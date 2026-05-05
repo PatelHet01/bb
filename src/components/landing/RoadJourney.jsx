@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { motion, useScroll, useTransform, useMotionValueEvent } from 'framer-motion'
+import { motion, useScroll, useTransform, useMotionValueEvent, AnimatePresence } from 'framer-motion'
 
 const STOPS = [
   { key: 'gurukul', name: 'GURUKUL', sign: 'BOMBAY BETHAK', year: 'Gurukul, Ahmedabad · 2025', label: 'Stop One',   title: 'The First Corner',        body: 'One small shop. Paan, smoke, and a place to sit. The first Bethak was born.',                              progress: 0.25, bottom: 26 },
@@ -188,30 +188,16 @@ export default function RoadJourney() {
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
 
   const x = useTransform(scrollYProgress, [0, 1], ['0%', '-72%'])
-
-  // Hero completely fades out very early. Fades back in ONLY at the end.
-  const heroOpacity = useTransform(scrollYProgress, [0, 0.04, 0.96, 0.99], [1, 0, 0, 1])
-  const heroScale = useTransform(scrollYProgress, [0, 0.04, 0.96, 0.99], [1, 1.1, 1.1, 1])
-  const heroY = useTransform(scrollYProgress, [0, 1], ['0vh', '0vh'])
-  
-  // Story Intro
-  const introOpacity = useTransform(scrollYProgress, [0.04, 0.07, 0.13, 0.16], [0, 1, 1, 0])
-  const introY = useTransform(scrollYProgress, [0.04, 0.07], [20, 0])
-
-  // Stop 1, 2, 3 overlays — rigidly constrained so they fade out before the next stop appears
-  const t1 = useTransform(scrollYProgress, [0.18, 0.22, 0.34, 0.38], [0, 1, 1, 0])
-  const t2 = useTransform(scrollYProgress, [0.48, 0.52, 0.64, 0.68], [0, 1, 1, 0])
-  const t3 = useTransform(scrollYProgress, [0.78, 0.82, 0.94, 0.96], [0, 1, 1, 0])
-  
-  const finalLine = useTransform(scrollYProgress, [0.95, 0.98], [0, 1])
   const hintOpacity = useTransform(scrollYProgress, [0, 0.03], [1, 0])
   const barWidth = useTransform(scrollYProgress, [0, 1], ['0%', '100%'])
 
   const [progress, setProgress] = useState(0)
   useMotionValueEvent(scrollYProgress, 'change', (v) => setProgress(v))
   
-  // Sync HUD perfectly with the overlay fade-ins
-  const active = STOPS.reduce((acc, s) => (progress >= s.progress - 0.08 ? s : acc), STOPS[0])
+  const activeHud = STOPS.reduce((acc, s) => (progress >= s.progress - 0.08 ? s : acc), STOPS[0])
+  
+  // Determine which story stop is currently active for the text overlay
+  const activeStory = STOPS.find(s => Math.abs(progress - s.progress) <= 0.10)
 
   return (
     <section ref={ref} className="relative bg-black" style={{ height: '600vh' }} aria-label="The Bombay Bethak journey">
@@ -221,71 +207,108 @@ export default function RoadJourney() {
         <div className="absolute inset-0 bg-black" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(20,15,10,0.4),transparent_60%),linear-gradient(to_bottom,#0a0807,#000)]" />
         <Stars />
-        <Moon />
+        
+        {/* Moon - Shrink on mobile to avoid overlapping HUD */}
+        <div className="absolute top-[8%] left-[4%] md:left-[8%]">
+          <div className="relative h-16 w-16 md:h-28 md:w-28 rounded-full bg-white/85 shadow-[0_0_80px_30px_rgba(255,255,255,0.08)]">
+            <div className="absolute top-0.5 left-0.5 h-12 w-12 md:top-1 md:left-1 md:h-24 md:w-24 rounded-full bg-black" />
+          </div>
+        </div>
 
         {/* Horizontally scrolling world */}
         <motion.div style={{ x }} className="absolute inset-y-0 left-0 h-full w-[360%] opacity-80">
           <Road progress={progress} />
         </motion.div>
 
-        {/* HERO SECTION OVERLAY */}
-        <motion.div 
-          style={{ opacity: heroOpacity, scale: heroScale, y: heroY }} 
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center pointer-events-none"
-        >
-          <motion.div initial={{ opacity: 0, letterSpacing: '0.5em' }} animate={{ opacity: 1, letterSpacing: '0.18em' }}
-            transition={{ duration: 1.6, ease: 'easeOut', delay: 0.2 }}
-            className="font-display text-6xl leading-none text-white sm:text-8xl md:text-[8rem] lg:text-[10rem] drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
-            BOMBAY
-          </motion.div>
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.4, delay: 0.6 }}
-            className="font-display text-6xl leading-none text-white sm:text-8xl md:text-[8rem] lg:text-[10rem] drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]"
-            style={{ letterSpacing: '0.18em' }}>
-            BETHAK
-          </motion.div>
-          <motion.p initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1, delay: 1.2 }}
-            className="mt-8 font-script text-ember text-2xl md:text-4xl">
-            where every sip has a story
-          </motion.p>
-        </motion.div>
+        <AnimatePresence>
+          {/* HERO SECTION OVERLAY */}
+          {(progress < 0.03 || progress > 0.97) && (
+            <motion.div 
+              key="hero"
+              initial={{ opacity: 0, scale: 0.95 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              exit={{ opacity: 0, scale: 1.05 }}
+              transition={{ duration: 0.8 }}
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center pointer-events-none"
+            >
+              <div className="font-display text-6xl leading-none text-white sm:text-8xl md:text-[8rem] lg:text-[10rem] drop-shadow-[0_0_15px_rgba(255,255,255,0.1)] tracking-[0.18em]">
+                BOMBAY
+              </div>
+              <div className="font-display text-6xl leading-none text-white sm:text-8xl md:text-[8rem] lg:text-[10rem] drop-shadow-[0_0_15px_rgba(255,255,255,0.1)] tracking-[0.18em]">
+                BETHAK
+              </div>
+              <p className="mt-8 font-script text-ember text-2xl md:text-4xl">
+                where every sip has a story
+              </p>
+            </motion.div>
+          )}
 
-        {/* INTRO TEXT OVERLAY */}
-        <motion.div 
-          style={{ opacity: introOpacity, y: introY }} 
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center pointer-events-none"
-        >
-          <h2 className="font-display text-3xl text-white md:text-5xl max-w-3xl mx-auto leading-tight drop-shadow-md">
-            It started with one shop. One corner. One idea.
-          </h2>
-          <p className="mt-6 text-white/60 tracking-[0.3em] text-xs uppercase drop-shadow-sm">
-            This is the story of Bombay Bethak.
-          </p>
-        </motion.div>
+          {/* INTRO TEXT OVERLAY - Pushed up on mobile to avoid overlapping shop roof */}
+          {(progress >= 0.04 && progress <= 0.14) && (
+            <motion.div 
+              key="intro"
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.8 }}
+              className="absolute top-[28%] md:top-[25%] w-full z-20 flex flex-col items-center px-6 text-center pointer-events-none"
+            >
+              <h2 className="font-display text-3xl text-white md:text-5xl max-w-3xl mx-auto leading-tight drop-shadow-md">
+                It started with one shop. One corner. One idea.
+              </h2>
+              <p className="mt-6 text-white/60 tracking-[0.3em] text-[10px] md:text-xs uppercase drop-shadow-sm">
+                This is the story of Bombay Bethak.
+              </p>
+            </motion.div>
+          )}
 
-        {/* Story overlays — fixed in viewport, fade in/out per stop */}
-        <StoryOverlay stop={STOPS[0]} opacity={t1} />
-        <StoryOverlay stop={STOPS[1]} opacity={t2} />
-        <StoryOverlay stop={STOPS[2]} opacity={t3} />
+          {/* Story overlays — dynamically swapped to prevent iOS stack ghosting */}
+          {activeStory && (
+            <motion.div
+              key={activeStory.key}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.6 }}
+              className="absolute top-[30%] md:top-[15%] left-1/2 -translate-x-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
+            >
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <span className="h-px w-8 bg-ember/60" />
+                <span className="text-ember text-[10px] md:text-xs tracking-[0.5em] uppercase">{activeStory.label}</span>
+                <span className="h-px w-8 bg-ember/60" />
+              </div>
+              <h3 className="font-display text-3xl md:text-5xl text-white leading-tight drop-shadow-[0_4px_20px_rgba(255,180,80,0.2)]">
+                {activeStory.title}
+              </h3>
+              <p className="text-white/65 mt-3 text-sm md:text-base max-w-sm mx-auto leading-relaxed">{activeStory.year}</p>
+              <p className="text-white/50 mt-2 text-sm md:text-base max-w-sm mx-auto leading-relaxed">{activeStory.body}</p>
+            </motion.div>
+          )}
 
-        {/* Final line */}
-        <motion.div style={{ opacity: finalLine }}
-          className="absolute bottom-[14%] left-1/2 -translate-x-1/2 text-center z-20 pointer-events-none">
-          <p className="font-italic-display text-white text-2xl md:text-4xl drop-shadow-[0_4px_20px_rgba(255,180,80,0.25)]">
-            And the story isn't over.
-          </p>
-        </motion.div>
+          {/* Final line */}
+          {(progress >= 0.95 && progress <= 0.97) && (
+            <motion.div 
+              key="final"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute bottom-[14%] left-1/2 -translate-x-1/2 text-center z-20 pointer-events-none">
+              <p className="font-italic-display text-white text-2xl md:text-4xl drop-shadow-[0_4px_20px_rgba(255,180,80,0.25)]">
+                And the story isn't over.
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Progress HUD - Pushed down on mobile to avoid TopButtons */}
-        <div className="absolute top-20 md:top-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
+        <div className="absolute top-24 md:top-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
           <div className="font-script text-white/40 text-sm">the journey</div>
-          <div className="relative h-[3px] w-44 md:w-64 rounded-full bg-white/15 overflow-hidden">
+          <div className="relative h-[3px] w-48 md:w-64 rounded-full bg-white/15 overflow-hidden">
             <motion.div className="absolute inset-y-0 left-0 rounded-full bg-ember" style={{ width: barWidth }} />
             {STOPS.map((s) => (
               <div key={s.key} className="absolute top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full border border-white/50 bg-black"
                 style={{ left: `calc(${s.progress * 100}% - 5px)` }} />
             ))}
           </div>
-          <div className="font-italic-display text-white/70 text-xs md:text-sm tracking-widest uppercase">{active.name}</div>
+          <div className="font-italic-display text-white/70 text-xs md:text-sm tracking-widest uppercase">{activeHud.name}</div>
         </div>
 
         {/* Scroll hint */}

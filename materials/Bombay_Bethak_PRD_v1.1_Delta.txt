@@ -1,0 +1,709 @@
+
+BOMBAY BETHAK
+Product Requirements Document
+VERSION  1.1  —  DELTA DOCUMENT
+Contains only new and updated features since v1.0
+
+DELTA / ADDENDUM DOCUMENT
+This document is an addendum to PRD v1.0.
+Read v1.0 first. v1.1 adds, extends, and amends — it does not repeat existing specs.
+
+Base Document
+Bombay Bethak PRD v1.0
+This Document
+PRD v1.1 — Delta / Addendum
+Prepared For
+Antigravity Studio
+New Role Added
+Manager (branch-specific, billing + inventory only)
+Major Additions
+Games, QR Cafe, Analytics+, Manager Role, Kitchen Display, 10 feature modules
+
+
+
+📋  1. What's New in v1.1
+Complete list of additions and amendments
+
+#
+Feature / Module
+Status
+1
+Manager Role (new RBAC role)
+🆕 New
+2
+QR Table Ordering — BB Cafe
+🆕 New
+3
+Kitchen Display Screen (KDS)
+🆕 New
+4
+In-App Game Centre
+🆕 New
+5
+Order Status Tracker (real-time)
+🆕 New
+6
+Call Waiter Button
+🆕 New
+7
+Table Reservation via My Bethak
+🆕 New
+8
+Split Bill
+🆕 New
+9
+Quick Reorder
+🆕 New
+10
+Void / Cancel Order
+🆕 New
+11
+Profit Calculator & Cost Price
+🆕 New
+12
+Peak Hour Heatmap
+🆕 New
+13
+In-App Export (CSV/PDF)
+🆕 New
+14
+Super Exclusive Analytics (Admin + Super Admin)
+🆕 New / Extended
+15
+Favourite Items
+🆕 New
+16
+Post-Visit Feedback & Ratings
+🆕 New
+17
+Birthday Reward (auto GHODA)
+🆕 New
+18
+Bethak Streaks
+🆕 New
+19
+Referral System
+🆕 New
+20
+Seasonal Events / Double Coins
+🆕 New
+21
+Daily Free Wheel Spin
+🆕 New
+22
+Worker Shift Clock In/Out
+🆕 New
+23
+Expense Tracker per Branch
+🆕 New
+24
+Announcement Board (in-app)
+🆕 New
+25
+RBAC Matrix — Updated
+✏️ Amended
+
+👔  2. Manager Role — New RBAC Addition
+Branch-specific operational role below Admin
+
+A new role — Manager — is introduced between Admin and Customer. Each branch admin can create one or more managers for their own branch. Managers are strictly operational; they have no visibility into financials, profits, analytics, or sensitive data.
+
+🆕  NEW IN v1.1:  Manager is a new role not present in v1.0. Update the RBAC system and all permission checks accordingly.
+
+2.1 Manager — Access Scope
+Feature
+Manager Access
+Billing / POS
+✅ Full access
+Inventory View + Update Stock
+✅ Full access
+Add / Edit / Delete Items
+❌ No
+Customer View (name/mobile only)
+✅ Read only
+Customer Ledger / Balance
+❌ No
+Order History
+✅ Own branch today only
+Kitchen Display
+✅ View only
+Revenue / Sales Totals
+❌ No
+Profit / Cost Data
+❌ No
+Salary Management
+❌ No
+GHODA Rewards Management
+❌ No
+Analytics / Reports
+❌ No
+Announcements
+✅ View only (receive)
+Export any data
+❌ No
+Create/manage other managers
+❌ No
+
+2.2 Manager Creation
+	•	Only the branch Admin (or Super Admin) can create a manager for that branch
+	•	Manager credentials: username + password (set by admin)
+	•	Manager is strictly branch-specific — cannot access any other branch
+	•	Admin can deactivate or delete a manager account
+	•	Manager login is at /admin (same login page, role detected post-login)
+	•	Manager dashboard is a stripped-down view — no financial widgets visible at all
+
+2.3 Updated RBAC Matrix (Full — Replaces v1.0 Section 3.2)
+Feature
+Super Admin
+Admin
+Manager
+Developer
+Customer
+
+Billing / POS
+✅
+✅
+✅
+❌
+❌
+
+Inventory CRUD
+✅
+✅
+View+Stock only
+❌
+❌
+
+Customer CRUD
+✅
+✅
+❌
+❌
+❌
+
+Customer Ledger
+✅
+✅
+❌
+❌
+Own only
+
+Revenue/Totals
+✅
+✅
+❌
+✅
+❌
+
+Profit Data
+✅
+✅ (branch)
+❌
+✅
+❌
+
+Salary Mgmt
+✅
+✅ (branch)
+❌
+❌
+❌
+
+GHODA CRUD
+✅
+✅
+❌
+❌
+View+Play
+
+Analytics
+✅ All
+✅ Branch
+❌
+✅
+Own only
+
+Export Reports
+✅
+✅
+❌
+✅
+❌
+
+Kitchen Display
+✅
+✅
+✅
+❌
+❌
+
+Manage Managers
+✅
+✅ (branch)
+❌
+❌
+❌
+
+Branch Creation
+✅
+❌
+❌
+❌
+❌
+
+Announcement Send
+✅
+✅ (branch)
+View only
+❌
+❌
+
+Expense Tracker
+✅
+✅
+❌
+❌
+❌
+
+Shift Clock In/Out
+✅
+✅
+✅ (own shift)
+❌
+❌
+
+Game Centre
+Config
+Config
+❌
+❌
+✅ Play
+
+
+📱  3. QR Table Ordering — BB Cafe
+Contactless table ordering for Bhat branch cafe
+
+📝  NOTE:  This feature is exclusively for BB Cafe at Bhat branch. It does not apply to Gurukul or Visat.
+
+Customers scan a permanent QR code on their table. They are taken to a mobile-optimised order page where they can browse the cafe menu, place orders, and interact with the game centre while waiting.
+3.1 QR & Table Setup
+	•	Admin configures number of tables from the admin panel (Table Management)
+	•	Each table gets a unique permanent QR code — does not change/expire
+	•	QR codes are downloadable from admin panel as PNG for printing
+	•	QR links to: /cafe/table/{table_id}
+	•	Table statuses: Empty, Occupied, Order Placed, Served, Bill Requested
+	•	Admin and Manager can see table status grid in real time
+3.2 Customer Ordering Flow
+Step
+Action
+1
+Customer scans QR → lands on /cafe/table/{id}
+2
+Optional: enter mobile number to link order to account (skip available)
+3
+Browse BB Cafe menu — items shown with name, price, image placeholder
+4
+Add items to cart → Review → Place Order
+5
+Order confirmation screen shown with order ID and estimated time
+6
+Game Centre unlocks — customer can play while waiting
+7
+Real-time status updates: Received → Preparing → Ready
+8
+When ready, customer sees 'Your order is ready!' on their screen
+9
+Call Waiter button available throughout the session
+10
+Bill Request button — customer requests bill from table
+3.3 Admin / Manager Side
+	•	New orders appear instantly on Kitchen Display Screen (KDS)
+	•	Admin panel shows live table grid with status badges
+	•	Admin/Manager can update order status from KDS or admin panel
+	•	Orders from QR are tagged with table number in billing history
+	•	If customer linked mobile number — order attaches to their account, GHODA earned
+
+🍳  4. Kitchen Display Screen (KDS)
+Real-time order display for cafe staff
+
+The KDS is a dedicated web view for cafe kitchen/counter staff. It runs in a browser on any phone or tablet logged in as Admin or Manager. It is optimised for quick scanning and status updates.
+4.1 Route & Access
+	•	Route: /kitchen
+	•	Accessible to: Admin and Manager of Bhat branch only
+	•	No sidebar, no navigation — full screen order cards only
+	•	Auto-refreshes in real time (Supabase Realtime subscription)
+4.2 KDS Interface
+	•	Orders displayed as cards: Table No., Items list, Time placed, Status
+	•	Color coding: 🟡 New → 🔵 Preparing → 🟢 Ready
+	•	One-tap status update per order card
+	•	Orders auto-archive after marked Ready + 5 minutes
+	•	Sound alert (browser notification) on new order
+	•	No financials, no customer data visible on KDS
+
+🎮  5. Game Centre
+In-app games for customers — entertainment + GHODA rewards
+
+5.1 Where Games Appear
+Location
+Details
+Landing Page
+Available to all visitors. Unregistered players play for entertainment only. No GHODA earned. Fresh session on registration.
+BB Cafe QR Page (post-order)
+Unlocks after placing an order. Solo + multiplayer games available. GHODA earned if registered.
+My Bethak Portal
+Full game access for registered customers. 1v1 rooms, leaderboard, all games.
+5.2 Game List
+Game
+Type
+Mode
+GHODA Earning
+Tic-Tac-Toe (O/X)
+Multiplayer
+Local 2P + Online 1v1
+Win 1v1 = earn opponent's bet
+Wheel of Fortune
+Solo
+Single player
+10 spins/day, prize on spin
+Slot Machine
+Solo
+Single player
+10 plays/day, prize on result
+Daily Free Spin
+Solo
+Once per day per mobile
+Fixed GHODA reward on spin
+5.3 Tic-Tac-Toe (O/X) — Multiplayer Detail
+Local 2-Player Mode (Pass & Play)
+	•	No registration required
+	•	Two players share one device — take turns
+	•	Designed for families/groups at cafe table
+	•	No GHODA earned — entertainment only
+	•	Score tracked for the session only
+Online 1v1 Mode (Registered Users Only)
+	•	Registered customer creates a room → gets a room code
+	•	Shares room code with another registered customer
+	•	Both must be registered (mobile number linked)
+	•	Before match: both players set a GHODA coin bet (min/max configurable by admin)
+	•	Winner earns the full pot (both players' bets)
+	•	Match result stored in GHODA transaction history
+	•	Bethak username and profile shown to opponent during game
+	•	Monthly leaderboard tracks total 1v1 wins and GHODA earned from games
+5.4 Daily Limits
+Game
+Daily Limit
+Reset
+Wheel of Fortune
+10 spins per mobile number
+Midnight
+Slot Machine
+10 plays per mobile number
+Midnight
+Daily Free Spin
+1 spin per mobile number
+Midnight
+O/X Online 1v1
+No hard limit (GHODA-gated)
+N/A
+O/X Local 2P
+Unlimited
+N/A
+5.5 Monthly Leaderboard
+	•	Resets on the 1st of each month
+	•	Tracks: Total GHODA earned from games, Total 1v1 wins
+	•	Displayed using Bethak username — no real names shown publicly
+	•	Visible on: Landing page (top 10), My Bethak (full board)
+	•	Super Admin can view historical leaderboards per month
+	•	Admin can configure whether leaderboard is publicly visible
+5.6 Admin Game Controls
+	•	Enable / disable individual games per branch
+	•	Set GHODA earn amounts per game outcome
+	•	Set min/max GHODA bet for 1v1 matches
+	•	Set daily spin/play limits (override defaults)
+	•	View game activity logs per customer
+
+🧾  6. Billing Additions
+Split bill, quick reorder, void/cancel
+
+6.1 Split Bill
+	•	Available on any completed or active order
+	•	Admin/Manager selects number of ways to split (2, 3, 4, custom)
+	•	Can split equally or assign specific items to specific people
+	•	Each split portion shows amount due
+	•	Payment can be collected separately per portion (cash, UPI, credit)
+	•	If a registered customer is on the split — their ledger updates individually
+📝  NOTE:  Split bill is available to Admin and Manager. Manager cannot see total revenue aggregates — only the individual bill being processed.
+6.2 Quick Reorder
+	•	On customer profile (if registered), show their last order as a one-tap reorder
+	•	Pre-fills the billing form with last order items and quantities
+	•	Admin/Manager can modify before confirming
+	•	Also available on My Bethak — customer can request a reorder (admin receives it)
+6.3 Void / Cancel Order
+	•	Admin and Manager can initiate a void on an existing order
+	•	Requires a reason (dropdown: Wrong item, Customer request, Billing error, Other)
+	•	Orders below a threshold: Manager can void directly
+	•	Orders above a configurable threshold (set by admin): requires Admin approval
+	•	Voided orders are NOT deleted — they are marked as Voided with reason, timestamp, and who voided
+	•	GHODA coins earned on voided orders are reversed
+	•	Levana/Deewana balances adjusted on void if credit was used
+
+📊  7. Super Exclusive Analytics
+Deep analytics for Admin and Super Admin
+
+⚠️  IMPORTANT:  Manager has ZERO access to any analytics, reports, revenue figures, or profit data. All analytics sections must be completely hidden from manager role.
+
+7.1 Admin Dashboard — Branch Analytics
+Each branch Admin sees a comprehensive analytics dashboard for their branch only:
+	•	Revenue: Today / This Week / This Month / Custom Range
+	•	Orders: Count, Average Order Value, Peak hours
+	•	Peak Hour Heatmap: 7-day grid showing busiest hours per day of week
+	•	Top 10 Items by revenue and by quantity sold
+	•	Category breakdown: Smoke Lounge vs Paan vs BB Cafe (where applicable)
+	•	Customer analytics: New vs returning, top spending customers
+	•	Credit analytics: Total outstanding Levana, total advance Deewana
+	•	Inventory analytics: Fast-moving, slow-moving, low-stock items
+	•	Staff analytics: Orders per shift, busiest staff hours
+	•	GHODA analytics: Coins issued, redeemed, game activity
+	•	Expense vs Revenue: Daily profit/loss if cost prices are set
+	•	Feedback summary: Average rating, recent comments
+7.2 Super Admin Dashboard — All-Branch Analytics
+Super Admin sees everything Admin sees, plus cross-branch and global views:
+	•	Cross-branch revenue comparison — bar/line chart with filter by date
+	•	Best performing branch, best performing item globally
+	•	Global customer analytics: total registered, active, churned
+	•	Global GHODA economy: total coins in circulation, redeemed, in game pool
+	•	Salary & expense: total payroll across all branches, total expenses
+	•	Profit summary: gross revenue minus expenses, per branch and total
+	•	Leaderboard analytics: game activity, top earners
+	•	Announcement performance: which announcements were seen
+	•	Branch growth over time: orders, customers, revenue trends
+	•	Developer activity log (basic)
+7.3 Profit Calculator
+	•	Admin can set a Cost Price per inventory item (separate from selling price)
+	•	System calculates: Margin % = ((Selling Price - Cost Price) / Selling Price) × 100
+	•	Daily Profit Report: Total revenue minus total cost of goods sold
+	•	Item-level profit report: highest and lowest margin items
+	•	Cost price is hidden from Manager — they only see selling price
+	•	Super Admin sees profit across all branches
+7.4 Peak Hour Heatmap
+	•	Visual grid: Days of week (rows) × Hours of day (columns)
+	•	Color intensity = order volume (light = quiet, dark = busy)
+	•	Hover/tap on a cell: shows exact order count and revenue for that slot
+	•	Filter by: Category, Date range, Branch (Super Admin only)
+	•	Useful for staffing decisions — recommend showing on dashboard home
+7.5 In-App Export
+	•	Export available for: Sales report, Inventory report, Customer ledger, Salary records, Expense report
+	•	Formats: CSV and PDF
+	•	PDF is generated in-app (no external service) — clean formatted layout
+	•	CSV is raw data for spreadsheet use
+	•	Date range filter before export
+	•	Export logs stored (who exported what and when) — visible to Super Admin
+	•	Manager cannot export anything
+
+⭐  8. Customer Experience Additions
+My Bethak enhancements and loyalty features
+
+8.1 Favourite Items
+	•	Registered customers can mark items as favourite from their order history
+	•	Shown in My Bethak under a 'Favourites' tab
+	•	Quick reorder from favourites list
+	•	Admin billing form: if customer is selected, favourites shown as quick-add suggestions
+8.2 Post-Visit Feedback
+	•	After an order is marked complete, My Bethak prompts for feedback
+	•	Rating: 1–5 stars
+	•	Optional comment field (max 200 characters)
+	•	One feedback per order
+	•	Feedback is admin-only — not shown publicly
+	•	Admin analytics: average rating, trend, recent comments
+	•	Super Admin sees aggregated ratings across all branches
+8.3 Birthday Reward
+	•	Optional DOB collected at customer registration (day + month only — no year required)
+	•	On birthday: automatic GHODA coin credit (amount configurable by admin)
+	•	Customer sees a birthday message in My Bethak on their birthday
+	•	One birthday reward per year per mobile number
+	•	Admin can see upcoming birthdays in the customer panel (next 7 days)
+8.4 Bethak Streaks
+	•	A streak is counted when a registered customer makes a purchase on consecutive days
+	•	Streak milestones award bonus GHODA coins (e.g., 3-day, 7-day, 30-day)
+	•	Milestone amounts configurable by admin
+	•	Streak resets if a day is missed
+	•	Streak count and milestone progress visible in My Bethak
+	•	Streak leaderboard optional — configurable by admin
+8.5 Referral System
+	•	Each registered customer gets a unique referral code visible in My Bethak
+	•	When a new customer registers using the referral code — both get GHODA coins
+	•	Referral bonus amounts configurable by admin
+	•	Referral history visible in My Bethak (who was referred, when, coins earned)
+	•	Abuse prevention: one referral bonus per mobile number
+8.6 Seasonal Events
+	•	Admin / Super Admin can create a Seasonal Event with: name, date range, bonus multiplier
+	•	During an event: GHODA earn rate is multiplied (e.g., 2x coins on all purchases)
+	•	Events can also unlock special game modes or bonus spins
+	•	Event banner shown on My Bethak and on landing page during active period
+	•	Super Admin can create global events; Admin creates branch-only events
+8.7 Daily Free Wheel Spin
+	•	Every registered customer gets 1 free Wheel of Fortune spin per day
+	•	Available in My Bethak and in BB Cafe post-order game centre
+	•	Prizes: small GHODA amounts, bonus spins, rare: larger GHODA rewards
+	•	Prize table configurable by admin
+	•	Resets at midnight daily
+8.8 Order Status Tracker
+	•	After placing an order (via QR table or via admin), customer can track status
+	•	Status flow: Order Received → Preparing → Ready for Pickup / Served
+	•	Visible in My Bethak under Orders tab (for linked mobile number orders)
+	•	Also visible live on the BB Cafe QR table page after ordering
+	•	Real-time update via Supabase Realtime
+
+🧑‍💼  9. Staff & Operations Additions
+Shift tracking, expenses, announcements
+
+9.1 Worker Shift Clock In/Out
+	•	Workers (staff) can clock in/out from a simple page — no full login required
+	•	Admin or Manager creates a shift code for the day — worker enters code + their name to clock in
+	•	Clock-in/out timestamps recorded
+	•	Total hours calculated automatically
+	•	Monthly hours feed into salary calculation (alongside base salary)
+	•	Admin can manually edit shift records if needed
+	•	Shift records visible in salary management module
+	•	Manager can clock in their own shift
+9.2 Expense Tracker
+	•	Admin can log daily expenses per branch: amount, category, description, date
+	•	Expense categories: Rent, Utilities, Supplies, Salary Advance, Miscellaneous, Other
+	•	Monthly expense summary
+	•	Expense vs Revenue report feeds into profit dashboard
+	•	Super Admin sees expenses across all branches
+	•	Expenses can be exported (CSV/PDF) by Admin and Super Admin
+9.3 Announcement Board
+	•	Super Admin can broadcast announcements to all branch admins
+	•	Admin can create branch-level announcements for their managers
+	•	Announcements appear as a notification badge and in an in-app board
+	•	Types: Info, Warning, Urgent
+	•	Announcements can be set to expire after a date
+	•	Manager sees announcements directed to their branch — read only
+	•	Super Admin can see read receipts (who has viewed)
+
+🗄️  10. Database Schema Additions
+New tables required for v1.1 features
+
+📝  NOTE:  These tables extend the schema defined in v1.0. Do not drop existing tables. Add these alongside the existing schema.
+
+New Table
+Key Fields
+tables
+id, branch_id, table_number, qr_code_url, status, created_at
+table_orders
+id, table_id, customer_id (nullable), status, created_at
+table_order_items
+id, table_order_id, item_id, quantity, unit_price
+game_sessions
+id, customer_id, game_type, result, ghoda_delta, created_at
+game_rooms
+id, room_code, game_type, player1_id, player2_id, bet_amount, winner_id, status, created_at
+leaderboard_monthly
+id, customer_id, month, year, total_wins, total_ghoda_earned
+feedback
+id, customer_id, order_id, branch_id, rating, comment, created_at
+favourites
+id, customer_id, item_id, created_at
+referrals
+id, referrer_id, referred_mobile, ghoda_awarded, created_at
+streaks
+id, customer_id, current_streak, last_visit_date, longest_streak
+seasonal_events
+id, name, branch_id (nullable=global), multiplier, start_date, end_date, is_active
+expenses
+id, branch_id, category, amount, description, date, created_by
+shifts
+id, worker_id, branch_id, clock_in, clock_out, total_hours, date
+announcements
+id, from_role, branch_id (nullable=global), type, message, expires_at, created_at
+announcement_reads
+id, announcement_id, user_id, read_at
+item_cost_prices
+id, item_id, cost_price, updated_at, updated_by
+void_orders
+id, order_id, reason, voided_by, approved_by, created_at
+managers
+id, username, branch_id, admin_id, is_active, created_at
+daily_spin_log
+id, customer_id, spin_type, result_ghoda, created_at
+
+✅  11. v1.1 Development Checklist
+All new items to be implemented
+
+
+Requirement
+☐
+Manager role added to RBAC — branch-specific, created by Admin
+☐
+Manager dashboard has ZERO financial/profit visibility
+☐
+QR table ordering system — Bhat BB Cafe only
+☐
+Permanent QR per table, downloadable PNG from admin panel
+☐
+Kitchen Display Screen at /kitchen — real-time, mobile optimised
+☐
+Game Centre on landing page (no GHODA for unregistered)
+☐
+Game Centre on BB Cafe QR page (unlocks post-order)
+☐
+Game Centre in My Bethak (full access for registered)
+☐
+O/X local 2-player pass-and-play mode
+☐
+O/X online 1v1 with room code and GHODA bet
+☐
+Wheel of Fortune — 10 plays/day limit
+☐
+Slot Machine — 10 plays/day limit
+☐
+Daily free spin — 1 per day per mobile number
+☐
+Monthly game leaderboard — Bethak usernames only
+☐
+Admin game controls (enable/disable, set GHODA amounts, bet limits)
+☐
+Split bill feature in billing module
+☐
+Quick reorder from customer history
+☐
+Void/cancel order with reason log and admin approval threshold
+☐
+Cost price per item — profit calculator
+☐
+Peak hour heatmap in analytics
+☐
+In-app CSV and PDF export (no external service)
+☐
+Favourite items in My Bethak
+☐
+Post-visit feedback (star + comment, admin-only)
+☐
+Birthday reward — auto GHODA, DOB optional at registration
+☐
+Bethak Streaks — consecutive visit rewards
+☐
+Referral system — unique code, both parties earn GHODA
+☐
+Seasonal events — configurable multiplier, date range
+☐
+Order status tracker (Received → Preparing → Ready) — real-time
+☐
+Call waiter button on QR table page
+☐
+Table reservation via My Bethak
+☐
+Worker shift clock in/out
+☐
+Expense tracker per branch
+☐
+In-app announcement board (Super Admin → Admin → Manager)
+☐
+All new DB tables seeded and migrated in Supabase
+☐
+Analytics hidden from Manager at component level — not just route
+
+
+END OF DOCUMENT — PRD v1.1
+Bombay Bethak  ·  Addendum to v1.0  ·  Confidential  ·  For Antigravity Studio

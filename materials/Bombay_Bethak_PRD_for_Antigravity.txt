@@ -1,0 +1,631 @@
+
+BOMBAY BETHAK
+Billing & Inventory Management System
+Paan Parlour  ·  Smoke Shop  ·  BB Cafe
+
+PRODUCT REQUIREMENTS DOCUMENT
+Prepared for:  Antigravity Studio
+Document Version:  1.0  |  Status: FINAL FOR DEVELOPMENT
+
+🏪  1. Executive Summary
+High-level overview of the Bombay Bethak system
+
+Bombay Bethak is a multi-branch retail and hospitality management platform serving three business verticals — Paan Parlour, Smoke Lounge, and BB Cafe — across three locations: Gurukul (main), Bhat, and Visat. The platform is designed to be fast, mobile-first, and minimal in UI, supporting high-traffic billing workflows with exceptional UX.
+
+Client / Brand
+Bombay Bethak
+Document For
+Antigravity Studio (Development Team)
+Tech Stack
+MERN (MongoDB replaced by Supabase), Node.js, React, Express
+Database
+Supabase (PostgreSQL)
+Branches
+Gurukul (Main), Bhat, Visat
+Business Verticals
+Paan Parlour, Smoke Lounge, BB Cafe
+RBAC Roles
+Super Admin, Admin, Developer, Customer
+Special Currency
+GHODA Coins (Rewards)
+Credit/Debit Terms
+Levana (Credit) / Deewana (Debit)
+Customer Portal
+"My Bethak" — mobile number based
+Priority
+🔴 Industry-Level, Production Ready
+
+🏗️  2. Technology Stack
+Tools, frameworks, and infrastructure
+
+2.1 Core Stack
+Layer
+Technology
+Frontend
+React.js (Vite) + Tailwind CSS + Framer Motion
+Backend
+Node.js + Express.js
+Database
+Supabase (PostgreSQL)
+Auth
+Supabase Auth + JWT (RBAC)
+Animation
+Framer Motion, GSAP, Three.js (landing page)
+State Management
+Zustand / Redux Toolkit
+API
+RESTful API + Supabase Realtime
+Deployment
+Vercel (Frontend) + Railway/Render (Backend)
+Version Control
+Git + GitHub
+2.2 Routing Structure
+Route
+Purpose
+/ (main domain)
+Customer landing page — public, no admin access exposed
+/my-bethak
+Customer self-service portal (My Bethak)
+/admin
+Admin login and panel
+/admin/dashboard
+Role-based dashboard post-login
+/dev
+Developer panel (if needed)
+
+👤  3. Role-Based Access Control (RBAC)
+User roles and permission matrix
+
+The system uses four distinct roles. Each role has strictly scoped access to features, data, and UI components.
+3.1 Role Definitions
+Role
+Login ID
+Access Scope
+Super Admin
+superadmin / [password]
+All branches, all analytics, salary, rewards CRUD, user management, branch creation, can change admin credentials
+Admin
+gurukul / bhat / visat
+Assigned branch only: billing, inventory, customers, salary, rewards management. Password: 1234567890
+Developer
+developer / [password]
+System config, DB management, debug tools, logs
+Customer
+10-digit mobile number
+My Bethak: view ledger, orders, rewards, financial insights. No admin access.
+3.2 Permission Matrix
+Feature
+Super Admin
+Admin
+Developer
+Customer
+View All Branches
+✅
+❌ (own only)
+✅
+❌
+Billing / POS
+✅
+✅
+❌
+❌
+Inventory CRUD
+✅
+✅
+❌
+❌
+Customer Management
+✅
+✅
+❌
+❌
+Salary Management
+✅
+✅
+❌
+❌
+GHODA Rewards CRUD
+✅
+✅ (limited)
+❌
+View only
+Analytics & Reports
+✅ (all)
+✅ (branch)
+✅
+Own only
+Branch Creation
+✅
+❌
+❌
+❌
+Change Admin Credentials
+✅
+❌
+❌
+❌
+Landing Page Access
+✅ (no panel shown)
+✅ (no panel shown)
+✅
+✅
+
+🌐  4. Landing Page (Customer-Facing)
+Public-facing multi-page animated experience
+
+4.1 Overview
+The landing page is a highly animated, multi-page experience designed specifically for the Bombay Bethak brand. It is NOT a single-page app. It must feature cinematic storytelling with scroll-based animations, a road trip visual narrative through the three branches, and no visible admin access points.
+📝  NOTE: The landing page has NO light/dark mode. It uses a single fixed theme (dark/moody). Admin routes must never be linked or hinted at from this page.
+4.2 Page Structure
+Section
+Name
+Description
+1
+Loader Screen
+Full-screen animated brand loader on first visit. GHODA coin spinning, smoke particle effects, brand name reveal.
+2
+Hero
+Brand intro with tagline. 'My Bethak' CTA button — uniquely designed, highly animated. Ambient background animations.
+3
+Story: The Journey
+Road animation — character traveling from Gurukul → Bhat → Visat. LOCKED scroll until animation completes. Vertical on mobile, horizontal on desktop. Realistic illustrated visuals.
+4
+Gurukul Branch
+Story card for Gurukul — the main hub. Products/vibe highlight.
+5
+Bhat Branch
+Story card for Bhat branch.
+6
+Visat Branch
+Story card for Visat branch.
+7
+Menu Teaser
+Visual showcase of top items from Smoke Lounge + BB Cafe categories.
+8
+GHODA Rewards
+Animated intro to the GHODA coin rewards system. CTA to join via 'My Bethak'.
+9
+Footer
+Brand links, social, contact. MANDATORY tobacco cancer warning banner.
+4.3 'My Bethak' Button
+	•	Must be uniquely designed — not a standard button
+	•	Animated glow / particle effect on hover
+	•	On click: full-screen animated loader before navigating to /my-bethak
+	•	Design must feel premium and culturally Indian-modern
+4.4 Story Animation — Branch Journey
+	•	Road animation with a character (illustrated) traveling through three branches
+	•	Scroll locked during animation playback — user cannot skip until animation completes
+	•	Mobile: vertical scroll layout with vertical road
+	•	Desktop: horizontal scroll with horizontal road
+	•	Realistic illustrated backgrounds for each branch (street, night market feel)
+	•	Node.js can be used for animation data serving if needed
+4.5 Footer Requirements
+	•	Branch addresses and contact numbers
+	•	Social media links
+	•	GHODA rewards teaser
+⚠️  MANDATORY WARNING  ⚠️
+"Tobacco causes Cancer" — This warning must appear in the footer of every landing page and any customer-facing page that references smoke/tobacco products. This is non-negotiable and must be clearly visible.
+
+🪑  5. My Bethak — Customer Portal
+Self-service portal for customers
+
+5.1 Overview
+'My Bethak' is the customer self-service portal accessible at /my-bethak. Customers log in using only their 10-digit mobile number — no password required. This is a personal ledger and rewards hub.
+5.2 Features
+Tab / Section
+Details
+Login
+Enter 10-digit mobile number. If registered, show their Bethak. If not, show registration prompt or guest view.
+Ledger (Khata)
+Full transaction history. Shows Levana (credit given to customer) and Deewana (payment made by customer) in customer-friendly language. Running balance displayed prominently.
+Orders
+History of all orders — items, quantities, amounts, dates, branch.
+Rewards (GHODA)
+GHODA coin balance, earned history, available rewards to redeem, betting game access.
+Financial Insights
+Visual charts: monthly spending, most ordered items, category-wise breakdown, average bill, loyalty score.
+Profile
+Name, mobile number, registration date, preferred branch.
+5.3 Levana / Deewana Terminology
+Term
+Admin View
+Customer View (My Bethak)
+Levana
+Customer has taken credit (owes us money)
+You have a balance due (you owe Bombay Bethak)
+Deewana
+Customer has paid advance (we owe them)
+You have advance balance (Bombay Bethak owes you)
+📝  NOTE: The terms are mirrored in perspective. The underlying data is the same; the framing changes based on who is viewing.
+
+🛡️  6. Admin Panel
+Branch management, billing, inventory, and operations
+
+6.1 Admin Login
+Branch
+Username
+Password
+Gurukul (Main)
+gurukul
+1234567890
+Bhat
+bhat
+1234567890
+Visat
+visat
+1234567890
+Super Admin
+superadmin
+[set separately]
+📝  NOTE: Only Super Admin can change admin credentials. Admin login is at /admin. Passwords are stored hashed (bcrypt). Super Admin can reset any admin password.
+6.2 Admin Dashboard Features
+	•	Light / Dark mode toggle (dashboards only, not landing page)
+	•	Branch-specific data view — admins only see their assigned branch
+	•	Quick stats: Today's revenue, top items, pending credits, low stock alerts
+	•	Navigation: Billing, Inventory, Customers, Salary, Rewards, Reports
+6.3 Billing / POS Page
+The billing page must be designed for speed and minimal clicks. It handles very high traffic — especially at Gurukul branch.
+	•	Dropdown-based form: Category → Item Autocomplete → Quantity → Customer (optional)
+	•	Three dropdown types must be implemented:
+	•	Category Dropdown: Smoke Lounge / BB Cafe / Paan (branch-dependent)
+	•	Item Autocomplete Dropdown: Type-ahead search within selected category
+	•	Quick Quantity Dropdown: 1, 2, 3, 5, 10, custom
+	•	Customer selection is OPTIONAL — billing works without registration
+	•	If customer exists (searched by mobile number or name), attach order to their account
+	•	Running cart/order summary on the right / bottom (responsive)
+	•	Quick Add / Remove items from cart
+	•	Payment options: Cash, UPI, Credit (Levana), Advance (Deewana)
+	•	Generate and display receipt (digital)
+	•	GHODA coins auto-credited on purchase if customer is registered
+6.4 Inventory Page
+	•	Display: Card format OR Table format (toggle)
+	•	Search bar between the form and item list
+	•	Inline quantity editing — no edit button needed; click quantity to update directly
+	•	Add new item form: Category, Name, Unit, Price, Stock Quantity
+	•	All items default to zero stock on creation
+	•	Low stock indicator (configurable threshold)
+	•	Branch-restricted: admins only manage their branch inventory
+	•	Super admin can view and edit all branches
+6.5 Customer Management
+	•	Admin can add customers: Name + Mobile Number
+	•	Search customer by name or mobile
+	•	View customer ledger (Levana/Deewana balance)
+	•	View full order history per customer
+	•	Manual credit/debit entry with reason
+	•	GHODA coin balance visible
+6.6 Salary Management
+	•	CRUD for workers/staff per branch
+	•	Fields: Name, Role, Join Date, Base Salary, Advance Taken, Net Payable
+	•	Monthly salary records
+	•	Advance deduction from salary
+	•	Both Admin and Super Admin can manage salary (admin = their branch only)
+
+👑  7. Super Admin Dashboard
+Comprehensive command center
+
+The Super Admin dashboard is the most feature-rich panel in the system. It must feel powerful, data-dense, and fully navigable with filters and sorting across all data.
+7.1 Features
+	•	Real-time analytics across all branches
+	•	Revenue comparison: Gurukul vs Bhat vs Visat
+	•	Category-wise sales: Smoke Lounge vs BB Cafe
+	•	Date-range filters: Today, Week, Month, Custom
+	•	Sortable data tables across all reports
+	•	Customer credit overview — total outstanding Levana across all branches
+	•	Inventory overview across all branches with low-stock alerts
+	•	Salary overview: total payroll, advance deductions
+	•	GHODA rewards analytics: total issued, redeemed, outstanding
+	•	Branch management: add new branches (name, location, assign admin)
+	•	Admin credential management: reset passwords, change usernames
+	•	Developer account management
+	•	System health / error logs (basic)
+7.2 Analytics Charts
+	•	Daily / Weekly / Monthly revenue line chart
+	•	Branch revenue pie chart
+	•	Top 10 items by sales volume
+	•	Category-wise sales bar chart
+	•	Customer growth chart
+	•	GHODA coin flow chart (issued vs redeemed)
+
+🏢  8. Branch Configuration
+Branch-specific rules and setup
+
+8.1 Branches
+Branch
+Traffic Level
+Available Categories
+Gurukul (Main)
+🔴 Highest
+Paan Parlour, Smoke Lounge (full range incl. ₹1 items), Salary, Rewards
+Bhat
+🟡 Medium
+Paan, Smoke, BB Cafe
+Visat
+🟢 Lower
+Paan Parlour, Smoke Lounge (NO Cafe)
+📝  NOTE: BB Cafe is only available at Bhat. Gurukul and Visat do NOT have cafe inventory or billing. Super Admin can add new branches in future — the system must be architected to support this.
+8.2 Item Categories
+Category
+Notes
+Smoke Lounge
+Smoke shop items including very low-cost items (as low as ₹1). Full price range.
+BB Cafe
+Cafe menu items. Bhat branch only.
+Paan Parlour
+Paan items. All branches.
+
+🪙  9. GHODA Rewards System
+Loyalty coin system and betting game
+
+9.1 Overview
+GHODA is the internal loyalty currency of Bombay Bethak. Customers earn GHODA coins on purchases and can redeem them for rewards or use them in a betting game.
+9.2 Earning Rules
+	•	Configurable earn rate: e.g., 1 GHODA per ₹10 spent
+	•	Bonus GHODA events can be created by admin
+	•	Only registered customers (with mobile number) earn coins
+	•	Coins auto-credited at billing time
+9.3 Rewards CRUD (Admin)
+	•	Create rewards: Name, Description, GHODA cost, Stock/availability
+	•	Update and delete rewards
+	•	Mark rewards as active / inactive
+	•	Super admin can create global rewards; branch admin can create branch-specific rewards
+9.4 Redemption
+	•	Customer redeems via My Bethak portal
+	•	Admin can also redeem on behalf of customer during billing
+	•	Redemption deducts from GHODA balance
+9.5 GHODA Betting Game
+	•	A unique, simple betting game exclusive to My Bethak
+	•	Customers can bet GHODA coins (not real money)
+	•	Game design: simple odds-based game (e.g., coin flip, lucky draw, spin wheel)
+	•	Max bet limit configurable by admin
+	•	Win/loss tracked in GHODA history
+	•	Cannot convert GHODA winnings to cash — internal currency only
+📝  NOTE: The betting game uses GHODA coins only. It is for entertainment purposes within the app. No real money is involved. Implement responsible limits and admin controls.
+
+💳  10. Credit System — Levana & Deewana
+Customer balance and credit management
+
+10.1 How It Works
+Bombay Bethak runs a trust-based credit system for regular customers. The system tracks both credit extended to customers and advance payments made by customers.
+Term
+Who Owes Whom
+Description
+Levana
+Customer owes Bombay Bethak
+Customer took goods on credit. Admin records this. Customer sees 'You owe us ₹X'.
+Deewana
+Bombay Bethak owes Customer
+Customer paid in advance. Balance is held. Customer sees 'Your advance balance: ₹X'.
+10.2 Customer Identification
+	•	Primary ID: 10-digit mobile number
+	•	Secondary: Name (for search/display)
+	•	No email, no password for customers
+	•	Admin registers customers with: Name + Mobile Number
+10.3 Balance Tracking
+	•	Running balance shown on customer card in admin panel
+	•	Full transaction log per customer
+	•	Admin can manually adjust balance with reason and timestamp
+	•	Balance alerts for high outstanding credit
+
+📦  11. Inventory Management
+Full inventory system with item seeding
+
+11.1 Item Management Rules
+	•	All items default to ZERO stock on creation
+	•	Admin can update stock via inline edit on inventory list
+	•	Items must have: Name, Category, Unit (piece/gram/ml), Price, Stock
+	•	Low stock threshold is configurable per item
+	•	Items can be marked inactive (hidden from billing without deletion)
+11.2 Default Item List — Smoke Lounge (Gurukul + Visat)
+The following is a representative item list. Actual items will be provided by client. All default to zero stock:
+	•	Cigarettes (by brand — individual and pack)
+	•	Gutka / Khaini / Tobacco pouches (₹1 items)
+	•	Lighter, Matches
+	•	Rolling papers, Filters
+	•	Hookah (session-based)
+	•	E-cigarettes / Vapes and refills
+	•	Mouth fresheners
+11.3 Default Item List — Paan Parlour (All Branches)
+	•	Meetha Paan, Saada Paan, Special Paan
+	•	Chocolate Paan, Fire Paan
+	•	Paan ingredients (wholesale / bulk)
+11.4 Default Item List — BB Cafe (Bhat Only)
+	•	Hot Beverages: Chai, Coffee, Green Tea
+	•	Cold Beverages: Cold Coffee, Shakes, Lemonades
+	•	Snacks: Sandwiches, Maggi, Puff, Biscuits
+	•	Combo Deals
+📝  NOTE: This list is tentative. Admins will finalize items via the inventory CRUD. Developers should seed with these categories and zero-stock items as a baseline.
+
+💰  12. Salary Management
+Worker payroll and advance tracking
+
+12.1 Features
+	•	Worker CRUD: Add, Edit, Delete, View
+	•	Fields: Name, Role/Designation, Join Date, Branch, Base Salary
+	•	Monthly salary records
+	•	Advance management: Record advance payments, deduct from monthly salary
+	•	Net payable calculation: Base Salary − Advance Taken
+	•	Payment status: Paid / Unpaid / Partial
+	•	Salary history per worker
+	•	Admin manages only their branch staff
+	•	Super Admin views and manages all branches
+
+🎨  13. UI/UX Design Requirements
+Design system and experience guidelines
+
+13.1 Design Philosophy
+	•	Minimal, clean, and purposeful — no visual noise
+	•	Mobile-first: All admin and customer views must work flawlessly on mobile
+	•	Maximum speed: Dropdowns, autocomplete, and keyboard shortcuts to minimize clicks
+	•	Responsive: Works smoothly on both mobile and laptop/desktop
+13.2 Theme
+Element
+Specification
+Dashboard Theme
+Light mode + Dark mode (toggle in header)
+Landing Page Theme
+Fixed dark/moody theme — NO light/dark toggle
+Font
+Inter or Poppins (clean, modern)
+Primary Color
+#2C3E50 (deep navy)
+Accent Color
+#E67E22 (warm orange — brand color)
+Success
+#27AE60 (green)
+Warning
+#F39C12 (amber)
+Danger
+#C0392B (red)
+13.3 Component Specifications
+	•	Billing form: All dropdowns — no free-text for items
+	•	Inventory list: Toggle between card and table view
+	•	Inline editing: Click quantity field to edit directly
+	•	Search: Global search bar in admin header
+	•	Notifications: Toast messages (success, error, warning)
+	•	Loading states: Skeleton loaders, not spinners
+	•	Modals: Minimal, keyboard-dismissible
+
+🔐  14. Test Credentials
+All test IDs for development and QA
+
+Role
+Username
+Password
+Access
+Super Admin
+superadmin
+Bethak@SuperAdmin#2025
+All branches, all features
+Admin — Gurukul
+gurukul
+1234567890
+Gurukul branch only
+Admin — Bhat
+bhat
+1234567890
+Bhat branch only
+Admin — Visat
+visat
+1234567890
+Visat branch only
+Developer
+dev
+DevAccess@2025
+System config, logs
+Customer Test 1
+9876543210
+N/A
+My Bethak — mobile login
+Customer Test 2
+9123456780
+N/A
+My Bethak — mobile login
+📝  NOTE: Seed the database with these test accounts, three branches, sample items (zero stock), and at least two test customers with transaction history for each. Customer landing page must never expose /admin route.
+
+🗄️  15. Database Schema Overview
+Supabase / PostgreSQL structure
+
+15.1 Core Tables
+Table
+Key Fields
+branches
+id, name, location, admin_id, created_at
+users
+id, username, role, branch_id, password_hash, created_at
+customers
+id, name, mobile_number, branch_id, ghoda_coins, created_at
+items
+id, name, category, unit, price, stock, branch_id, is_active
+orders
+id, customer_id, branch_id, total, payment_type, created_at
+order_items
+id, order_id, item_id, quantity, unit_price
+ledger
+id, customer_id, branch_id, type (levana/deewana), amount, reason, created_at
+workers
+id, name, role, branch_id, base_salary, join_date
+salary_records
+id, worker_id, month, year, base_salary, advance, net_payable, status
+rewards
+id, name, description, ghoda_cost, stock, is_active, branch_id
+reward_redemptions
+id, customer_id, reward_id, created_at
+ghoda_transactions
+id, customer_id, type (earn/spend/bet), amount, reason, created_at
+
+📋  16. Development Milestones
+Suggested build sequence
+
+Phase
+Milestone
+Deliverables
+1
+Foundation
+Supabase setup, DB schema, Auth, RBAC, routing structure
+2
+Admin Core
+Admin login, dashboard shell, branch routing, dark/light mode
+3
+Billing & Inventory
+POS form with dropdowns, inventory CRUD, inline editing
+4
+Customer System
+Customer CRUD, ledger, Levana/Deewana, mobile login
+5
+GHODA Rewards
+Coin system, rewards CRUD, betting game
+6
+Salary Module
+Worker CRUD, salary records, advance management
+7
+Super Admin
+Full analytics, all-branch views, filters, branch management
+8
+My Bethak Portal
+Customer portal, ledger, rewards, insights, mobile UX
+9
+Landing Page
+Multi-page animated experience, road animation, loader
+10
+QA & Polish
+Performance, mobile testing, edge cases, seed data verification
+
+⚠️  17. Critical Requirements Checklist
+Non-negotiable requirements
+
+
+Requirement
+☐
+Tobacco cancer warning in footer of all customer-facing pages that reference smoke products
+☐
+Landing page must NEVER expose or link to /admin
+☐
+Customer portal (My Bethak) accessible only via mobile number — no password
+☐
+All billing items selectable via dropdown — no free-text entry
+☐
+All items default to zero stock on creation
+☐
+BB Cafe available at Bhat ONLY
+☐
+Scroll lock during branch journey animation on landing page
+☐
+GHODA betting uses GHODA coins only — no real money
+☐
+Only Super Admin can change admin credentials
+☐
+Light/dark mode in dashboards ONLY
+☐
+Mobile-first: all views must be fully functional on mobile
+☐
+Database must be clean and structured before development start
+☐
+All test IDs must be seeded and functional before handover
+☐
+Super Admin must be able to add new branches in future (architecture must support this)
+☐
+Salary management available at both Admin and Super Admin level
+
+
+END OF DOCUMENT
+Bombay Bethak  ·  Confidential  ·  Prepared for Antigravity Studio

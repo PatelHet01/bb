@@ -9,6 +9,7 @@
   body {
     @apply bg-zinc-100 text-zinc-900;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
   .dark body, body.dark {
     @apply bg-zinc-950 text-zinc-100;
@@ -127,3 +128,38 @@
            text-white dark:text-zinc-900;
   }
 }
+
+/* ── Landing Page Globals ── */
+:root {
+  --ember: oklch(0.82 0.17 62);
+  --font-display: 'Playfair Display', serif;
+  --font-script:  'Caveat', cursive;
+  --font-body:    'Montserrat', sans-serif;
+}
+
+.font-display  { font-family: var(--font-display); letter-spacing: -0.01em; }
+.font-script   { font-family: var(--font-script); }
+.font-italic-display { font-family: var(--font-display); font-style: italic; letter-spacing: 0.02em; font-weight: 600; }
+.text-ember    { color: var(--ember); }
+.bg-ember      { background-color: var(--ember); }
+.border-ember  { border-color: var(--ember); }
+
+.grain::before {
+  content: '';
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 1;
+  opacity: 0.055; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes walk    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-2px)} }
+@keyframes flicker { 0%,100%{opacity:1} 45%{opacity:.85} 50%{opacity:.6} 55%{opacity:.95} }
+@keyframes breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.03)} }
+@keyframes drift   { 0%{transform:translate3d(0,0,0) scale(1);opacity:0} 20%{opacity:.5} 100%{transform:translate3d(var(--dx,40px),-120px,0) scale(1.6);opacity:0} }
+@keyframes scroll-hint { 0%,100%{transform:scaleY(1);opacity:.4} 50%{transform:scaleY(1.4);opacity:1} }
+
+.animate-walk         { animation: walk 0.6s ease-in-out infinite; }
+.animate-flicker      { animation: flicker 3s ease-in-out infinite; }
+.animate-breathe      { animation: breathe 4s ease-in-out infinite; }
+.animate-scroll-hint  { animation: scroll-hint 2s ease-in-out infinite; }
+

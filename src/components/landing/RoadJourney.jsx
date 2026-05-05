@@ -2,9 +2,9 @@ import { useRef, useState } from 'react'
 import { motion, useScroll, useTransform, useMotionValueEvent, AnimatePresence } from 'framer-motion'
 
 const STOPS = [
-  { key: 'gurukul', name: 'GURUKUL', sign: 'BOMBAY BETHAK', year: 'Gurukul, Ahmedabad · 2025', label: 'Stop One',   title: 'The First Corner',        body: 'One small shop. Paan, smoke, and a place to sit. The first Bethak was born.',                              progress: 0.25, bottom: 26 },
-  { key: 'bhat',    name: 'BHAT',    sign: 'BB CAFE',       year: 'Bhat · Jan 2026',           label: 'Stop Two',   title: 'A New Crowd',              body: 'Bombay Bethak grew. A cafe joined the story — BB Cafe. A new corner, a new crowd.',                       progress: 0.55, bottom: 28.6 },
-  { key: 'visat',   name: 'VISAT',   sign: 'BOMBAY BETHAK', year: 'Visat · March 2026',        label: 'Stop Three', title: 'Three Corners. One Soul.', body: 'Three corners. One story. Yours.',                                                                         progress: 0.85, bottom: 25.2 },
+  { key: 'gurukul', name: 'GURUKUL', sign: 'BOMBAY BETHAK', year: 'Gurukul, Ahmedabad · 2025', label: 'Stop One',   title: 'The First Corner',        body: 'One small shop. Paan, smoke, and a place to sit. The first Bethak was born.',                              progress: 0.25, bottom: 29.0 },
+  { key: 'bhat',    name: 'BHAT',    sign: 'BB CAFE',       year: 'Bhat · Jan 2026',           label: 'Stop Two',   title: 'A New Crowd',              body: 'Bombay Bethak grew. A cafe joined the story — BB Cafe. A new corner, a new crowd.',                       progress: 0.55, bottom: 30.0 },
+  { key: 'visat',   name: 'VISAT',   sign: 'BOMBAY BETHAK', year: 'Visat · March 2026',        label: 'Stop Three', title: 'Three Corners. One Soul.', body: 'Three corners. One story. Yours.',                                                                         progress: 0.85, bottom: 29.0 },
 ]
 
 function Stars() {
@@ -104,16 +104,15 @@ function StreetProp({ x, b, type }) {
 }
 
 function getManBottom(p) {
-  if (p < 0.1) return 27.2 + (p/0.1)*(28-27.2);
-  if (p < 0.23) return 28 + ((p-0.1)/0.13)*(26-28);
-  if (p < 0.33) return 26 + ((p-0.23)/0.1)*(24.7-26);
-  if (p < 0.51) return 24.7 + ((p-0.33)/0.18)*(27-24.7);
-  if (p < 0.56) return 27 + ((p-0.51)/0.05)*(28.6-27);
-  if (p < 0.64) return 28.6 + ((p-0.56)/0.08)*(29.5-28.6);
-  if (p < 0.73) return 29.5 + ((p-0.64)/0.09)*(27.4-29.5);
-  if (p < 0.78) return 27.4 + ((p-0.73)/0.05)*(27-27.4);
-  if (p < 0.9) return 27 + ((p-0.78)/0.12)*(25.2-27);
-  return 25.2 + ((p-0.9)/0.1)*(25.9-25.2);
+  const smooth = (t) => t * t * (3 - 2 * t);
+  const interp = (p, p0, b0, p1, b1) => b0 + (b1 - b0) * smooth(Math.max(0, Math.min(1, (p - p0) / (p1 - p0))));
+  
+  if (p < 0.25) return interp(p, 0, 26.2, 0.25, 29.0);
+  if (p < 0.40) return interp(p, 0.25, 29.0, 0.40, 24.0);
+  if (p < 0.55) return interp(p, 0.40, 24.0, 0.55, 30.0);
+  if (p < 0.70) return interp(p, 0.55, 30.0, 0.70, 25.0);
+  if (p < 0.85) return interp(p, 0.70, 25.0, 0.85, 29.0);
+  return interp(p, 0.85, 29.0, 1.0, 26.6);
 }
 
 function Road({ progress }) {
@@ -130,23 +129,23 @@ function Road({ progress }) {
             <stop offset="1"   stopColor="rgba(255,255,255,0.04)" />
           </linearGradient>
         </defs>
-        <path d="M0 720 Q900 700 1800 730 Q2700 760 3600 720 L3600 1000 L0 1000 Z" fill="rgba(255,255,255,0.015)" />
-        <path d="M0 740 Q450 700 900 740 Q1350 780 1800 730 Q2250 680 2700 730 Q3150 770 3600 720"
+        <path d="M 0 720 C 477 720, 477 690, 954 690 C 1197 690, 1197 740, 1440 740 C 1683 740, 1683 680, 1926 680 C 2169 680, 2169 730, 2412 730 C 2655 730, 2655 690, 2898 690 C 3249 690, 3249 720, 3600 720 L 3600 1000 L 0 1000 Z" fill="rgba(255,255,255,0.015)" />
+        <path d="M 0 740 C 477 740, 477 710, 954 710 C 1197 710, 1197 760, 1440 760 C 1683 760, 1683 700, 1926 700 C 2169 700, 2169 750, 2412 750 C 2655 750, 2655 710, 2898 710 C 3249 710, 3249 740, 3600 740"
           stroke="url(#roadEdge)" strokeWidth="3" fill="none" />
-        <path d="M0 760 Q450 720 900 760 Q1350 800 1800 750 Q2250 700 2700 750 Q3150 790 3600 740"
+        <path d="M 0 760 C 477 760, 477 730, 954 730 C 1197 730, 1197 780, 1440 780 C 1683 780, 1683 720, 1926 720 C 2169 720, 2169 770, 2412 770 C 2655 770, 2655 730, 2898 730 C 3249 730, 3249 760, 3600 760"
           stroke="rgba(255,255,255,0.35)" strokeWidth="2" strokeDasharray="14 22" fill="none" strokeLinecap="round" />
       </svg>
 
-      <StreetProp x={5}  b={27.2} type="lamp"  />
-      <StreetProp x={13} b={28.0} type="cup"   />
-      <StreetProp x={20} b={27.2} type="bench" />
-      <StreetProp x={30} b={24.7} type="lamp"  />
-      <StreetProp x={42} b={24.7} type="tree"  />
-      <StreetProp x={55} b={28.6} type="bike"  />
-      <StreetProp x={62} b={29.5} type="lamp"  />
-      <StreetProp x={74} b={27.4} type="tree"  />
-      <StreetProp x={83} b={25.3} type="cup"   />
-      <StreetProp x={93} b={25.9} type="lamp"  />
+      <StreetProp x={5}  b={26.2} type="lamp"  />
+      <StreetProp x={13} b={27.5} type="cup"   />
+      <StreetProp x={20} b={28.5} type="bench" />
+      <StreetProp x={30} b={28.5} type="lamp"  />
+      <StreetProp x={42} b={24.5} type="tree"  />
+      <StreetProp x={55} b={29.8} type="bike"  />
+      <StreetProp x={62} b={27.5} type="lamp"  />
+      <StreetProp x={74} b={26.5} type="tree"  />
+      <StreetProp x={83} b={28.5} type="cup"   />
+      <StreetProp x={93} b={26.8} type="lamp"  />
 
       {STOPS.map((s, idx) => (
         <div key={s.key} className="absolute flex flex-col items-center"

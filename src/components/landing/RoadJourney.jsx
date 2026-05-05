@@ -167,7 +167,7 @@ function StoryOverlay({ stop, opacity }) {
   return (
     <motion.div
       style={{ opacity }}
-      className="absolute top-[10%] left-1/2 -translate-x-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
+      className="absolute top-[20%] md:top-[12%] left-1/2 -translate-x-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
     >
       <div className="flex items-center justify-center gap-3 mb-3">
         <span className="h-px w-8 bg-ember/60" />

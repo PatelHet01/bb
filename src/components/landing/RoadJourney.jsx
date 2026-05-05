@@ -167,7 +167,7 @@ function StoryOverlay({ stop, opacity }) {
   return (
     <motion.div
       style={{ opacity }}
-      className="absolute top-[20%] md:top-[12%] left-1/2 -translate-x-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
+      className="absolute top-[28%] md:top-[15%] left-1/2 -translate-x-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
     >
       <div className="flex items-center justify-center gap-3 mb-3">
         <span className="h-px w-8 bg-ember/60" />
@@ -195,13 +195,13 @@ export default function RoadJourney() {
   const heroY = useTransform(scrollYProgress, [0, 1], ['0vh', '0vh'])
   
   // Story Intro
-  const introOpacity = useTransform(scrollYProgress, [0.05, 0.08, 0.16, 0.19], [0, 1, 1, 0])
-  const introY = useTransform(scrollYProgress, [0.05, 0.08], [20, 0])
+  const introOpacity = useTransform(scrollYProgress, [0.04, 0.07, 0.13, 0.16], [0, 1, 1, 0])
+  const introY = useTransform(scrollYProgress, [0.04, 0.07], [20, 0])
 
-  // Stop 1, 2, 3 overlays — extended visibility to allow smooth reading
-  const t1 = useTransform(scrollYProgress, [0.19, 0.23, 0.40, 0.44], [0, 1, 1, 0])
-  const t2 = useTransform(scrollYProgress, [0.49, 0.53, 0.70, 0.74], [0, 1, 1, 0])
-  const t3 = useTransform(scrollYProgress, [0.79, 0.83, 0.94, 0.96], [0, 1, 1, 0])
+  // Stop 1, 2, 3 overlays — rigidly constrained so they fade out before the next stop appears
+  const t1 = useTransform(scrollYProgress, [0.18, 0.22, 0.34, 0.38], [0, 1, 1, 0])
+  const t2 = useTransform(scrollYProgress, [0.48, 0.52, 0.64, 0.68], [0, 1, 1, 0])
+  const t3 = useTransform(scrollYProgress, [0.78, 0.82, 0.94, 0.96], [0, 1, 1, 0])
   
   const finalLine = useTransform(scrollYProgress, [0.95, 0.98], [0, 1])
   const hintOpacity = useTransform(scrollYProgress, [0, 0.03], [1, 0])
@@ -275,8 +275,8 @@ export default function RoadJourney() {
           </p>
         </motion.div>
 
-        {/* Progress HUD */}
-        <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
+        {/* Progress HUD - Pushed down on mobile to avoid TopButtons */}
+        <div className="absolute top-20 md:top-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 px-4 pointer-events-none">
           <div className="font-script text-white/40 text-sm">the journey</div>
           <div className="relative h-[3px] w-44 md:w-64 rounded-full bg-white/15 overflow-hidden">
             <motion.div className="absolute inset-y-0 left-0 rounded-full bg-ember" style={{ width: barWidth }} />
@@ -285,7 +285,7 @@ export default function RoadJourney() {
                 style={{ left: `calc(${s.progress * 100}% - 5px)` }} />
             ))}
           </div>
-          <div className="font-italic-display text-white/70 text-xs md:text-sm tracking-widest">{active.name}</div>
+          <div className="font-italic-display text-white/70 text-xs md:text-sm tracking-widest uppercase">{active.name}</div>
         </div>
 
         {/* Scroll hint */}

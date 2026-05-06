@@ -187,7 +187,6 @@ export default function RoadJourney() {
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
 
   const x = useTransform(scrollYProgress, [0, 1], ['0%', '-72%'])
-  const hintOpacity = useTransform(scrollYProgress, [0, 0.03], [1, 0])
   const barWidth = useTransform(scrollYProgress, [0, 1], ['0%', '100%'])
 
   const [progress, setProgress] = useState(0)
@@ -221,7 +220,7 @@ export default function RoadJourney() {
 
         <AnimatePresence>
           {/* HERO SECTION OVERLAY */}
-          {(progress < 0.03 || progress > 0.97) && (
+          {progress < 0.03 && (
             <motion.div 
               key="hero"
               initial={{ opacity: 0, scale: 0.95 }} 
@@ -250,7 +249,7 @@ export default function RoadJourney() {
               animate={{ opacity: 1, y: 0 }} 
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.8 }}
-              className="absolute top-[28%] md:top-[25%] w-full z-20 flex flex-col items-center px-6 text-center pointer-events-none"
+              className="absolute top-[18%] md:top-[25%] w-full z-20 flex flex-col items-center px-6 text-center pointer-events-none"
             >
               <h2 className="font-display text-3xl text-white md:text-5xl max-w-3xl mx-auto leading-tight drop-shadow-md">
                 It started with one shop. One corner. One idea.
@@ -265,11 +264,11 @@ export default function RoadJourney() {
           {activeStory && (
             <motion.div
               key={activeStory.key}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
+              initial={{ opacity: 0, x: "-50%", y: 15 }}
+              animate={{ opacity: 1, x: "-50%", y: 0 }}
+              exit={{ opacity: 0, x: "-50%", y: -15 }}
               transition={{ duration: 0.6 }}
-              className="absolute top-[30%] md:top-[15%] left-1/2 -translate-x-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
+              className="absolute top-[15%] left-1/2 z-20 text-center w-[92%] max-w-lg px-4 pointer-events-none"
             >
               <div className="flex items-center justify-center gap-3 mb-3">
                 <span className="h-px w-8 bg-ember/60" />
@@ -288,11 +287,22 @@ export default function RoadJourney() {
           {(progress >= 0.95 && progress <= 0.97) && (
             <motion.div 
               key="final"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute bottom-[14%] left-1/2 -translate-x-1/2 text-center z-20 pointer-events-none">
+              initial={{ opacity: 0, x: "-50%" }} animate={{ opacity: 1, x: "-50%" }} exit={{ opacity: 0, x: "-50%" }}
+              className="absolute bottom-[14%] left-1/2 text-center z-20 pointer-events-none">
               <p className="font-italic-display text-white text-2xl md:text-4xl drop-shadow-[0_4px_20px_rgba(255,180,80,0.25)]">
                 And the story isn't over.
               </p>
+            </motion.div>
+          )}
+
+          {/* Scroll hint */}
+          {progress < 0.05 && (
+            <motion.div 
+              key="scroll-hint"
+              initial={{ opacity: 1, x: "-50%" }} exit={{ opacity: 0, x: "-50%" }} transition={{ duration: 0.5 }}
+              className="absolute bottom-6 left-1/2 z-20 flex flex-col items-center gap-1 pointer-events-none">
+              <span className="text-[9px] tracking-[0.4em] text-white/35 uppercase">Scroll</span>
+              <div className="w-px h-8 bg-gradient-to-b from-white/35 to-transparent animate-scroll-hint" />
             </motion.div>
           )}
         </AnimatePresence>
@@ -309,13 +319,6 @@ export default function RoadJourney() {
           </div>
           <div className="font-italic-display text-white/70 text-xs md:text-sm tracking-widest uppercase">{activeHud.name}</div>
         </div>
-
-        {/* Scroll hint */}
-        <motion.div style={{ opacity: hintOpacity }}
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1 pointer-events-none">
-          <span className="text-[9px] tracking-[0.4em] text-white/35 uppercase">Scroll</span>
-          <div className="w-px h-8 bg-gradient-to-b from-white/35 to-transparent animate-scroll-hint" />
-        </motion.div>
 
       </div>
     </section>

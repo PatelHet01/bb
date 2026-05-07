@@ -65,7 +65,13 @@ export default function BillingPage() {
     async function fetchInventory() {
       setLoading(true)
       const targetBranch = branchId || selectedBranch
-      const { data } = await supabase.from('items').select('*').eq('branch_id', targetBranch).neq('category', 'Inventory')
+      const { data } = await supabase.from('items').select('*')
+        .eq('branch_id', targetBranch)
+        .neq('category', 'Inventory')
+        .eq('is_active', true)
+        .neq('is_archived', true)
+        .not('subcategory', 'is', null)
+        
       setItems(data || [])
       setLoading(false)
     }

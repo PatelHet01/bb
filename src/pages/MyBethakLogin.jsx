@@ -69,7 +69,8 @@ export default function MyBethakLogin() {
           mobile_number: mobile,
           dob: signupForm.dob,
           ghoda_coins: 0,
-          branch_id: 'gurukul', // default, can be updated
+          branch_id: null,
+          registration_type: 'self'
         }).select().single()
         if (error) throw error
         setCustomer(newCust)

@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Search, AlertTriangle, ToggleLeft, ToggleRight, Edit2, Check, X, Trash2, Archive, RefreshCw, LayoutGrid } from 'lucide-react'
+import { Plus, Search, AlertTriangle, ToggleLeft, ToggleRight, Edit2, Check, X, Trash2, Archive, RefreshCw, LayoutGrid, Download, Upload } from 'lucide-react'
 import { BRANCH_CATEGORY_MAP, CATEGORY_ICONS, CATEGORY_SUBCATEGORIES } from '../lib/branchConfig'
 
 const UNITS = ['piece','gram','ml','kg','litre','pack','session']
@@ -216,6 +216,98 @@ export default function InventoryPage() {
     return { lowCount: low, zeroCount: zero, activeValue: val }
   }, [items])
 
+  const handleExportCSV = () => {
+    const csvRows = ['id,name,variant,category,subcategory,stock_quantity'];
+    const exportData = mainTab === 'archived' ? items.filter(i => i.is_archived) : items.filter(i => !i.is_archived);
+    
+    exportData.forEach(i => {
+      const row = [
+        i.id,
+        `"${i.name.replace(/"/g, '""')}"`,
+        `"${(i.variant || '').replace(/"/g, '""')}"`,
+        `"${i.category}"`,
+        `"${i.subcategory || ''}"`,
+        i.stock_quantity
+      ];
+      csvRows.push(row.join(','));
+    });
+    
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inventory_export_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target.result;
+      const lines = text.split('\n');
+      if (lines.length < 2) return toast.error('CSV is empty or invalid format');
+      
+      const headers = lines[0].toLowerCase().split(',');
+      const idIdx = headers.indexOf('id');
+      const stockIdx = headers.indexOf('stock_quantity');
+      
+      if (idIdx === -1 || stockIdx === -1) {
+        return toast.error('CSV must contain "id" and "stock_quantity" columns');
+      }
+
+      const updates = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const row = [];
+        let inQuotes = false;
+        let currentVal = '';
+        for(let char of line) {
+          if(char === '"') { inQuotes = !inQuotes; }
+          else if(char === ',' && !inQuotes) { row.push(currentVal); currentVal = ''; }
+          else { currentVal += char; }
+        }
+        row.push(currentVal);
+        
+        const id = row[idIdx]?.replace(/"/g, '').trim();
+        const stockStr = row[stockIdx]?.replace(/"/g, '').trim();
+        
+        if (!id || id.includes('leave_blank') || id === 'id') continue;
+        
+        const stock = parseInt(stockStr, 10);
+        if (!isNaN(stock) && id.length > 10) {
+          updates.push({ id, stock_quantity: stock });
+        }
+      }
+
+      if (updates.length === 0) return toast.error('No valid rows found to update');
+      
+      setLoading(true);
+      let successCount = 0;
+      
+      // Process in small chunks to avoid rate limiting
+      const chunkSize = 10;
+      for (let i = 0; i < updates.length; i += chunkSize) {
+        const chunk = updates.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(u => 
+          supabase.from('items').update({ stock_quantity: u.stock_quantity }).eq('id', u.id)
+        ));
+        successCount += chunk.length;
+      }
+      
+      toast.success(`Successfully updated stock for ${successCount} items`);
+      setLoading(false);
+      fetchInventory();
+      e.target.value = null;
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="max-w-6xl space-y-4 pb-20">
       {/* Header */}
@@ -239,7 +331,15 @@ export default function InventoryPage() {
           </div>
         </div>
         {canEdit && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-secondary btn-sm" onClick={handleExportCSV} title="Download CSV template with current items">
+              <Download size={14} /> Export CSV
+            </button>
+            <label className="btn-secondary btn-sm cursor-pointer" title="Upload modified CSV to bulk update stock">
+              <Upload size={14} /> Upload CSV
+              <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+            </label>
+            <div className="w-px h-8 bg-zinc-200 dark:bg-zinc-800 mx-1 hidden sm:block"></div>
             <button className={`btn-secondary btn-sm ${bulkMode ? 'ring-2 ring-emerald-500' : ''}`} onClick={toggleBulkMode}>
               <RefreshCw size={14} className={bulkMode ? 'animate-spin-slow text-emerald-500' : ''} /> Bulk Update
             </button>

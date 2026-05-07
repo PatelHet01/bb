@@ -7,6 +7,15 @@ import DashboardHome from '../pages/DashboardHome'
 import BillingPage from '../pages/BillingPage'
 import InventoryPage from '../pages/InventoryPage'
 import CustomersPage from '../pages/CustomersPage'
+import SalaryPage from '../pages/SalaryPage'
+import RewardsPage from '../pages/RewardsPage'
+import AnalyticsPage from '../pages/AnalyticsPage'
+import KDSPage from '../pages/KDSPage'
+import BranchesPage from '../pages/BranchesPage'
+import StaffPage from '../pages/StaffPage'
+import AnnouncementsPage from '../pages/AnnouncementsPage'
+import ExpensesPage from '../pages/ExpensesPage'
+import SettingsPage from '../pages/SettingsPage'
 import LandingPage from '../pages/LandingPage'
 import MyBethakLogin from '../pages/MyBethakLogin'
 import MyBethakDashboard from '../pages/MyBethakDashboard'
@@ -49,8 +58,32 @@ export default function AppRoutes() {
             <CustomersPage />
           </AdminRoute>
         } />
+        <Route path="salary" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><SalaryPage /></AdminRoute>
+        } />
+        <Route path="rewards" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><RewardsPage /></AdminRoute>
+        } />
+        <Route path="analytics" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><AnalyticsPage /></AdminRoute>
+        } />
+        <Route path="branches" element={
+          <AdminRoute allowedRoles={['super_admin']}><BranchesPage /></AdminRoute>
+        } />
+        <Route path="staff" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><StaffPage /></AdminRoute>
+        } />
+        <Route path="announcements" element={<AnnouncementsPage />} />
+        <Route path="expenses" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><ExpensesPage /></AdminRoute>
+        } />
+        <Route path="settings" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><SettingsPage /></AdminRoute>
+        } />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Route>
+
+      <Route path="/kitchen" element={<AdminRoute allowedRoles={['super_admin', 'admin', 'manager']}><KDSPage /></AdminRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

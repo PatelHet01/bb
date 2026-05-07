@@ -177,12 +177,12 @@ export default function BillingPage() {
     try {
       const target_branch = branchId || selectedBranch
       const { data: order, error } = await supabase.from('orders').insert({
-        customer_id: customer?.id || null, branch_id: target_branch, total, status: 'completed'
+        customer_id: customer?.id || null, branch_id: target_branch, subtotal: total, discount: 0, total, status: 'completed'
       }).select().single()
       if (error) throw error
 
       await supabase.from('order_items').insert(cart.map(c => ({
-        order_id: order.id, item_id: c.id, quantity: c.quantity, unit_price: c.price,
+        order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
       })))
       
       // Real DB Stock deduction

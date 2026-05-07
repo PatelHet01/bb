@@ -23,7 +23,7 @@ export default function DashboardHome() {
         if (branchId) cQ = cQ.eq('branch_id', branchId)
         const { count: custCount } = await cQ
 
-        let sQ = supabase.from('items').select('id', { count: 'exact', head: true }).lte('stock', 5).eq('is_active', true)
+        let sQ = supabase.from('items').select('id', { count: 'exact', head: true }).lte('stock_quantity', 5).eq('is_active', true)
         if (branchId) sQ = sQ.eq('branch_id', branchId)
         const { count: lowStock } = await sQ
 

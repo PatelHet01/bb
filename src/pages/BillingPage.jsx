@@ -69,8 +69,7 @@ export default function BillingPage() {
         .eq('branch_id', targetBranch)
         .neq('category', 'Inventory')
         .eq('is_active', true)
-        .neq('is_archived', true)
-        .not('subcategory', 'is', null)
+        .eq('is_archived', false)
         
       setItems(data || [])
       setLoading(false)

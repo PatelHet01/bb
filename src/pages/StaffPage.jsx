@@ -28,8 +28,10 @@ export default function StaffPage() {
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
+    const usernameClean = form.username.toLowerCase()
     const { error } = await supabase.from('users').insert({
-      username: form.username.toLowerCase(),
+      username: usernameClean,
+      email: `${usernameClean}-${Date.now()}@bb.local`, // Auto-generated to satisfy DB schema
       password_hash: form.password,
       role: form.role,
       branch_id: form.branch_id

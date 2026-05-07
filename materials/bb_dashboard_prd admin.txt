@@ -1,0 +1,917 @@
+================================================================================
+BOMBAY BETHAK
+Admin & Super Admin Dashboard
+Product Requirements Document — Dashboard Edition
+================================================================================
+
+EXCLUSIVE DASHBOARD SPECIFICATION
+Prepared exclusively for Antigravity Studio
+Covers: Admin Dashboard | Super Admin Dashboard | Manager Dashboard
+Landing page unchanged — see existing PRD v1.0 & v1.1 for landing page spec
+
+Document Type   : Dashboard PRD — Standalone
+Covers          : Admin Panel, Super Admin, Manager Role
+Excludes        : Landing page (spec unchanged from v1.0)
+Tech Stack      : React + Tailwind + Supabase + Zustand
+Priority        : Production-ready, industry-level
+Prepared For    : Antigravity Studio
+
+================================================================================
+SECTION 1 — Dashboard Overview & Design Philosophy
+Principles that govern every screen in the admin panel
+================================================================================
+
+The Bombay Bethak admin panel is a high-traffic operational tool. At Gurukul
+branch alone, hundreds of transactions happen daily. Every millisecond and every
+unnecessary click costs real money. This dashboard must be the fastest, clearest,
+most data-dense admin interface the team has built.
+
+1.1 Core Design Principles
+---------------------------
+Principle             | Implementation
+----------------------|-------------------------------------------------------------
+Mobile-First          | Every dashboard screen works on a phone. Admins at Gurukul
+                      | use phones behind the counter. Min tap target: 44px.
+Zero Wasted Clicks    | The most common action on any screen must require at most
+                      | 2 taps from landing on that screen.
+Data Density          | Show more information per screen. No decorative whitespace.
+                      | Every pixel earns its place.
+Instant Feedback      | Every action shows result within 100ms (optimistic UI).
+                      | Never let the user wonder if something worked.
+Light + Dark Mode     | Both modes are fully supported. Toggle in header.
+                      | Preference persisted per user.
+Role-Scoped UI        | Manager, Admin, Super Admin see fundamentally different
+                      | screens — not just hidden buttons.
+
+1.2 Global Layout Structure
+-----------------------------
+All dashboard roles share the same shell layout. The sidebar and header are
+universal. Page content changes per role and route.
+
+Zone              | Specification
+------------------|-------------------------------------------------------------
+Sidebar (Desktop) | Fixed left sidebar, 240px wide. Brand logo at top. Nav links
+                  | with icons. User profile + logout at bottom. Collapses to
+                  | icon-only at md breakpoint.
+Top Bar (Mobile)  | Sticky top bar with hamburger menu. Branch name + dark mode
+                  | toggle. No horizontal scroll.
+Content Area      | Scrollable main area. Max width 1280px. Padding: 24px
+                  | desktop, 16px mobile.
+Header            | Height 56px. Branch breadcrumb left. Dark mode toggle right.
+                  | No search bar (search is page-level).
+Toast             | Top-right corner. Success (green), Error (red), Warning
+Notifications     | (amber). Auto-dismiss 4 seconds.
+
+1.3 Colour System — Dashboard Only
+------------------------------------
+NOTE: Dashboard uses a different colour system from the landing page. Landing
+page is pure black/white. Dashboard uses the admin design system below.
+
+Token            | Hex Value | Usage
+-----------------|-----------|----------------------------------------------
+Brand / Primary  | #1A1A2E   | Sidebar bg, active nav, primary buttons
+Accent / Orange  | #E67E22   | CTAs, highlights, active states, low-stock badges
+Success          | #27AE60   | Positive balances, paid status, active items
+Danger           | #C0392B   | Khata balances, void actions, zero stock
+Warning          | #F39C12   | Low stock, pending status, caution
+Background Light | #F8F9FA   | Page bg light mode, table alt rows
+Background Dark  | #0F0F1A   | Page bg dark mode
+Card Light       | #FFFFFF   | Card bg light mode
+Card Dark        | #1C1C2E   | Card bg dark mode
+
+================================================================================
+SECTION 2 — Navigation & Sidebar
+Role-based navigation with zero excess
+================================================================================
+
+2.1 Navigation Items by Role
+------------------------------
+Nav Item           | Super Admin | Admin | Manager       | Route
+-------------------|-------------|-------|---------------|------------------------
+Dashboard          | YES         | YES   | YES (limited) | /admin/dashboard
+Billing / POS      | YES         | YES   | YES           | /admin/billing
+Inventory          | YES         | YES   | YES (view+stock) | /admin/inventory
+Customers          | YES         | YES   | NO            | /admin/customers
+Salary             | YES         | YES   | NO            | /admin/salary
+Rewards (GHODA)    | YES         | YES   | NO            | /admin/rewards
+Analytics          | YES (all)   | YES (branch) | NO     | /admin/analytics
+Kitchen Display    | YES         | YES (Bhat only) | YES (Bhat only) | /kitchen
+Branches           | YES         | NO    | NO            | /admin/branches
+Staff / Managers   | YES         | YES (own branch) | NO | /admin/staff
+Announcements      | YES         | YES   | View only     | /admin/announcements
+Expenses           | YES         | YES   | NO            | /admin/expenses
+Settings           | YES (full)  | YES (branch) | NO     | /admin/settings
+
+2.2 Sidebar Behaviour
+-----------------------
+▸ Desktop (>=768px): Always visible, 240px fixed. Active item: brand navy bg,
+  white text, left accent bar.
+▸ Mobile (<768px): Overlay drawer. Opens via hamburger. Tapping outside closes.
+  Smooth slide animation.
+▸ Branch name shown in small uppercase text below the Bombay Bethak logo.
+▸ User avatar (initials), username, and role badge shown in sidebar footer.
+▸ Sign out button in sidebar footer — red icon and text on hover.
+▸ Dark mode toggle in top header bar — sun/moon icon. Preference saved to
+  localStorage.
+
+================================================================================
+SECTION 3 — Admin Dashboard Home Page
+Branch-level command centre for daily operations
+================================================================================
+
+IMPORTANT: Manager sees a stripped-down version of this page with NO revenue,
+NO profit, NO khata totals, NO analytics. Manager sees: today's order count,
+low stock count, and a quick link to Billing. Nothing else.
+
+3.1 Stat Cards Row — Admin View
+---------------------------------
+Four stat cards in a 2x2 grid on mobile, 4-column row on desktop. Each card is
+clickable and navigates to the relevant section.
+
+Card                     | Value Shown                                    | Click Action
+-------------------------|------------------------------------------------|----------------------------
+Today's Revenue          | Sum of all completed orders today              | -> Analytics, today filter
+Outstanding Khata        | Total Khata balance across all customers       | -> Customers, Khata filter
+(Levana)                 | in this branch                                 |
+Orders Today             | Count of completed orders today                | -> Order history page
+Low / Zero Stock         | Number of items at or below threshold          | -> Inventory, low-stock filter
+
+3.2 Quick Actions Bar
+-----------------------
+Horizontal scrollable row of large touch-friendly quick action buttons directly
+below stat cards:
+▸ + New Bill — primary orange button, navigates to /admin/billing
+▸ Add Customer — navigates to /admin/customers with add form open
+▸ Update Stock — navigates to /admin/inventory in Bulk Update mode
+▸ Record Payment — opens a quick modal to record customer Khata payment
+
+3.3 Recent Orders Table
+-------------------------
+Last 10 orders for this branch. Columns: Order ID (truncated), Customer (name
+or Guest), Items count, Total, Payment mode(s), Time. Each row is tappable —
+expands to show itemised receipt inline.
+
+3.4 Outstanding Khata Widget
+------------------------------
+A compact list of the top 5 customers with highest outstanding Khata balance for
+this branch. Shows: Name, mobile, balance in red, last transaction date. Tap to
+open full customer profile.
+
+3.5 Low Stock Alerts Widget
+-----------------------------
+Items with stock at or below their threshold. Shows item name, current stock
+(red if zero, amber if low), category. Tap opens inventory row inline edit for
+quick restock.
+
+3.6 Today's Revenue Chart
+---------------------------
+A simple hourly bar chart showing revenue by hour for today. Helps admin
+identify peak times at a glance. Bhat branch additionally shows a BB Cafe vs
+other breakdown.
+
+3.7 Announcements Banner
+--------------------------
+If there is an unread announcement from Super Admin, it appears as a coloured
+banner at the top of the dashboard (above stat cards). Types: Info (blue),
+Warning (amber), Urgent (red). Tap to expand and mark as read.
+
+================================================================================
+SECTION 4 — Billing / POS Page
+The highest-traffic page — built for speed above all else
+================================================================================
+
+The billing page must complete a transaction in under 10 seconds for a trained
+operator. It is the most critical page in the entire system. No compromises on
+speed, responsiveness, or reliability.
+
+4.1 Three-Panel Layout
+------------------------
+Panel               | Specification
+--------------------|-------------------------------------------------------------
+Left / Top:         | Vertical tab list on desktop (140px wide). Horizontal
+Category Tabs       | scrollable pills on mobile. One tab per category. Active tab:
+                    | orange bg. Switching tabs is instant — all items pre-loaded.
+Middle: Item Cards  | Subcategory rows with horizontal scrolling card shelves.
+Grid                | Each card: item name, variant, price, qty badge. Single tap
+                    | adds 1 to cart. Double tap / long press opens qty editor modal.
+Right / Bottom:     | Desktop: fixed right panel 380px. Mobile: collapsible bottom
+Cart                | sheet. Shows running total, item list, payment mode selector,
+                    | confirm button.
+
+4.2 Customer Bar
+------------------
+▸ Search input at top of page. Type name or mobile number — autocomplete
+  dropdown shows matching customers.
+▸ Select customer: their name, Khata balance (red), and Advance balance (green)
+  shown as badges next to name.
+▸ Deselect button (X) to clear customer selection.
+▸ '+ New Customer' quick button beside search — opens inline mini-form: Name,
+  Mobile, DOB — saves and auto-selects.
+▸ If no customer selected: Khata and Advance payment modes are completely hidden
+  from payment selector.
+
+4.3 Item Card Specifications
+------------------------------
+State              | Visual
+-------------------|-------------------------------------------------------------
+Default (in stock) | Dark bg (#1A1A2E), white item name, variant in muted text,
+                   | green price bottom-right
+In Cart (qty > 0)  | Orange border glow, orange quantity badge top-right, card
+                   | slightly elevated
+Out of Stock       | Grey bg, grey text, 'Out' label, not tappable
+No Price Set       | Grey bg, 'No Price' label, not tappable — admin must set
+                   | price first
+Inactive           | Greyed out, 50% opacity, not tappable
+
+4.4 Payment Flow
+------------------
+▸ Payment mode dropdown: Cash, Online (sub: UPI / Credit Card / Debit Card),
+  Khata, Advance.
+▸ Khata and Advance modes only visible when a registered customer is selected.
+▸ Split bill: '+ Split' button adds a second payment row. Operator sets amount
+  per mode. Total must equal cart total to enable Confirm.
+▸ 'Exact Cash' shortcut button: one tap confirms bill as full cash payment —
+  fastest possible checkout.
+▸ On confirm: order saved, stock decremented, Khata/Advance ledger updated,
+  GHODA coins credited, cart clears, success toast shown. All in one atomic
+  operation.
+▸ Receipt shown post-confirm with order ID, items, total, payment modes.
+  'New Bill' button to reset.
+
+4.5 Offline Tolerance
+-----------------------
+▸ If network drops mid-session: cart is preserved in localStorage — never lost.
+▸ Offline indicator shown in top bar.
+▸ Order is queued and synced when connection restores. User is informed.
+
+================================================================================
+SECTION 5 — Inventory Page
+Full stock management with inline editing and bulk operations
+================================================================================
+
+5.1 Page Header & Stats Bar
+-----------------------------
+▸ Title: 'Inventory'
+▸ Sub-stats: '{N} active items · {N} low stock · {N} zero stock · Total Value: Rs.{X}'
+▸ Low stock and Zero stock counts are clickable filters — clicking instantly
+  filters table.
+▸ Total Value is hidden from Manager role.
+▸ Buttons (top right): 'Add Item', 'Add Disposable', 'Bulk Update'
+
+5.2 Three Main Tabs
+---------------------
+Tab         | Content
+------------|-------------------------------------------------------------
+Active      | All active, non-archived, non-disposable items. Default tab.
+Archived    | Items that have been archived. Greyed style. 'Restore' and
+            | 'Delete Forever' actions.
+Disposables | Internal-use items (cups, bags, etc.). Not shown on billing.
+            | No selling price. Cost price only.
+
+5.3 Filter & Search Bar
+-------------------------
+▸ Search: matches item name, variant, subcategory, category. Works within
+  active category tab filter.
+▸ Category filter pills: All | Smoke | Paan | Candy & Chewing | Beverages |
+  Snacks | BB Cafe (Bhat only)
+▸ Low Stock toggle pill: filters to items at or below threshold
+▸ Zero Stock toggle pill: filters to items with stock = 0
+
+5.4 Inventory Table Columns
+-----------------------------
+# | Column          | Details
+--|-----------------|-------------------------------------------------------------
+1 | Sync Dot        | Green dot = item is live on billing POS. Grey dot = item
+  |                 | not appearing on billing (no price, inactive, or unassigned
+  |                 | subcategory). Tooltip on hover explains why.
+2 | Item & Variant  | Bold item name. Variant shown as small badge below. INACTIVE
+  |                 | label in red if toggled off.
+3 | Category & Sub  | Category name with icon. Subcategory below in muted text. If
+  |                 | subcategory missing: amber 'Assign Subcategory' button —
+  |                 | clicking opens inline subcategory dropdown.
+4 | Stock           | Large clickable number. Click turns into inline input. Type
+  |                 | new value, Enter or click away to save. Color: green (healthy),
+  |                 | amber (low), red (zero). In Bulk Update mode: all stock cells
+  |                 | become inputs simultaneously.
+5 | MRP (Rs.)       | Selling price. Hidden from Manager. 'No Price' in red if not set.
+6 | Value (Rs.)     | Stock x Price. Admin and Super Admin only. Hidden from Manager.
+7 | Status Toggle   | Active/Inactive toggle. Click to flip. Immediate save.
+  |                 | Inactive = greyed card on billing.
+8 | Actions         | Always visible (not hover-only): Edit (pencil), Archive/Restore.
+  |                 | Delete Forever in Archived tab (Admin only).
+
+5.5 Inline Row Edit
+---------------------
+▸ Click pencil icon -> entire row becomes editable inline (no modal, no separate page).
+▸ Editable fields: Name, Variant, Category, Subcategory, Unit, Price (MRP),
+  Cost Price (Admin only), Low Stock Threshold.
+▸ Save (green checkmark) and Cancel (grey X) buttons appear inline.
+▸ Save triggers immediate DB update and real-time reflection.
+
+5.6 Add Item Form
+-------------------
+Shown above the table when 'Add Item' or 'Add Disposable' is clicked. Collapses
+on save or cancel.
+
+Field                | Required | Notes
+---------------------|----------|----------------------------------------------
+Item Name            | YES      | Text input
+Variant              | NO       | e.g. Regular, Small, 250ml
+Category             | YES      | Dropdown — branch-filtered
+Subcategory          | YES      | Dropdown — filtered by category selection
+Unit                 | YES      | Dropdown: piece, gram, ml, kg, litre, pack, session
+Selling Price (Rs.)  | YES      | Number input. Item hidden from billing until set.
+Cost Price (Rs.)     | NO       | Admin only. Hidden from Manager. Used for profit calc.
+Opening Stock        | YES      | Defaults to 0
+Low Stock Alert At   | NO       | Defaults to 5
+Active               | YES      | Checkbox. Inactive items hidden from billing.
+
+5.7 Bulk Update Mode
+----------------------
+▸ Activated by 'Bulk Update' button. Entire stock column becomes editable inputs.
+▸ Operator tabs through quantities rapidly — designed for restocking scenarios.
+▸ Floating sticky bar at bottom: 'X items changed — Save All' button.
+▸ Cancel exits bulk mode without saving. Save commits all changes in a single
+  batch operation.
+
+================================================================================
+SECTION 6 — Customers Page
+Full customer management with Khata and Advance ledger
+================================================================================
+
+6.1 Customer List
+-------------------
+▸ Search: by name, username, or mobile number. Real-time filter.
+▸ Each customer row shows: Avatar (initials), Name, Username, Mobile, Khata
+  balance (red if >0), Advance balance (green if >0), GHODA coins, order count,
+  last visit date.
+▸ Self-registered customers (from landing page) show a 'Self Reg' badge.
+▸ Clicking a customer opens their full profile in a right panel (desktop) or
+  full-screen drawer (mobile).
+
+6.2 Add Customer Form
+-----------------------
+▸ Triggered by 'New Customer' button. Inline form above the list.
+▸ Fields: Full Name (required), Mobile Number 10-digit (required), Date of Birth
+  (required), Username (auto-generated if blank).
+▸ DOB is required — used for birthday GHODA reward automation.
+▸ On save: customer appears in list immediately (optimistic update). Registration
+  type set to 'admin'.
+
+6.3 Customer Profile Panel
+----------------------------
+Five tabs in the customer profile panel:
+
+Tab           | Content
+--------------|-------------------------------------------------------------
+Profile       | Name, username, mobile, DOB, branch, registration date,
+              | registration type. Khata balance card (with Record Payment
+              | button). Advance balance card (with Add Advance button).
+Khata Ledger  | Full transaction history. Entry types: CREDIT (goods taken),
+              | PAYMENT (customer paid), ADJUSTMENT. Running balance column.
+              | Newest first. Admin can add manual entries with reason.
+Advance Ledger| TOPUP (advance paid), DEDUCTION (used in purchase), REFUND.
+              | Running advance balance. Newest first.
+Orders        | All orders with date, items list, total, payment modes, order
+              | status. Tap to expand itemised view.
+GHODA History | Coin earn/spend transactions. Type, amount (+ or -), reason, date.
+
+6.4 Record Payment Modal
+--------------------------
+▸ Fields: Amount (large input), Payment Mode (Cash / Online), Note / Reference
+  (optional)
+▸ Updates Khata ledger with PAYMENT entry. Running balance reduced immediately.
+▸ Supports partial payment — customer with Rs.4000 Khata can pay Rs.2000;
+  remaining stays as Khata.
+
+6.5 Add Advance Modal
+-----------------------
+▸ Fields: Amount (large input), Payment Mode (Cash / Online), Note
+▸ Creates TOPUP entry in Advance ledger. Advance balance increases.
+▸ Advance balance then appears on billing form when this customer is selected.
+
+6.6 Devaa / Levana Terminology in UI
+--------------------------------------
+Context        | Admin View Label                    | Customer View (My Bethak)
+---------------|-------------------------------------|---------------------------
+Khata Balance  | Levana: Rs.X (collect from customer)| Your Devaa: Rs.X (you owe this)
+Advance Balance| Advance: Rs.X (owed to customer)    | Your Advance: Rs.X (pre-paid balance)
+
+================================================================================
+SECTION 7 — Salary Management
+Worker payroll, advance deductions, and clock-in records
+================================================================================
+
+7.1 Workers List
+------------------
+▸ Table: Name, Role/Designation, Branch, Join Date, Base Salary, Status
+  (Active/Inactive)
+▸ Actions: Edit, Deactivate, View Salary History
+▸ Add Worker: Name, Role, Branch, Join Date, Base Salary.
+▸ Admin sees only their branch workers. Super Admin sees all branches.
+
+7.2 Monthly Salary Records
+----------------------------
+▸ Per worker: Month, Base Salary, Advance Taken, Net Payable (Base - Advance),
+  Status (Paid / Unpaid / Partial)
+▸ Admin can mark as Paid with a payment note.
+▸ Total payroll summary for the month shown at top of section.
+
+7.3 Shift Clock In/Out
+------------------------
+▸ Shift Code system: Admin generates a day code (e.g., 'GK-0508'). Workers
+  enter code + name to clock in.
+▸ Clock in / Clock out timestamps recorded.
+▸ Admin can view all shifts for any day. Manual edit available.
+▸ Monthly total hours per worker automatically calculated from shift records.
+▸ Hours feed into salary calculation context (admin manually decides how to use
+  hours in salary).
+
+================================================================================
+SECTION 8 — Rewards (GHODA) Management
+Admin control over the loyalty coin system
+================================================================================
+
+8.1 Rewards CRUD
+------------------
+▸ List of rewards: Name, Description, GHODA cost, Stock/Availability,
+  Active/Inactive, Branch scope.
+▸ Add Reward: Name, Description, GHODA cost, Stock (set -1 for unlimited),
+  Active toggle, Branch (own branch or Super Admin can set global).
+▸ Edit and delete rewards. Deletion only if reward has never been redeemed.
+▸ Deactivate (soft) if cannot delete — hides from customer redemption.
+
+8.2 GHODA Configuration
+-------------------------
+▸ Earn rate: Rs.X spent = Y GHODA coins (e.g., Rs.10 = 1 GHODA). Configurable
+  per branch.
+▸ Birthday bonus GHODA amount: configurable.
+▸ Streak milestone amounts: configurable (3-day, 7-day, 30-day).
+▸ Referral bonus: GHODA for referrer and referee, configurable.
+▸ Game earn amounts: per game type, configurable.
+▸ Bet limits for O/X 1v1: min and max GHODA per match.
+
+8.3 GHODA Analytics
+---------------------
+▸ Total coins issued this month, total redeemed, total in circulation.
+▸ Top earners list (Bethak usernames, no real names in this view).
+▸ Redemption breakdown by reward type.
+
+================================================================================
+SECTION 9 — Analytics Page (Branch Admin View)
+Deep branch-level analytics for admin decision making
+================================================================================
+
+IMPORTANT: This entire page and all its data is completely hidden from Manager
+role. Route /admin/analytics returns 403 for managers. Navigation item not
+shown in sidebar.
+
+9.1 Date Range Filter
+-----------------------
+▸ Default: Today. Options: Today, Yesterday, This Week, This Month, Last Month,
+  Custom Range.
+▸ Custom range: date picker with start and end date. Applied instantly, no
+  submit button.
+▸ All charts and stats on the page update simultaneously on filter change.
+
+9.2 Revenue Summary Cards
+---------------------------
+Metric               | Details
+---------------------|-------------------------------------------------------------
+Total Revenue        | Sum of all completed order totals in date range
+Total Orders         | Count of completed orders
+Average Order Value  | Total Revenue / Total Orders
+Total Cost (COGS)    | Sum of (qty x cost_price) for all sold items — Admin only
+Gross Profit         | Revenue - COGS — Admin only
+Total Expenses       | Sum of expense entries in date range — Admin only
+Net Profit           | Gross Profit - Total Expenses — Admin only
+Outstanding Khata    | Total Levana across all customers (all-time, not date-filtered)
+
+9.3 Revenue Over Time Chart
+-----------------------------
+▸ Line chart showing revenue per day in selected range.
+▸ X-axis: dates. Y-axis: Rs. revenue.
+▸ Hover tooltip: date, revenue, order count.
+▸ If Bhat branch: shows two lines — BB Cafe revenue and Other revenue
+  stacked/grouped.
+
+9.4 Peak Hour Heatmap
+-----------------------
+▸ Grid: 7 rows (Mon-Sun) x 24 columns (0-23 hours).
+▸ Cell colour intensity proportional to order count in that hour/day combination.
+▸ Colour scale: white (0 orders) to deep orange (max orders).
+▸ Tap/hover: shows exact order count and revenue for that cell.
+▸ Helps admin plan staffing and stock for peak hours.
+
+9.5 Top Items
+---------------
+▸ Two sortable lists side by side: Top 10 by Revenue, Top 10 by Quantity Sold.
+▸ Each item: rank, name, variant, category, value/qty, trend (up/down vs
+  previous period).
+▸ Category filter: all / Smoke / Paan / Beverages / Snacks / BB Cafe.
+
+9.6 Category Breakdown
+------------------------
+▸ Pie/donut chart: revenue split by category.
+▸ Table below chart: each category with revenue, order count, % of total.
+
+9.7 Customer Analytics
+------------------------
+▸ New customers in period (registered by admin or self-registered).
+▸ Returning customers (placed order in this period AND in a previous period).
+▸ Top 10 customers by spend in period: name, mobile, total spend, order count.
+
+9.8 Export
+------------
+▸ Export button top-right: CSV or PDF.
+▸ PDF: formatted report with date range, all charts as images, all tables.
+▸ CSV: raw data rows for spreadsheet analysis.
+▸ Export log: who exported what and when — visible to Super Admin only.
+
+================================================================================
+SECTION 10 — Super Admin Dashboard
+The all-branch command centre — most powerful panel in the system
+================================================================================
+
+The Super Admin dashboard is the most feature-rich, data-dense screen in the
+entire system. It must feel powerful and fully navigable. Super Admin sees
+everything all admins see, plus cross-branch data, global analytics, and system
+management.
+
+10.1 Super Admin Home — Stat Cards (First Row)
+------------------------------------------------
+Eight stat cards in two rows of four on desktop, 2x4 on tablet, scrollable
+1-column on mobile:
+
+Card                       | Value
+---------------------------|----------------------------------------------
+Today's Total Revenue      | Across all branches combined
+Gurukul Revenue Today      | Branch-specific, colour-coded
+Bhat Revenue Today         | Branch-specific
+Visat Revenue Today        | Branch-specific
+Total Outstanding Khata    | Sum of all customer Khata across all branches
+Total GHODA in Circulation | Earned minus spent, all branches
+Total Low Stock Items      | Across all branches
+Active Customers           | Total registered customers across all branches
+
+10.2 Branch Revenue Comparison Chart
+--------------------------------------
+▸ Grouped bar chart: Gurukul, Bhat, Visat — one bar per branch per date.
+▸ Date range selector: Today / Week / Month / Last Month / Custom.
+▸ Toggle: daily view or cumulative view.
+▸ Line chart option for trend analysis.
+▸ Hover tooltip: exact revenue, order count, average order value for that
+  branch on that date.
+
+10.3 Cross-Branch Performance Table
+--------------------------------------
+Metric             | Gurukul | Bhat | Visat | Total
+-------------------|---------|------|-------|-------
+Revenue (Period)   | Rs.X    | Rs.X | Rs.X  | Rs.X
+Orders (Period)    | N       | N    | N     | N
+Avg Order Value    | Rs.X    | Rs.X | Rs.X  | Rs.X
+Customers          | N       | N    | N     | N
+Outstanding Khata  | Rs.X    | Rs.X | Rs.X  | Rs.X
+Low Stock Items    | N       | N    | N     | N
+GHODA Issued       | N       | N    | N     | N
+
+10.4 Super Admin Analytics — All Filters
+------------------------------------------
+▸ Branch filter: All Branches / Gurukul / Bhat / Visat — applies to all charts
+  on the page.
+▸ Date range filter: same as Admin analytics but defaults to This Month.
+▸ Category filter: All / Smoke / Paan / Beverages / Snacks / BB Cafe.
+▸ Metric toggle: Revenue / Orders / Avg Order Value — changes what charts show.
+▸ All filters combinable. URL reflects filter state for shareable links.
+
+10.5 Global Top Items
+-----------------------
+▸ Top 10 items globally (across all applicable branches).
+▸ Branch indicator on each item showing which branch(es) it belongs to.
+▸ Sort by: Revenue, Quantity, Profit Margin (Admin only), Trend.
+
+10.6 Profit Dashboard (Super Admin Exclusive)
+-----------------------------------------------
+▸ Revenue, COGS, Gross Profit, Expenses, Net Profit — for each branch and
+  combined total.
+▸ Profit margin % per branch.
+▸ Month-over-month profit trend chart.
+▸ Item-level margin report: highest and lowest margin items per branch.
+
+10.7 GHODA Economy Overview
+-----------------------------
+▸ Total coins issued vs total redeemed vs total in circulation — donut chart.
+▸ Issuance breakdown: from purchases / from games / from bonuses / from referrals.
+▸ Redemption breakdown: by reward type.
+▸ Game activity: total bets placed, total O/X matches, total wheel spins.
+▸ Leaderboard preview: top 5 GHODA earners this month (Bethak usernames).
+
+10.8 Customer Growth Chart
+----------------------------
+▸ New registrations per day/week/month — line chart.
+▸ Breakdown: self-registered vs admin-added.
+▸ Branch-wise breakdown.
+▸ Total customers milestone tracker.
+
+================================================================================
+SECTION 11 — Super Admin System Management
+Branch control, credentials, announcements, and settings
+================================================================================
+
+11.1 Branch Management
+------------------------
+▸ List of all branches: ID, Name, Location, Admin username, Created date, Status.
+▸ Add New Branch: Name, Location, assign Admin (creates or assigns existing
+  admin account).
+▸ Edit branch: name and location only. Admin assignment via separate credential
+  management.
+▸ Architecture is extensible — adding a new branch requires no code changes,
+  only data entry here.
+
+11.2 Credential Management
+----------------------------
+▸ List of all admin and manager accounts: Username, Role, Branch, Last login,
+  Status.
+▸ Super Admin can: reset password for any admin/manager, change username,
+  deactivate/reactivate account.
+▸ Only Super Admin can change admin credentials. Admins cannot change their own
+  username — only Super Admin can.
+▸ Password reset: generates a temporary password shown once to Super Admin.
+  Admin must change on next login.
+▸ All credential changes are logged with timestamp and Super Admin identity.
+
+11.3 Manager Creation (per Branch)
+------------------------------------
+▸ Super Admin can create managers for any branch. Branch Admin can create
+  managers for their own branch.
+▸ Create Manager form: Username, Password, Branch (dropdown). Manager is
+  immediately active.
+▸ Deactivate manager: account disabled, they cannot log in. Data preserved.
+▸ Super Admin sees all managers across all branches in one table.
+
+11.4 Announcement Board
+-------------------------
+▸ Super Admin sends announcements to: All Branches, or specific branch(es).
+▸ Types: Info (blue banner), Warning (amber banner), Urgent (red banner —
+  dismisses only after reading).
+▸ Expiry date optional. After expiry, announcement is archived, not shown.
+▸ Read receipts: Super Admin can see who has viewed each announcement
+  (username + timestamp).
+▸ Admin can send branch-level announcements to their managers. Same type system.
+
+11.5 Export Logs
+------------------
+▸ Table: who exported, what (report type), date range, format (CSV/PDF),
+  timestamp.
+▸ Only Super Admin can see export logs.
+
+11.6 System Settings
+----------------------
+▸ GHODA earn rate: Rs.X = Y coins (configurable per branch or global).
+▸ GHODA birthday bonus amount.
+▸ Streak milestone coin amounts (3-day, 7-day, 30-day).
+▸ Referral bonus amount (referrer + referee).
+▸ Game limits: daily spins, daily slots, O/X bet min/max.
+▸ Low stock threshold default (per-item can override).
+▸ Seasonal events: create/edit/delete events with name, date range, coin
+  multiplier, branch scope.
+▸ Table management (Bhat only): number of tables, QR code download.
+
+================================================================================
+SECTION 12 — Kitchen Display Screen (KDS)
+Real-time order management for BB Cafe staff
+================================================================================
+
+INFO: Available only at Bhat branch. Accessible to Admin and Manager of Bhat
+only. Route: /kitchen
+
+12.1 KDS Layout
+-----------------
+▸ Full-screen, no sidebar, no header navigation. Just order cards.
+▸ Background: dark (#0F0F1A). No distractions.
+▸ Real-time updates via Supabase Realtime subscription on orders table.
+▸ Sound alert on new order (browser notification API).
+
+12.2 Order Card Design
+------------------------
+Status              | Visual Style
+--------------------|-------------------------------------------------------------
+New (just placed)   | Yellow border, 'NEW' badge, timestamp, table number,
+                    | items list
+Preparing           | Blue border, 'PREPARING' badge, elapsed timer
+Ready               | Green border, 'READY' badge, elapsed timer — auto-archives
+                    | after 5 mins
+
+▸ Each card shows: Table number (large), items list with quantities, time placed,
+  elapsed time, one-tap status update button.
+▸ No customer names, no prices, no financial data visible on KDS.
+▸ Call Waiter requests appear as a pulsing orange 'WAITER CALLED — Table X'
+  overlay card.
+
+12.3 KDS Controls
+-------------------
+▸ Status update: large tap target per card. Single tap advances status:
+  New -> Preparing -> Ready.
+▸ Ready cards auto-collapse after 5 minutes. Can be manually dismissed earlier.
+▸ View toggle: All Orders / New Only / Preparing Only.
+▸ Clock display (large) in top corner for kitchen awareness.
+
+================================================================================
+SECTION 13 — QR Table Ordering Admin Configuration
+Table setup and management for BB Cafe at Bhat
+================================================================================
+
+13.1 Table Management (Admin Setting — Bhat Only)
+---------------------------------------------------
+▸ Admin configures number of tables (e.g., 8 tables).
+▸ Each table gets a permanent QR code — does not expire or change.
+▸ QR codes downloadable as PNG for printing — one-click download per table or
+  bulk download all.
+▸ Table grid in admin panel shows live status of each table: Empty, Occupied,
+  Order Placed, Served, Bill Requested.
+
+13.2 Admin Table Status View
+------------------------------
+▸ Visual grid of all tables. Each tile shows: Table number, status badge, order
+  count if active, time since last activity.
+▸ Clicking a table tile opens the current order for that table (or order history
+  if empty).
+▸ Admin/Manager can update table status manually from this view.
+
+13.3 Incoming QR Orders in Billing
+------------------------------------
+▸ Orders placed via QR appear in a separate 'Table Orders' queue visible on the
+  billing page.
+▸ Admin can review and confirm — or orders auto-confirm and go directly to KDS.
+▸ Setting: auto-confirm table orders (on/off toggle in settings).
+
+================================================================================
+SECTION 14 — Expense Tracker
+Daily operational expenses feeding into profit calculation
+================================================================================
+
+14.1 Add Expense
+------------------
+▸ Fields: Category (dropdown: Rent, Utilities, Supplies, Salary Advance,
+  Miscellaneous, Other), Amount (Rs.), Description (text), Date (date picker,
+  defaults to today).
+▸ Admin logs expenses for their own branch. Super Admin can log for any branch.
+
+14.2 Expense List
+-------------------
+▸ Table: Date, Category, Description, Amount, Logged By.
+▸ Filter by: date range, category, branch (Super Admin only).
+▸ Monthly expense total shown at top.
+▸ Export: CSV / PDF.
+
+14.3 Profit Calculation Integration
+-------------------------------------
+▸ Expense total feeds into: Net Profit = Gross Profit (Revenue - COGS) -
+  Total Expenses.
+▸ This calculation appears on Analytics page (Admin) and Super Admin analytics.
+▸ Cost price per item must be set in inventory for COGS to be accurate.
+
+================================================================================
+SECTION 15 — Manager Dashboard Stripped View
+Operational-only dashboard with zero financial data
+================================================================================
+
+IMPORTANT: Manager dashboard must never show: revenue, profit, expenses, salary
+data, Khata balances, total order values in aggregate, GHODA analytics, or any
+analytics/reports section. These are not hidden with CSS — they are never
+rendered in the component tree for manager role.
+
+15.1 Manager Home Page
+------------------------
+Shown                           | Hidden
+--------------------------------|---------------------------------------
+Today's order count             | Today's revenue
+Low stock item count (clickable)| Profit / expense data
+Quick link to Billing POS       | Khata total
+Quick link to Inventory         | Analytics nav item
+Announcements banner (read-only)| Customer ledger balances
+Clock-in button for own shift   | Salary management
+
+15.2 Manager Sidebar Navigation
+----------------------------------
+▸ Dashboard, Billing / POS, Inventory, Kitchen Display (Bhat only),
+  Announcements (read-only).
+▸ No Customers, No Analytics, No Salary, No Rewards, No Settings, No Branches,
+  No Staff management.
+▸ Attempting to navigate to restricted routes via URL returns a 'Not Authorised'
+  page.
+
+================================================================================
+SECTION 16 — Dark Mode Specification
+Complete dark mode for all dashboard screens
+================================================================================
+
+INFO: Dark mode applies ONLY to admin dashboard screens. The landing page has a
+fixed dark theme — no toggle.
+
+16.1 Dark Mode Token Mapping
+------------------------------
+Element          | Light Mode          | Dark Mode
+-----------------|---------------------|------------------------------
+Page Background  | #F8F9FA             | #0F0F1A
+Sidebar          | #FFFFFF             | #1A1A2E
+Card Background  | #FFFFFF             | #1C1C2E
+Card Border      | #E5E7EB             | #2D2D4E
+Primary Text     | #111827             | #F9FAFB
+Secondary Text   | #6B7280             | #9CA3AF
+Table Header     | #F3F4F6             | #16162A
+Table Alt Row    | #FAFAFA             | #1A1A30
+Input Background | #FFFFFF             | #252540
+Input Border     | #D1D5DB             | #3D3D65
+Active Nav Item  | #1A1A2E / white txt | #E67E22 / black text
+
+16.2 Persistence
+------------------
+▸ Dark mode preference saved to localStorage per user (key: 'bb-dark-mode').
+▸ Applied via document.documentElement.classList.toggle('dark') — Tailwind dark
+  mode class strategy.
+▸ Persists across sessions and page refreshes.
+▸ Toggle in top header bar — sun icon (switch to light) / moon icon (switch to dark).
+
+================================================================================
+SECTION 17 — Dashboard Development Checklist
+Every item that must be built and verified
+================================================================================
+
+17.1 Layout & Shell
+---------------------
+[ ] Sidebar with role-based nav — Super Admin, Admin, Manager each see
+    different items
+[ ] Mobile overlay sidebar with hamburger trigger
+[ ] Top header bar with branch breadcrumb and dark mode toggle
+[ ] Dark mode toggle persisted to localStorage
+[ ] Toast notification system (success, error, warning)
+[ ] Role-based route protection: Manager gets 403 on restricted routes
+
+17.2 Admin Dashboard Home
+---------------------------
+[ ] 4 stat cards (revenue, Khata, orders, stock) — all hidden from Manager
+[ ] Quick actions bar (New Bill, Add Customer, Update Stock, Record Payment)
+[ ] Recent orders table with expandable rows
+[ ] Top Khata customers widget
+[ ] Low stock alerts widget
+[ ] Today's revenue hourly bar chart
+[ ] Announcement banner at top if unread announcements
+
+17.3 Billing POS
+------------------
+[ ] Category tabs (branch-filtered — no BB Cafe on Gurukul/Visat)
+[ ] Subcategory rows with horizontal scrollable card shelves
+[ ] Item cards: tap=+1, double tap/long press=qty editor
+[ ] Customer search bar with autocomplete and Khata/Advance balance display
+[ ] Payment mode selector (Cash, Online sub-types, Khata, Advance)
+[ ] Split bill functionality
+[ ] Exact Cash shortcut button
+[ ] Cart persists to localStorage (offline protection)
+[ ] Order confirmation with receipt view
+[ ] Stock auto-decrements on order confirm via decrement_stock RPC
+[ ] Khata/Advance ledger entries created on order confirm
+
+17.4 Inventory
+----------------
+[ ] Active / Archived / Disposables tab system
+[ ] Sync dot (green = live on billing, grey = not showing on billing)
+[ ] Inline stock editing (click number -> input -> Enter to save)
+[ ] Inline row edit (pencil icon -> all fields editable inline)
+[ ] Archive and Delete Forever (with type-DELETE confirmation)
+[ ] Bulk Update mode with floating Save All bar
+[ ] Add Item form with all required fields including cost price (Admin only)
+[ ] Category and low stock / zero stock filter pills
+[ ] Total inventory value visible to Admin/Super Admin, hidden from Manager
+[ ] Left border colour: red for zero stock, amber for low stock
+
+17.5 Customers
+----------------
+[ ] Customer list with Khata balance, Advance balance, GHODA, order count,
+    last visit
+[ ] Add Customer form (Name, Mobile, DOB required)
+[ ] Customer profile panel: Profile, Khata Ledger, Advance Ledger, Orders,
+    GHODA tabs
+[ ] Record Payment modal (partial payment supported)
+[ ] Add Advance modal
+[ ] Devaa/Levana terminology in customer-facing vs admin-facing labels
+[ ] Realtime subscription on customers table for live sync
+
+17.6 Super Admin
+------------------
+[ ] 8 cross-branch stat cards on home
+[ ] Branch revenue comparison chart with date range and branch filters
+[ ] Cross-branch performance table
+[ ] Profit dashboard (Revenue, COGS, Gross Profit, Expenses, Net Profit
+    per branch)
+[ ] GHODA economy overview with issuance/redemption breakdown
+[ ] Branch management: add/edit branches
+[ ] Credential management: reset/change admin and manager credentials
+[ ] Announcement board: create, type, branch scope, expiry, read receipts
+[ ] System settings: GHODA rates, game limits, seasonal events, table count
+[ ] Export logs: who exported what, when
+
+================================================================================
+END OF DOCUMENT — DASHBOARD PRD
+Bombay Bethak · Dashboard Specification · Confidential · For Antigravity Studio
+================================================================================

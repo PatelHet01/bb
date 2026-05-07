@@ -50,7 +50,7 @@
 
   /* ── Cards ── */
   .card {
-    @apply bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-card;
+    @apply bg-dash-card dark:bg-dash-cardDark rounded-xl border border-dash-border dark:border-dash-borderDark shadow-card;
   }
   .card-hover {
     @apply card transition-shadow duration-200 hover:shadow-card-hover cursor-pointer;
@@ -59,21 +59,21 @@
   /* ── Inputs ── */
   .input {
     @apply w-full px-3 py-2.5 rounded-lg text-sm
-           bg-white dark:bg-zinc-800
-           border border-zinc-200 dark:border-zinc-700
+           bg-white dark:bg-[#252540]
+           border border-zinc-200 dark:border-[#3D3D65]
            text-zinc-900 dark:text-zinc-100
            placeholder:text-zinc-400 dark:placeholder:text-zinc-500
-           focus:outline-none focus:ring-2 focus:ring-zinc-900/20 dark:focus:ring-white/20
-           focus:border-zinc-900 dark:focus:border-white
+           focus:outline-none focus:ring-2 focus:ring-dash-accent/20 dark:focus:ring-dash-accent/20
+           focus:border-dash-accent dark:focus:border-dash-accent
            transition-all duration-150;
   }
   .input-error {
-    @apply border-red-500 focus:ring-red-200;
+    @apply border-dash-danger focus:ring-red-200;
   }
 
   /* ── Labels ── */
   .label {
-    @apply block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 
+    @apply block text-[10px] font-bold text-dash-muted dark:text-dash-mutedDark 
            uppercase tracking-widest mb-1.5;
   }
 
@@ -82,11 +82,11 @@
     @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider;
   }
   .badge-default  { @apply badge bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400; }
-  .badge-dark     { @apply badge bg-zinc-900 dark:bg-white text-white dark:text-zinc-900; }
+  .badge-dark     { @apply badge bg-dash-primary dark:bg-white text-white dark:text-dash-primary; }
   .badge-outline  { @apply badge border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400; }
-  .badge-success  { @apply badge bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400; }
-  .badge-warning  { @apply badge bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400; }
-  .badge-danger   { @apply badge bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400; }
+  .badge-success  { @apply badge bg-emerald-50 dark:bg-emerald-900/20 text-dash-success; }
+  .badge-warning  { @apply badge bg-amber-50 dark:bg-amber-900/20 text-dash-warning; }
+  .badge-danger   { @apply badge bg-red-50 dark:bg-red-900/20 text-dash-danger; }
 
   /* ── Skeleton ── */
   .skeleton { @apply animate-pulse bg-zinc-200 dark:bg-zinc-800 rounded-lg; }
@@ -94,16 +94,16 @@
   /* ── Sidebar Nav ── */
   .nav-link {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-           text-zinc-500 dark:text-zinc-400 
-           hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100
-           transition-all duration-150;
+           text-dash-muted dark:text-dash-mutedDark 
+           hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-dash-text dark:hover:text-dash-textDark
+           transition-all duration-150 border-l-4 border-transparent;
   }
   .nav-link.active {
-    @apply bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-semibold;
+    @apply bg-dash-primary dark:bg-dash-accent text-white dark:text-black font-semibold border-dash-accent dark:border-white;
   }
 
   /* ── Divider ── */
-  .divider { @apply border-t border-zinc-200 dark:border-zinc-800; }
+  .divider { @apply border-t border-dash-border dark:border-dash-borderDark; }
 
   /* ── Stat Card ── */
   .stat-card {
@@ -111,9 +111,9 @@
   }
 
   /* ── Table ── */
-  .tbl-head { @apply px-4 py-3 text-left text-[10px] font-bold text-zinc-500 dark:text-zinc-500 uppercase tracking-widest; }
-  .tbl-cell { @apply px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300; }
-  .tbl-row  { @apply border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors; }
+  .tbl-head { @apply px-4 py-3 text-left text-[10px] font-bold text-dash-muted dark:text-dash-mutedDark uppercase tracking-widest bg-[#F3F4F6] dark:bg-[#16162A]; }
+  .tbl-cell { @apply px-4 py-3 text-sm text-dash-text dark:text-dash-textDark; }
+  .tbl-row  { @apply border-b border-dash-border dark:border-dash-borderDark bg-[#FAFAFA] dark:bg-[#1A1A30] hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors; }
 
   /* ── Payment pill ── */
   .pay-pill {

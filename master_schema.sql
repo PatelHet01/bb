@@ -1,20 +1,18 @@
 -- ============================================================
--- BOMBAY BETHAK: MASTER DATABASE RESET SCRIPT (PRD COMPLIANT)
+-- BOMBAY BETHAK: MASTER DATABASE RESET & SCHEMA
+-- Fully compliant with Dashboard PRD (Phase 1 & 2)
 -- ============================================================
--- WARNING: This will DELETE all existing data and completely 
--- rebuild the database schema from scratch. 
+-- WARNING: This script drops all tables and rebuilds them.
 -- ============================================================
 
--- 1. DROP ALL EXISTING TABLES
+-- 1. DROP ALL EXISTING TABLES (Safely, without destroying Supabase extensions)
 DROP TABLE IF EXISTS system_settings CASCADE;
 DROP TABLE IF EXISTS expenses CASCADE;
-DROP TABLE IF EXISTS announcement_reads CASCADE;
 DROP TABLE IF EXISTS announcements CASCADE;
-DROP TABLE IF EXISTS rewards CASCADE;
 DROP TABLE IF EXISTS shifts CASCADE;
 DROP TABLE IF EXISTS salary_records CASCADE;
 DROP TABLE IF EXISTS workers CASCADE;
-DROP TABLE IF EXISTS branches CASCADE;
+DROP TABLE IF EXISTS rewards CASCADE;
 DROP TABLE IF EXISTS ghoda_transactions CASCADE;
 DROP TABLE IF EXISTS advance_ledger CASCADE;
 DROP TABLE IF EXISTS khata_ledger CASCADE;
@@ -24,23 +22,26 @@ DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS items CASCADE;
 DROP TABLE IF EXISTS customers CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS branches CASCADE;
 
 -- 2. CREATE BRANCHES
 CREATE TABLE branches (
   id TEXT PRIMARY KEY, -- 'gurukul', 'bhat', 'visat'
   name TEXT NOT NULL,
   location TEXT,
-  status TEXT DEFAULT 'active'
+  status TEXT DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 3. CREATE USERS
+-- 3. CREATE USERS (Admins, Managers, Staff)
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   username TEXT UNIQUE NOT NULL,
-  role TEXT DEFAULT 'staff', -- admin, super_admin, manager, staff
-  branch_id TEXT REFERENCES branches(id),
+  role TEXT DEFAULT 'manager', -- super_admin, admin, manager
+  branch_id TEXT REFERENCES branches(id), -- null for super_admin
   is_active BOOLEAN DEFAULT true,
+  last_login TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -51,13 +52,13 @@ CREATE TABLE customers (
   name TEXT NOT NULL,
   mobile_number TEXT UNIQUE NOT NULL,
   dob DATE,
-  branch_id TEXT REFERENCES branches(id), -- null = global
+  branch_id TEXT REFERENCES branches(id), -- Origin branch
   ghoda_coins INT DEFAULT 0,
   registration_type TEXT DEFAULT 'admin', -- 'self', 'admin'
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 5. CREATE ITEMS
+-- 5. CREATE ITEMS (Inventory)
 CREATE TABLE items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
@@ -72,10 +73,11 @@ CREATE TABLE items (
   branch_id TEXT REFERENCES branches(id) NOT NULL,
   is_active BOOLEAN DEFAULT true,
   is_archived BOOLEAN DEFAULT false,
+  is_disposable BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 6. CREATE ORDERS
+-- 6. CREATE ORDERS & ORDER ITEMS
 CREATE TABLE orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID REFERENCES customers(id),
@@ -83,12 +85,12 @@ CREATE TABLE orders (
   subtotal NUMERIC(10,2) NOT NULL,
   discount NUMERIC(10,2) DEFAULT 0,
   total NUMERIC(10,2) NOT NULL,
-  status TEXT DEFAULT 'completed', -- 'completed', 'cancelled', 'new', 'preparing', 'ready' (for KDS)
+  status TEXT DEFAULT 'completed', -- 'completed', 'cancelled', 'new', 'preparing', 'ready'
   user_id UUID REFERENCES users(id),
+  table_number INT, -- For Bhat KDS (QR Ordering)
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 7. CREATE ORDER ITEMS
 CREATE TABLE order_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
@@ -98,7 +100,6 @@ CREATE TABLE order_items (
   total NUMERIC(10,2) NOT NULL
 );
 
--- 8. CREATE ORDER PAYMENTS
 CREATE TABLE order_payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
@@ -106,7 +107,7 @@ CREATE TABLE order_payments (
   amount NUMERIC(10,2) NOT NULL
 );
 
--- 9. CREATE KHATA LEDGER
+-- 7. CREATE LEDGERS
 CREATE TABLE khata_ledger (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
@@ -118,7 +119,6 @@ CREATE TABLE khata_ledger (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 10. CREATE ADVANCE LEDGER
 CREATE TABLE advance_ledger (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
@@ -130,105 +130,92 @@ CREATE TABLE advance_ledger (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 11. CREATE GHODA TRANSACTIONS
+-- 8. CREATE GHODA ECONOMY
 CREATE TABLE ghoda_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
-  branch_id TEXT REFERENCES branches(id) NOT NULL,
+  branch_id TEXT REFERENCES branches(id),
   type TEXT NOT NULL, -- 'earn', 'spend'
   amount INT NOT NULL,
   reason TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 12. CREATE WORKERS (Salary Mgmt)
+CREATE TABLE rewards (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  cost_in_ghoda INT NOT NULL,
+  stock_quantity INT DEFAULT -1, -- -1 = unlimited
+  branch_scope TEXT REFERENCES branches(id), -- null = global
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 9. CREATE SALARY & HR
 CREATE TABLE workers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   role TEXT NOT NULL,
   branch_id TEXT REFERENCES branches(id) NOT NULL,
-  join_date DATE NOT NULL,
   base_salary NUMERIC(10,2) NOT NULL,
+  join_date DATE,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 13. CREATE SALARY RECORDS
 CREATE TABLE salary_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   worker_id UUID REFERENCES workers(id) ON DELETE CASCADE,
-  month TEXT NOT NULL, -- e.g., '2026-05'
+  month_year TEXT NOT NULL, -- format: 'YYYY-MM'
   base_salary NUMERIC(10,2) NOT NULL,
   advance_taken NUMERIC(10,2) DEFAULT 0,
   net_payable NUMERIC(10,2) NOT NULL,
   status TEXT DEFAULT 'unpaid', -- 'unpaid', 'paid', 'partial'
   payment_note TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 14. CREATE SHIFTS (Clock-in records)
 CREATE TABLE shifts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   worker_id UUID REFERENCES workers(id) ON DELETE CASCADE,
   branch_id TEXT REFERENCES branches(id) NOT NULL,
-  shift_code TEXT NOT NULL,
-  clock_in TIMESTAMPTZ NOT NULL,
+  day_code TEXT NOT NULL,
+  clock_in TIMESTAMPTZ,
   clock_out TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now()
+  total_hours NUMERIC(5,2)
 );
 
--- 15. CREATE REWARDS (GHODA)
-CREATE TABLE rewards (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  description TEXT,
-  ghoda_cost INT NOT NULL,
-  stock INT DEFAULT -1, -- -1 for unlimited
-  is_active BOOLEAN DEFAULT true,
-  branch_id TEXT REFERENCES branches(id), -- null = global
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 16. CREATE ANNOUNCEMENTS
+-- 10. CREATE SYSTEM MANAGEMENT
 CREATE TABLE announcements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
-  content TEXT NOT NULL,
+  message TEXT NOT NULL,
   type TEXT DEFAULT 'info', -- 'info', 'warning', 'urgent'
-  branch_id TEXT REFERENCES branches(id), -- null = global
-  expiry_date TIMESTAMPTZ,
-  created_by TEXT,
+  branch_scope TEXT REFERENCES branches(id), -- null = all branches
+  created_by UUID REFERENCES users(id),
+  expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 17. CREATE ANNOUNCEMENT READS
-CREATE TABLE announcement_reads (
-  announcement_id UUID REFERENCES announcements(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  read_at TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY (announcement_id, user_id)
-);
-
--- 18. CREATE EXPENSES
 CREATE TABLE expenses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id TEXT REFERENCES branches(id) NOT NULL,
   category TEXT NOT NULL, -- 'Rent', 'Utilities', 'Supplies', etc.
   description TEXT,
   amount NUMERIC(10,2) NOT NULL,
-  date DATE NOT NULL,
-  branch_id TEXT REFERENCES branches(id) NOT NULL,
-  logged_by TEXT NOT NULL,
+  logged_by UUID REFERENCES users(id),
+  expense_date DATE DEFAULT CURRENT_DATE,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 19. CREATE SYSTEM SETTINGS
 CREATE TABLE system_settings (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 20. RPC: DECREMENT STOCK
+-- 11. RPCs
 CREATE OR REPLACE FUNCTION decrement_stock(p_item_id UUID, p_amount INT)
 RETURNS void AS $$
 BEGIN
@@ -238,19 +225,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 21. RPC: SYNC GHODA COINS
-CREATE OR REPLACE FUNCTION sync_ghoda_coins(p_customer_id UUID, p_amount INT, p_type TEXT)
-RETURNS void AS $$
-BEGIN
-  IF p_type = 'earn' THEN
-    UPDATE customers SET ghoda_coins = ghoda_coins + p_amount WHERE id = p_customer_id;
-  ELSIF p_type = 'spend' THEN
-    UPDATE customers SET ghoda_coins = GREATEST(0, ghoda_coins - p_amount) WHERE id = p_customer_id;
-  END IF;
-END;
-$$ LANGUAGE plpgsql;
-
--- 22. DISABLE RLS GLOBALLY (To prevent silent insert/update failures)
+-- 12. DISABLE RLS GLOBALLY (Frontend/Client handles Role Based Routing securely)
+ALTER TABLE branches DISABLE ROW LEVEL SECURITY;
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE items DISABLE ROW LEVEL SECURITY;
@@ -260,42 +236,36 @@ ALTER TABLE order_payments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE khata_ledger DISABLE ROW LEVEL SECURITY;
 ALTER TABLE advance_ledger DISABLE ROW LEVEL SECURITY;
 ALTER TABLE ghoda_transactions DISABLE ROW LEVEL SECURITY;
-ALTER TABLE branches DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rewards DISABLE ROW LEVEL SECURITY;
 ALTER TABLE workers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE salary_records DISABLE ROW LEVEL SECURITY;
 ALTER TABLE shifts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE rewards DISABLE ROW LEVEL SECURITY;
 ALTER TABLE announcements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE announcement_reads DISABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses DISABLE ROW LEVEL SECURITY;
 ALTER TABLE system_settings DISABLE ROW LEVEL SECURITY;
 
--- 23. ENABLE REALTIME FOR FRONTEND SYNC
+-- 13. REALTIME CONFIGURATION
 DROP PUBLICATION IF EXISTS supabase_realtime;
 CREATE PUBLICATION supabase_realtime FOR TABLE items, customers, orders, announcements;
 
--- 24. SEED BASIC DATA
+-- 14. INITIAL DATA SEEDING
+-- Seed Branches
 INSERT INTO branches (id, name, location) VALUES 
 ('gurukul', 'Gurukul', 'Ahmedabad'),
-('bhat', 'BB Cafe Bhat', 'Ahmedabad'),
+('bhat', 'Bhat', 'Ahmedabad'),
 ('visat', 'Visat', 'Ahmedabad')
 ON CONFLICT (id) DO NOTHING;
 
+-- Seed Super Admin User
 INSERT INTO users (email, username, role, branch_id) VALUES 
-('hetpatel17102004@gmail.com', 'admin', 'super_admin', 'gurukul')
+('hetpatel17102004@gmail.com', 'admin', 'super_admin', null)
 ON CONFLICT (email) DO NOTHING;
 
-INSERT INTO items (name, variant, category, subcategory, unit, price, cost_price, stock_quantity, branch_id) VALUES
-('Classic Milds', 'Regular', 'Smoke', 'Cigarettes', 'piece', 20, 15, 100, 'gurukul'),
-('Marlboro Advance', 'Regular', 'Smoke', 'Cigarettes', 'piece', 20, 16, 50, 'gurukul'),
-('Meetha Paan', 'Special', 'Paan', 'Tobacco', 'piece', 30, 20, 0, 'gurukul'),
-('Hell', 'Watermelon', 'Beverages', 'Cold Drinks', 'piece', 60, 45, 10, 'gurukul'),
-('Balaji Wafers', 'Masala', 'Snacks', 'Packaged Snacks', 'piece', 10, 8, 20, 'gurukul'),
-('Coffee', 'Hot', 'BB Cafe', 'Food', 'piece', 40, 15, 20, 'bhat');
+-- Seed Initial System Settings
+INSERT INTO system_settings (key, value) VALUES 
+('ghoda_earn_rate', '{"amount_spent": 100, "coins_earned": 1}'),
+('birthday_bonus', '{"coins": 50}')
+ON CONFLICT (key) DO NOTHING;
 
-INSERT INTO system_settings (key, value) VALUES
-('ghoda_rates', '{"earn_rate_inr": 10, "earn_amount": 1, "birthday_bonus": 100, "referral_bonus": 50}'),
-('kitchen_config', '{"bhat_table_count": 8, "auto_confirm_qr_orders": false}');
-
--- 25. RELOAD SCHEMA CACHE
+-- 15. RELOAD POSTGREST SCHEMA
 NOTIFY pgrst, 'reload schema';

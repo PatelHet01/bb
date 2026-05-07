@@ -19,6 +19,25 @@ export default {
           900: '#171717',
           950: '#0a0a0a',
         },
+        dash: {
+          bg: '#F8F9FA',
+          bgDark: '#0F0F1A',
+          sidebar: '#FFFFFF',
+          sidebarDark: '#1A1A2E',
+          card: '#FFFFFF',
+          cardDark: '#1C1C2E',
+          border: '#E5E7EB',
+          borderDark: '#2D2D4E',
+          text: '#111827',
+          textDark: '#F9FAFB',
+          muted: '#6B7280',
+          mutedDark: '#9CA3AF',
+          primary: '#1A1A2E',
+          accent: '#E67E22',
+          success: '#27AE60',
+          danger: '#C0392B',
+          warning: '#F39C12'
+        }
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

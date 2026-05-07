@@ -25,19 +25,29 @@ export default function LoginPage() {
   async function handleLogin(e) {
     e.preventDefault()
     const u = username.trim().toLowerCase()
-    const record = HARDCODED_USERS[u]
-    if (!record || record.password !== password) {
-      toast.error('Invalid credentials')
-      return
-    }
     setLoading(true)
-    try {
-      setAuth({ username: u }, record.role, record.branchId, record.branchName)
+    
+    const record = HARDCODED_USERS[u]
+    if (record && record.password === password) {
+      setAuth({ username: u, id: `hardcoded-${u}` }, record.role, record.branchId, record.branchName)
       toast.success(`Signed in as ${u}`)
       navigate('/admin/dashboard', { replace: true })
-    } finally {
       setLoading(false)
+      return
     }
+
+    // DB check for Staff/Managers created via StaffPage
+    const { data } = await supabase.from('users').select('*').eq('username', u).eq('is_active', true).single()
+    if (data && data.password_hash === password) {
+      setAuth({ username: data.username, id: data.id }, data.role, data.branch_id, data.branch_id ? data.branch_id.toUpperCase() : 'All Branches')
+      toast.success(`Signed in as ${data.username}`)
+      navigate('/admin/dashboard', { replace: true })
+      setLoading(false)
+      return
+    }
+
+    toast.error('Invalid credentials or account disabled')
+    setLoading(false)
   }
 
   return (

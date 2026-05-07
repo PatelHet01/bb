@@ -10,19 +10,34 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState({ revenue: 0, orders: 0, profit: 0, avgOrder: 0 })
   const [chartData, setChartData] = useState([])
+  const [dateRange, setDateRange] = useState('7d')
 
-  useEffect(() => { fetchAnalytics() }, [branchId])
+  useEffect(() => { fetchAnalytics() }, [branchId, dateRange])
 
   async function fetchAnalytics() {
     setLoading(true)
     
-    const sevenDaysAgo = new Date()
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    let startDate = null;
+    let daysToGenerate = 7;
+
+    if (dateRange === '7d') {
+      startDate = new Date()
+      startDate.setDate(startDate.getDate() - 7)
+      daysToGenerate = 7;
+    } else if (dateRange === '30d') {
+      startDate = new Date()
+      startDate.setDate(startDate.getDate() - 30)
+      daysToGenerate = 30;
+    } else if (dateRange === 'this_month') {
+      startDate = new Date()
+      startDate.setDate(1) // first day of month
+      daysToGenerate = new Date().getDate() // days passed this month
+    } else if (dateRange === 'all') {
+      daysToGenerate = 30; // fallback chart to 30 days for visual clarity if "all time"
+    }
     
-    let q = supabase.from('orders')
-      .select('created_at, total, status')
-      .gte('created_at', sevenDaysAgo.toISOString())
-      
+    let q = supabase.from('orders').select('created_at, total, status')
+    if (startDate) q = q.gte('created_at', startDate.toISOString())
     if (branchId) q = q.eq('branch_id', branchId)
     
     const { data: ordersData } = await q
@@ -31,11 +46,15 @@ export default function AnalyticsPage() {
     let count = 0
     const dailyMap = {}
     
-    for(let i=6; i>=0; i--) {
+    for(let i = daysToGenerate - 1; i >= 0; i--) {
       const d = new Date()
       d.setDate(d.getDate() - i)
       const dateStr = d.toISOString().split('T')[0]
-      dailyMap[dateStr] = { date: d.toLocaleDateString('en-US', {weekday:'short'}), revenue: 0, orders: 0 }
+      dailyMap[dateStr] = { 
+        date: daysToGenerate <= 7 ? d.toLocaleDateString('en-US', {weekday:'short'}) : d.toLocaleDateString('en-US', {month:'short', day:'numeric'}), 
+        revenue: 0, 
+        orders: 0 
+      }
     }
 
     if (ordersData) {
@@ -67,8 +86,11 @@ export default function AnalyticsPage() {
     <div className="max-w-6xl mx-auto space-y-6 pb-20 animate-fade-in">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-dash-text dark:text-dash-textDark">Analytics & Reports</h1>
-        <select className="input w-48 disabled:opacity-50" disabled>
-          <option>Last 7 Days</option>
+        <select className="input w-48" value={dateRange} onChange={e => setDateRange(e.target.value)}>
+          <option value="7d">Last 7 Days</option>
+          <option value="30d">Last 30 Days</option>
+          <option value="this_month">This Month</option>
+          <option value="all">All Time</option>
         </select>
       </div>
 
@@ -106,7 +128,7 @@ export default function AnalyticsPage() {
 
       {/* Charts */}
       <div className="card p-6 bg-dash-bg dark:bg-zinc-900 border-dash-border dark:border-dash-borderDark">
-        <h3 className="font-bold text-lg mb-6 text-dash-text dark:text-dash-textDark">Revenue Trend (7 Days)</h3>
+        <h3 className="font-bold text-lg mb-6 text-dash-text dark:text-dash-textDark">Revenue Trend</h3>
         {loading ? (
           <div className="h-72 w-full flex items-center justify-center text-dash-muted">Loading chart data...</div>
         ) : (

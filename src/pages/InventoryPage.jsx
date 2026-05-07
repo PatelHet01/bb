@@ -248,12 +248,12 @@ export default function InventoryPage() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target.result;
-      const lines = text.split('\n');
+      const lines = text.split(/\r?\n/);
       if (lines.length < 2) return toast.error('CSV is empty or invalid format');
       
       const headers = lines[0].toLowerCase().split(',');
-      const idIdx = headers.indexOf('id');
-      const stockIdx = headers.indexOf('stock_quantity');
+      const idIdx = headers.findIndex(h => h.includes('id'));
+      const stockIdx = headers.findIndex(h => h.includes('stock_quantity'));
       
       if (idIdx === -1 || stockIdx === -1) {
         return toast.error('CSV must contain "id" and "stock_quantity" columns');
@@ -264,18 +264,11 @@ export default function InventoryPage() {
         const line = lines[i].trim();
         if (!line) continue;
         
-        const row = [];
-        let inQuotes = false;
-        let currentVal = '';
-        for(let char of line) {
-          if(char === '"') { inQuotes = !inQuotes; }
-          else if(char === ',' && !inQuotes) { row.push(currentVal); currentVal = ''; }
-          else { currentVal += char; }
-        }
-        row.push(currentVal);
+        // simple quote-aware split
+        const row = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         
-        const id = row[idIdx]?.replace(/"/g, '').trim();
-        const stockStr = row[stockIdx]?.replace(/"/g, '').trim();
+        const id = row[idIdx]?.replace(/^"|"$/g, '').trim();
+        const stockStr = row[stockIdx]?.replace(/^"|"$/g, '').trim();
         
         if (!id || id.includes('leave_blank') || id === 'id') continue;
         
@@ -290,7 +283,6 @@ export default function InventoryPage() {
       setLoading(true);
       let successCount = 0;
       
-      // Process in small chunks to avoid rate limiting
       const chunkSize = 10;
       for (let i = 0; i < updates.length; i += chunkSize) {
         const chunk = updates.slice(i, i + chunkSize);
@@ -486,15 +478,15 @@ export default function InventoryPage() {
                   if (isEditing) return (
                     <tr key={item.id} className="bg-blue-50/50 dark:bg-blue-900/10">
                       <td colSpan={8} className="p-3">
-                        <div className="grid grid-cols-6 gap-3 items-end">
-                          <div className="col-span-2">
+                        <div className="flex flex-wrap gap-3 items-end">
+                          <div className="flex-1 min-w-[200px]">
                             <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1 block">Name & Variant</label>
                             <div className="flex gap-2">
                               <input className="input flex-1 text-sm py-1.5" value={editForm.name} onChange={e=>setEditForm({...editForm, name:e.target.value})} placeholder="Name"/>
                               <input className="input w-24 text-sm py-1.5" value={editForm.variant || ''} onChange={e=>setEditForm({...editForm, variant:e.target.value})} placeholder="Var"/>
                             </div>
                           </div>
-                          <div className="col-span-2">
+                          <div className="flex-1 min-w-[200px]">
                             <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1 block">Cat & Sub</label>
                             <div className="flex gap-2">
                               <select className="input flex-1 text-sm py-1.5" value={editForm.category} onChange={e=>setEditForm({...editForm, category:e.target.value, subcategory:CATEGORY_SUBCATEGORIES[e.target.value]?.[0]||''})}>
@@ -505,11 +497,17 @@ export default function InventoryPage() {
                               </select>
                             </div>
                           </div>
-                          <div>
+                          <div className="w-24">
                             <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1 block">Price</label>
                             <input type="number" className="input w-full text-sm py-1.5" value={editForm.price} onChange={e=>setEditForm({...editForm, price:e.target.value})}/>
                           </div>
-                          <div className="flex gap-2 justify-end">
+                          {isAdmin && (
+                            <div className="w-24">
+                              <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1 block">Cost P</label>
+                              <input type="number" className="input w-full text-sm py-1.5" value={editForm.cost_price || ''} onChange={e=>setEditForm({...editForm, cost_price:e.target.value})}/>
+                            </div>
+                          )}
+                          <div className="flex gap-2 justify-end ml-auto">
                             <button onClick={saveInlineEdit} className="p-2 bg-emerald-500 text-white rounded shadow hover:bg-emerald-600"><Check size={16}/></button>
                             <button onClick={()=>setEditingRow(null)} className="p-2 bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600"><X size={16}/></button>
                           </div>

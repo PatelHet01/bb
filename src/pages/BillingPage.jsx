@@ -185,9 +185,39 @@ export default function BillingPage() {
         order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
       })))
       
-      // Real DB Stock deduction
+      // Real DB Stock deduction & Disposables Logic
+      let cafeDishCount = 0;
+      let maggiBowlCount = 0;
+
       for (const c of cart) {
         await supabase.rpc('decrement_stock', { p_item_id: c.id, p_amount: c.quantity })
+        
+        if (c.category === 'BB Cafe') {
+          cafeDishCount += c.quantity;
+          if (c.name.toLowerCase().includes('maggi')) {
+             maggiBowlCount += c.quantity;
+          }
+        }
+      }
+
+      if (cafeDishCount > 0 || maggiBowlCount > 0) {
+        const { data: disposables } = await supabase.from('items')
+          .select('id, name')
+          .eq('category', 'Inventory')
+          .eq('subcategory', 'Disposables')
+          .eq('branch_id', target_branch)
+
+        if (disposables && disposables.length > 0) {
+          const dish = disposables.find(d => d.name.toLowerCase().includes('dish') || d.name.toLowerCase().includes('plate'))
+          const bowl = disposables.find(d => d.name.toLowerCase().includes('bowl'))
+          
+          if (dish && cafeDishCount > 0) {
+             await supabase.rpc('decrement_stock', { p_item_id: dish.id, p_amount: cafeDishCount })
+          }
+          if (bowl && maggiBowlCount > 0) {
+             await supabase.rpc('decrement_stock', { p_item_id: bowl.id, p_amount: maggiBowlCount })
+          }
+        }
       }
 
       await supabase.from('order_payments').insert(finalPayments.map(p => ({

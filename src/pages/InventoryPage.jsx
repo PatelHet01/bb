@@ -94,9 +94,19 @@ export default function InventoryPage() {
     if (isNaN(n) || n < 0) return
     const item = items.find(i => i.id === id)
     if (item && item.stock_quantity === n) return // no change
-    await supabase.from('items').update({ stock_quantity: n }).eq('id', id)
+    
+    // Optimistic update
+    const prevItems = [...items]
     setItems(p => p.map(i => i.id === id ? { ...i, stock_quantity: n } : i))
-    toast.success('Stock updated instantly')
+    
+    const { error } = await supabase.from('items').update({ stock_quantity: n }).eq('id', id)
+    if (error) {
+      console.error('Stock update failed:', error)
+      toast.error('Stock update failed')
+      setItems(prevItems) // revert
+    } else {
+      toast.success('Stock updated instantly')
+    }
   }
 
   // --- Bulk Stock Edit ---
@@ -420,7 +430,11 @@ export default function InventoryPage() {
                       </td>
                       <td className="tbl-cell">
                         <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{CATEGORY_ICONS[item.category]} {item.category}</div>
-                        <div className="text-[10px] text-zinc-400 uppercase tracking-wider">{item.subcategory || <span className="text-red-400">UNASSIGNED</span>}</div>
+                        <div className="text-[10px] uppercase tracking-wider mt-0.5">
+                          {item.subcategory ? <span className="text-zinc-500">{item.subcategory}</span> : (
+                            <button onClick={() => startEdit(item)} className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded font-bold border border-amber-200 dark:border-amber-800 hover:bg-amber-200 transition-colors">Assign Subcategory</button>
+                          )}
+                        </div>
                       </td>
                       <td className="tbl-cell text-center">
                         {bulkMode ? (
@@ -463,15 +477,15 @@ export default function InventoryPage() {
                       </td>
                       {canEdit && (
                         <td className="tbl-cell text-right">
-                          <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={()=>startEdit(item)} className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 rounded" title="Edit row"><Edit2 size={15}/></button>
+                          <div className="flex gap-1 justify-end">
+                            <button onClick={()=>startEdit(item)} className="p-2 md:p-1.5 text-zinc-400 hover:text-ember hover:bg-ember/10 rounded-lg transition-colors" title="Edit row"><Edit2 size={18}/></button>
                             {mainTab === 'Archived' ? (
                               <>
-                                <button onClick={()=>toggleArchive(item.id, true)} className="p-1.5 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50 rounded" title="Restore"><RefreshCw size={15}/></button>
-                                {isAdmin && <button onClick={()=>deleteForever(item.id, item.name)} className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded" title="Delete Forever"><Trash2 size={15}/></button>}
+                                <button onClick={()=>toggleArchive(item.id, true)} className="p-2 md:p-1.5 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="Restore"><RefreshCw size={18}/></button>
+                                {isAdmin && <button onClick={()=>deleteForever(item.id, item.name)} className="p-2 md:p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Forever"><Trash2 size={18}/></button>}
                               </>
                             ) : (
-                              <button onClick={()=>toggleArchive(item.id, false)} className="p-1.5 text-zinc-400 hover:text-amber-500 hover:bg-amber-50 rounded" title="Archive"><Archive size={15}/></button>
+                              <button onClick={()=>toggleArchive(item.id, false)} className="p-2 md:p-1.5 text-zinc-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors" title="Archive"><Archive size={18}/></button>
                             )}
                           </div>
                         </td>

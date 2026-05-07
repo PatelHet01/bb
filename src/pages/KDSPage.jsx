@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
-import { useAuthStore } from '../store/authStore'
-import { Utensils, Check, Clock, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Utensils, Check, Clock, Trash2, ArrowLeft } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function KDSPage() {
   const { branchId } = useAuthStore()
+  const navigate = useNavigate()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -48,9 +47,18 @@ export default function KDSPage() {
   return (
     <div className="min-h-screen bg-[#0F0F1A] text-white -m-4 md:-m-6 p-4 md:p-6 animate-fade-in">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2 text-dash-accent">
-          <Utensils /> Kitchen Display Screen (KDS)
-        </h1>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => navigate('/admin/dashboard')} 
+            className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-colors"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-2xl font-bold flex items-center gap-2 text-dash-accent">
+            <Utensils /> Kitchen Display Screen (KDS)
+          </h1>
+        </div>
         <div className="text-sm text-zinc-400">
           Branch: {branchId || 'All'} | {orders.length} Active Orders
         </div>

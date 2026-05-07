@@ -35,8 +35,10 @@ export default function InventoryPage() {
 
   const activeBranch = branchId || 'gurukul'
   const branchCats = BRANCH_CATEGORY_MAP[activeBranch] || Object.values(BRANCH_CATEGORY_MAP).flat().filter((v,i,a)=>a.indexOf(v)===i)
-  const canEdit = role !== 'manager'
+  const isManager = role === 'manager'
   const isAdmin = role === 'admin' || role === 'super_admin'
+  const canDefineItems = isAdmin || role === 'super_admin' // Only admins can create/delete/archive
+  const canManageStock = true // Managers and Admins can update stock quantities
 
   async function fetchItems() {
     let q = supabase.from('items').select('*').order('category').order('name')
@@ -322,27 +324,32 @@ export default function InventoryPage() {
             )}
           </div>
         </div>
-        {canEdit && (
-          <div className="flex flex-wrap gap-2">
-            <button className="btn-secondary btn-sm" onClick={handleExportCSV} title="Download CSV template with current items">
-              <Download size={14} /> Export CSV
+        <div className="flex gap-2 w-full sm:w-auto">
+          {canManageStock && (
+            <button onClick={toggleBulkMode} className={`btn-secondary flex-1 sm:flex-none ${bulkMode ? 'bg-emerald-500 text-white border-emerald-500' : ''}`}>
+              <Edit2 size={16} /> {bulkMode ? 'Exit Bulk Edit' : 'Bulk Update Stock'}
             </button>
-            <label className="btn-secondary btn-sm cursor-pointer" title="Upload modified CSV to bulk update stock">
-              <Upload size={14} /> Upload CSV
+          )}
+          <button onClick={handleExportCSV} className="btn-secondary flex-1 sm:flex-none">
+            <Download size={16} /> Export
+          </button>
+          {canManageStock && (
+            <label className="btn-secondary flex-1 sm:flex-none cursor-pointer">
+              <Upload size={16} /> Import
               <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
             </label>
-            <div className="w-px h-8 bg-zinc-200 dark:bg-zinc-800 mx-1 hidden sm:block"></div>
-            <button className={`btn-secondary btn-sm ${bulkMode ? 'ring-2 ring-emerald-500' : ''}`} onClick={toggleBulkMode}>
-              <RefreshCw size={14} className={bulkMode ? 'animate-spin-slow text-emerald-500' : ''} /> Bulk Update
-            </button>
-            <button className="btn-primary btn-sm shadow-md" onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Paan' })) }}>
-              <Plus size={14} /> Add Item
-            </button>
-            <button className="btn-secondary btn-sm" onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Inventory', subcategory: 'Disposables', price: 0 })) }}>
-              <Plus size={14} /> Add Disposable
-            </button>
-          </div>
-        )}
+          )}
+          {canDefineItems && (
+            <div className="flex gap-2">
+              <button onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Paan' })) }} className="btn-primary flex-1 sm:flex-none">
+                <Plus size={16} /> Add Item
+              </button>
+              <button onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Inventory', subcategory: 'Disposables', price: 0 })) }} className="btn-secondary flex-1 sm:flex-none">
+                <Plus size={16} /> Add Disposable
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Tabs */}
@@ -356,7 +363,7 @@ export default function InventoryPage() {
       </div>
 
       {/* Add form */}
-      {showForm && canEdit && (
+      {showForm && canDefineItems && (
         <div className="card p-5 animate-slide-up border-2 border-ember/20 shadow-xl">
           <div className="flex justify-between items-center mb-4">
             <h2 className="font-bold text-zinc-900 dark:text-white text-lg">New {form.category === 'Inventory' ? 'Disposable' : 'Item'}</h2>
@@ -463,7 +470,7 @@ export default function InventoryPage() {
                 {mainTab !== 'Disposables' && <th className="tbl-head text-right w-24">MRP (₹)</th>}
                 {isAdmin && <th className="tbl-head text-right w-24">Value (₹)</th>}
                 <th className="tbl-head text-center w-24">Status</th>
-                {canEdit && <th className="tbl-head text-right w-24">Actions</th>}
+                {canDefineItems && <th className="tbl-head text-right w-24">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
@@ -561,7 +568,7 @@ export default function InventoryPage() {
                         </td>
                       )}
                       <td className="tbl-cell text-center">
-                        {canEdit ? (
+                        {canDefineItems ? (
                           <button onClick={() => {
                               supabase.from('items').update({ is_active: !item.is_active }).eq('id', item.id)
                               setItems(p=>p.map(i=>i.id===item.id?{...i, is_active:!item.is_active}:i))
@@ -573,7 +580,7 @@ export default function InventoryPage() {
                           <span className={item.is_active ? 'badge-success' : 'badge-default'}>{item.is_active ? 'Active' : 'Inactive'}</span>
                         )}
                       </td>
-                      {canEdit && (
+                      {canDefineItems && (
                         <td className="tbl-cell text-right">
                           <div className="flex gap-1 justify-end">
                             <button onClick={()=>startEdit(item)} className="p-2 md:p-1.5 text-zinc-400 hover:text-ember hover:bg-ember/10 rounded-lg transition-colors" title="Edit row"><Edit2 size={18}/></button>

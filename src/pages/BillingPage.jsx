@@ -388,7 +388,6 @@ export default function BillingPage() {
     setTimeout(() => { w.print(); w.close() }, 400)
   }
 
-  const isBhatBranch = (branchId || selectedBranch) === 'bhat'
 
   if (receipt) return (
     <div className="max-w-sm mx-auto animate-slide-up pt-10">

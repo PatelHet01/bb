@@ -1,8 +1,8 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3 } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -29,6 +29,12 @@ export default function BillingPage() {
   const [payments, setPayments] = useState([{ mode: 'CASH', subtype: '', amount: 0 }])
   const [receipt, setReceipt] = useState(null)
   const [loading, setLoading] = useState(true)
+
+  // Table billing (Bhat only)
+  const [cafeTables, setCafeTables] = useState([])
+  const [selectedTable, setSelectedTable] = useState(null) // { id, table_number, current_order_id }
+  const [loadingTable, setLoadingTable] = useState(false)
+  const isBhatBranch = (branchId || selectedBranch) === 'bhat'
 
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
   const totalPaid = payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
@@ -61,11 +67,25 @@ export default function BillingPage() {
         .neq('category', 'Inventory')
         .eq('is_active', true)
         .eq('is_archived', false)
-        
       setItems(data || [])
       setLoading(false)
     }
     fetchInventory()
+  }, [branchId, selectedBranch])
+
+  // Fetch cafe tables for Bhat
+  useEffect(() => {
+    const branch = branchId || selectedBranch
+    if (branch !== 'bhat') { setCafeTables([]); return }
+    async function fetchTables() {
+      const { data } = await supabase.from('cafe_tables').select('*').eq('branch_id', 'bhat').order('table_number')
+      setCafeTables(data || [])
+    }
+    fetchTables()
+    const ch = supabase.channel('billing_tables')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cafe_tables', filter: 'branch_id=eq.bhat' }, fetchTables)
+      .subscribe()
+    return () => supabase.removeChannel(ch)
   }, [branchId, selectedBranch])
 
   useEffect(() => {
@@ -91,6 +111,45 @@ export default function BillingPage() {
     const khataBal = (khata.data || []).reduce((sum, l) => l.type === 'CREDIT' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
     const advBal = (adv.data || []).reduce((sum, l) => l.type === 'TOPUP' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
     setCustBalances({ khata: khataBal, advance: advBal })
+  }
+
+  // Load table order into cart
+  async function loadTableOrder(table) {
+    if (!table.current_order_id) {
+      // Just select the table, empty cart
+      setSelectedTable(table)
+      setCart([])
+      toast(`Table ${table.table_number} selected — cart cleared`)
+      return
+    }
+    setLoadingTable(true)
+    const { data: orderItems } = await supabase
+      .from('order_items')
+      .select('*, items(*)')
+      .eq('order_id', table.current_order_id)
+    setSelectedTable(table)
+    if (orderItems && orderItems.length > 0) {
+      const cartItems = orderItems.map(oi => ({
+        ...oi.items,
+        quantity: oi.quantity,
+        price: oi.price,
+      }))
+      setCart(cartItems)
+      toast.success(`Loaded ${cartItems.length} items from Table ${table.table_number}`)
+    } else {
+      setCart([])
+    }
+    // Link customer from order if available
+    const { data: ord } = await supabase.from('orders').select('customer_id, customers(*)').eq('id', table.current_order_id).single()
+    if (ord?.customers) selectCustomer(ord.customers)
+    setLoadingTable(false)
+  }
+
+  function clearTable() {
+    setSelectedTable(null)
+    setCart([])
+    setCustomer(null)
+    setCustBalances({ khata: 0, advance: 0 })
   }
 
   function deselectCustomer() {
@@ -167,14 +226,31 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const target_branch = branchId || selectedBranch
-      const { data: order, error } = await supabase.from('orders').insert({
-        customer_id: customer?.id || null, branch_id: target_branch, subtotal: total, discount: 0, total, status: 'completed'
-      }).select().single()
-      if (error) throw error
-
-      await supabase.from('order_items').insert(cart.map(c => ({
-        order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
-      })))
+      // If billing from a table, update the existing order; otherwise create new
+      let order
+      if (selectedTable?.current_order_id) {
+        const { data: updatedOrder, error } = await supabase.from('orders')
+          .update({ customer_id: customer?.id || null, subtotal: total, total, status: 'completed' })
+          .eq('id', selectedTable.current_order_id)
+          .select().single()
+        if (error) throw error
+        order = updatedOrder
+        // Replace order items with final cart
+        await supabase.from('order_items').delete().eq('order_id', order.id)
+        await supabase.from('order_items').insert(cart.map(c => ({
+          order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
+        })))
+      } else {
+        const { data: newOrder, error } = await supabase.from('orders').insert({
+          customer_id: customer?.id || null, branch_id: target_branch, subtotal: total, discount: 0, total, status: 'completed',
+          table_number: selectedTable?.table_number || null,
+        }).select().single()
+        if (error) throw error
+        order = newOrder
+        await supabase.from('order_items').insert(cart.map(c => ({
+          order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
+        })))
+      }
       
       // Real DB Stock deduction & Disposables Logic
       let cafeDishCount = 0;
@@ -240,8 +316,13 @@ export default function BillingPage() {
         }
       }
 
-      setReceipt({ order, cart: [...cart], total, customer, payments: finalPayments })
-      setCart([]); setCustomer(null); setCustomerSearch(''); 
+      setReceipt({ order, cart: [...cart], total, customer, payments: finalPayments, tableNumber: selectedTable?.table_number })
+      // Clear table
+      if (selectedTable) {
+        await supabase.from('cafe_tables').update({ status: 'available', current_order_id: null }).eq('id', selectedTable.id)
+        setSelectedTable(null)
+      }
+      setCart([]); setCustomer(null); setCustomerSearch('');
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       setCartExpanded(false)
       toast.success('Bill generated!')
@@ -268,6 +349,47 @@ export default function BillingPage() {
     }
   }
 
+  function printBillPDF(r) {
+    const isBhat = (branchId || selectedBranch) === 'bhat'
+    if (!isBhat) return
+    const rows = r.cart.map(c =>
+      `<tr><td>${c.name}${c.variant ? ' <small>('+c.variant+')</small>' : ''}</td><td style="text-align:center">${c.quantity}</td><td style="text-align:right">₹${(c.price*c.quantity).toLocaleString('en-IN')}</td></tr>`
+    ).join('')
+    const payRows = r.payments.map(p =>
+      `<tr><td>${p.mode}${p.subtype ? ' - '+p.subtype : ''}</td><td style="text-align:right">₹${parseFloat(p.amount).toLocaleString('en-IN')}</td></tr>`
+    ).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>BB Cafe Bill</title><style>
+      body{font-family:Arial,sans-serif;max-width:320px;margin:0 auto;padding:16px;font-size:12px;}
+      h2{text-align:center;margin:0;font-size:16px;letter-spacing:2px;}
+      .sub{text-align:center;color:#666;font-size:10px;margin-bottom:8px;}
+      table{width:100%;border-collapse:collapse;margin:8px 0;}
+      td{padding:4px 2px;vertical-align:top;}
+      .divider{border-top:1px dashed #000;margin:8px 0;}
+      .total-row td{font-weight:bold;font-size:14px;padding-top:6px;}
+      .footer{text-align:center;font-size:10px;color:#888;margin-top:12px;}
+      @media print{body{margin:0;padding:8px;}}
+    </style></head><body>
+      <h2>BB CAFE</h2>
+      <div class="sub">Bhat · Order #${r.order.id.slice(0,8).toUpperCase()}</div>
+      <div class="sub">${new Date().toLocaleString('en-IN')}</div>
+      ${r.customer ? `<div class="sub">Customer: <b>${r.customer.name}</b>${r.customer.mobile_number ? ' · '+r.customer.mobile_number : ''}</div>` : ''}
+      <div class="divider"></div>
+      <table><thead><tr><th style="text-align:left">Item</th><th>Qty</th><th style="text-align:right">Amt</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="divider"></div>
+      <table><tbody><tr class="total-row"><td>TOTAL</td><td style="text-align:right">₹${r.total.toLocaleString('en-IN')}</td></tr></tbody></table>
+      <div class="divider"></div>
+      <table><thead><tr><th style="text-align:left">Payment</th><th style="text-align:right">Amount</th></tr></thead><tbody>${payRows}</tbody></table>
+      <div class="footer">Thank you for visiting Bombay Bethak!<br>bombay-bethak.vercel.app</div>
+    </body></html>`
+    const w = window.open('', '_blank', 'width=400,height=600')
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print(); w.close() }, 400)
+  }
+
+  const isBhatBranch = (branchId || selectedBranch) === 'bhat'
+
   if (receipt) return (
     <div className="max-w-sm mx-auto animate-slide-up pt-10">
       <div className="card overflow-hidden">
@@ -289,7 +411,14 @@ export default function BillingPage() {
               <span>Total</span><span className="text-lg">₹{receipt.total.toLocaleString('en-IN')}</span>
             </div>
           </div>
-          <button className="btn-primary w-full mt-4 btn-lg" autoFocus onClick={() => setReceipt(null)}>+ New Bill</button>
+          <div className="flex gap-3 mt-4">
+            <button className="btn-primary flex-1 btn-lg" autoFocus onClick={() => setReceipt(null)}>+ New Bill</button>
+            {isBhatBranch && (
+              <button className="btn-secondary flex items-center gap-2 px-4" onClick={() => printBillPDF(receipt)}>
+                <Printer size={16} /> PDF
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -325,6 +454,40 @@ export default function BillingPage() {
       {/* MIDDLE: Items Grid (The POS area) */}
       <div className="flex-1 flex flex-col min-w-0 bg-ink-50 dark:bg-ink-950 pb-16 md:pb-0 relative overflow-hidden">
         
+        {/* Table Selector — Bhat only */}
+        {isBhatBranch && cafeTables.length > 0 && (
+          <div className="p-2 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800">
+            <div className="flex items-center gap-2 mb-1.5 px-1">
+              <Grid3X3 size={12} className="text-ink-400" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-ink-400">Tables</span>
+              {selectedTable && (
+                <button onClick={clearTable} className="ml-auto text-[10px] font-bold text-red-400 hover:text-red-600">✕ Clear Table</button>
+              )}
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+              {cafeTables.map(t => {
+                const isSelected = selectedTable?.id === t.id
+                const isOccupied = t.status === 'occupied'
+                const isAvail = t.status === 'available'
+                return (
+                  <button key={t.id}
+                    onClick={() => loadTableOrder(t)}
+                    disabled={loadingTable}
+                    className={`flex-shrink-0 w-14 h-12 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
+                      isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
+                      isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
+                      isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
+                      'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
+                    }`}>
+                    <span>{t.table_number}</span>
+                    <span className="text-[8px] font-bold opacity-60 capitalize">{t.status}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Customer Bar */}
         <div className="p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex items-center gap-2 shadow-sm z-20">
           {customer ? (

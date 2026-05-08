@@ -13,6 +13,7 @@ export default function CustomersPage() {
   const [form, setForm] = useState({ username: '', name: '', mobile_number: '', dob: '', branch_id: branchId || 'gurukul' })
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(null)
+  const [editingId, setEditingId] = useState(null)
   
   const [khataLedger, setKhataLedger] = useState([])
   const [advanceLedger, setAdvanceLedger] = useState([])
@@ -68,7 +69,7 @@ export default function CustomersPage() {
     return () => supabase.removeChannel(chan)
   }, [branchId])
 
-  async function handleAdd(e) {
+  async function handleSave(e) {
     e.preventDefault()
     if (!form.name || form.mobile_number.length !== 10 || !form.dob) { 
       toast.error('Fill required fields correctly')
@@ -76,34 +77,62 @@ export default function CustomersPage() {
     }
     setSaving(true)
     
-    const username = form.username || form.name.split(' ')[0].toLowerCase() + Math.floor(Math.random() * 1000)
-    
-    const newCustomer = {
-      username: username.toLowerCase(),
-      name: form.name,
-      mobile_number: form.mobile_number,
-      dob: form.dob,
-      branch_id: form.branch_id,
-      ghoda_coins: 0,
-      registration_type: 'admin'
-    }
-    
     try {
-      const { data, error } = await supabase.from('customers').insert(newCustomer).select().single()
-      if (error) throw error
+      if (editingId) {
+        const { data, error } = await supabase.from('customers')
+          .update({
+            name: form.name,
+            mobile_number: form.mobile_number,
+            dob: form.dob,
+            branch_id: form.branch_id,
+            username: form.username.toLowerCase()
+          })
+          .eq('id', editingId)
+          .select().single()
+        
+        if (error) throw error
+        toast.success('Customer updated')
+        setCustomers(prev => prev.map(c => c.id === editingId ? { ...c, ...data } : c))
+        if (selected?.id === editingId) setSelected({ ...selected, ...data })
+      } else {
+        const username = form.username || form.name.split(' ')[0].toLowerCase() + Math.floor(Math.random() * 1000)
+        const { data, error } = await supabase.from('customers').insert({
+          username: username.toLowerCase(),
+          name: form.name,
+          mobile_number: form.mobile_number,
+          dob: form.dob,
+          branch_id: form.branch_id,
+          ghoda_coins: 0,
+          registration_type: 'admin'
+        }).select().single()
+        
+        if (error) throw error
+        toast.success('Customer added')
+        setCustomers(prev => [{ ...data, khataBalance: 0, advanceBalance: 0, totalPurchases: 0, lastVisit: null }, ...prev].sort((a,b) => a.name.localeCompare(b.name)))
+      }
       
-      toast.success('Customer added')
       setForm({ username: '', name: '', mobile_number: '', dob: '', branch_id: branchId || 'gurukul' })
       setShowForm(false)
-      
-      // Optimistic update
-      setCustomers(prev => [{ ...data, khataBalance: 0, advanceBalance: 0, totalPurchases: 0, lastVisit: null }, ...prev].sort((a,b) => a.name.localeCompare(b.name)))
-      
+      setEditingId(null)
     } catch (e) {
       toast.error(e.message)
     } finally {
       setSaving(false)
     }
+  }
+
+  function startEdit(c, e) {
+    if (e) e.stopPropagation()
+    setForm({ 
+      name: c.name, 
+      mobile_number: c.mobile_number, 
+      dob: c.dob || '', 
+      username: c.username, 
+      branch_id: c.branch_id || 'gurukul' 
+    })
+    setEditingId(c.id)
+    setShowForm(true)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function viewCustomer(c) {
@@ -217,8 +246,8 @@ export default function CustomersPage() {
 
         {showForm && (
           <div className="p-5 bg-ember-50/50 dark:bg-ember-900/10 border-b border-ember-100 dark:border-ember-900/30 animate-slide-up">
-            <h3 className="font-bold text-sm mb-3">Add New Customer</h3>
-            <form onSubmit={handleAdd} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <h3 className="font-bold text-sm mb-3">{editingId ? 'Edit Customer' : 'Add New Customer'}</h3>
+            <form onSubmit={handleSave} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Full Name *</label>
                 <input className="input" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="John Doe" required />
@@ -246,8 +275,8 @@ export default function CustomersPage() {
                 </div>
               )}
               <div className="sm:col-span-2 flex justify-end gap-2 mt-2">
-                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn-primary px-6" disabled={saving}>{saving ? 'Saving…' : 'Create'}</button>
+                <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditingId(null); }}>Cancel</button>
+                <button type="submit" className="btn-primary px-6" disabled={saving}>{saving ? 'Saving…' : (editingId ? 'Update' : 'Create')}</button>
               </div>
             </form>
           </div>
@@ -276,6 +305,12 @@ export default function CustomersPage() {
                       {c.lastVisit && <span className="text-ink-400 text-[10px]">Visited: {new Date(c.lastVisit).toLocaleDateString()}</span>}
                     </div>
                   </div>
+                </div>
+                
+                <div className="flex items-center gap-2 grow justify-end px-2">
+                  <button onClick={(e) => startEdit(c, e)} className="p-2 text-ink-400 hover:text-ember hover:bg-ember/10 rounded-lg transition-all">
+                    <Edit2 size={16} />
+                  </button>
                 </div>
 
                 <div className="flex flex-col items-end gap-1">
@@ -306,7 +341,12 @@ export default function CustomersPage() {
               <div className="w-16 h-16 rounded-2xl bg-white text-ink-900 flex items-center justify-center font-black text-3xl uppercase">{selected.name[0]}</div>
               <div>
                 <h2 className="font-black text-2xl leading-none">{selected.name}</h2>
-                <p className="text-sm text-ink-400 font-mono mt-1">@{selected.username} · {selected.mobile_number}</p>
+                <div className="flex items-center gap-3 mt-2">
+                  <p className="text-sm text-ink-400 font-mono">@{selected.username} · {selected.mobile_number}</p>
+                  <button onClick={(e) => startEdit(selected, e)} className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-all text-white/80 hover:text-white">
+                    <Edit2 size={14}/>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

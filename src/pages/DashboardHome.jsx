@@ -22,9 +22,20 @@ export default function DashboardHome() {
       try {
         const today = new Date().toISOString().split('T')[0]
 
-        let oQ = supabase.from('orders').select('id, order_number, total, created_at, table_number, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
+        let oQ = supabase.from('orders').select('id, order_number, total, created_at, table_number, order_type, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
         if (branchId) oQ = oQ.eq('branch_id', branchId)
-        const { data: orders } = await oQ.order('created_at', { ascending: false })
+        const { data: orders, error: ordersError } = await oQ.order('created_at', { ascending: false })
+        if (ordersError) throw ordersError
+
+        // Fetch payments separately to ensure reliability
+        const { data: allPayments, error: payError } = await supabase.from('order_payments').select('*').in('order_id', orders.map(o => o.id))
+        if (payError) console.error('Error fetching payments:', payError)
+        
+        // Map payments to orders
+        const ordersWithPayments = orders.map(o => ({
+          ...o,
+          order_payments: (allPayments || []).filter(p => p.order_id === o.id)
+        }))
 
         let cQ = supabase.from('customers').select('id', { count: 'exact', head: true })
         if (branchId) cQ = cQ.eq('branch_id', branchId)
@@ -63,22 +74,22 @@ export default function DashboardHome() {
 
         // Calculate Cash/Online
         let cashRev = 0; let onlineRev = 0;
-        (orders || []).forEach(o => {
+        (ordersWithPayments || []).forEach(o => {
           (o.order_payments || []).forEach(p => {
             if (p.mode === 'CASH') cashRev += Number(p.amount);
-            if (p.mode === 'UPI') onlineRev += Number(p.amount);
+            if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD', 'GPAY', 'PHONEPE', 'ONLINE'].includes(p.mode)) onlineRev += Number(p.amount);
           })
         })
 
         setStats({
-          revenue: orders?.reduce((s, o) => s + (o.total || 0), 0) || 0,
+          revenue: ordersWithPayments?.reduce((s, o) => s + (o.total || 0), 0) || 0,
           cashRev, onlineRev,
-          orders: orders?.length || 0,
+          orders: ordersWithPayments?.length || 0,
           customers: custCount || 0,
           outKhata: outKhataTotal
         })
-        setRecentOrders(orders || [])
-        setTodayOrders(orders || [])
+        setRecentOrders(ordersWithPayments || [])
+        setTodayOrders(ordersWithPayments || [])
       } catch (e) {
         console.error(e)
       } finally {
@@ -180,11 +191,15 @@ export default function DashboardHome() {
                         <td className="tbl-cell font-semibold text-ink-900 dark:text-white">₹{o.total.toLocaleString('en-IN')}</td>
                         <td className="tbl-cell">
                           <div className="flex gap-1 flex-wrap">
-                            {(o.order_payments || []).map((p, idx) => (
-                              <span key={idx} className={`badge text-[9px] ${p.mode === 'UPI' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : p.mode === 'CASH' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-ink-100 text-ink-600'}`}>
-                                {p.mode}
-                              </span>
-                            ))}
+                            {o.order_payments && o.order_payments.length > 0 ? (
+                              o.order_payments.map((p, idx) => (
+                                <span key={idx} className={`badge text-[9px] ${['UPI', 'ONLINE', 'GPAY', 'PHONEPE', 'PAYTM', 'CREDIT_CARD', 'DEBIT_CARD'].includes(p.mode) ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : p.mode === 'CASH' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-ink-100 text-ink-600'}`}>
+                                  {p.mode}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-ink-400 italic">No payment logged</span>
+                            )}
                           </div>
                         </td>
                       </tr>

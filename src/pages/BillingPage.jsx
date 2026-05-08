@@ -25,10 +25,16 @@ export default function BillingPage() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [custBalances, setCustBalances] = useState({ khata: 0, advance: 0 })
 
-  // Payments
+  // Payments & Checkout
   const [payments, setPayments] = useState([{ mode: 'CASH', subtype: '', amount: 0 }])
-  const [receipt, setReceipt] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [orderType, setOrderType] = useState('Dine-in')
+
+  // Search & New Customer
+  const [itemSearch, setItemSearch] = useState('')
+  const [showAddCustomer, setShowAddCustomer] = useState(false)
+  const [newCustName, setNewCustName] = useState('')
+  const [addingCust, setAddingCust] = useState(false)
 
   // Table billing (Bhat only)
   const [cafeTables, setCafeTables] = useState([])
@@ -104,6 +110,7 @@ export default function BillingPage() {
     setCustomer(c)
     setDropdownOpen(false)
     setCustomerSearch('')
+    setShowAddCustomer(false)
     const [khata, adv] = await Promise.all([
       supabase.from('khata_ledger').select('type,amount').eq('customer_id', c.id),
       supabase.from('advance_ledger').select('type,amount').eq('customer_id', c.id)
@@ -111,6 +118,25 @@ export default function BillingPage() {
     const khataBal = (khata.data || []).reduce((sum, l) => l.type === 'CREDIT' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
     const advBal = (adv.data || []).reduce((sum, l) => l.type === 'TOPUP' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
     setCustBalances({ khata: khataBal, advance: advBal })
+  }
+
+  async function quickAddCustomer() {
+    if (!newCustName || !customerSearch) { toast.error('Enter name and 10-digit mobile number'); return }
+    setAddingCust(true)
+    try {
+      const { data, error } = await supabase.from('customers').insert({
+        name: newCustName,
+        mobile_number: customerSearch,
+        branch_id: branchId || selectedBranch
+      }).select().single()
+      if (error) throw error
+      toast.success('Customer registered!')
+      selectCustomer(data)
+    } catch (e) {
+      toast.error('Registration failed: ' + e.message)
+    } finally {
+      setAddingCust(false)
+    }
   }
 
   // Load table order into cart
@@ -230,7 +256,7 @@ export default function BillingPage() {
       let order
       if (selectedTable?.current_order_id) {
         const { data: updatedOrder, error } = await supabase.from('orders')
-          .update({ customer_id: customer?.id || null, subtotal: total, total, status: 'completed' })
+          .update({ customer_id: customer?.id || null, subtotal: total, total, status: 'completed', order_type: orderType })
           .eq('id', selectedTable.current_order_id)
           .select().single()
         if (error) throw error
@@ -243,7 +269,7 @@ export default function BillingPage() {
       } else {
         const { data: newOrder, error } = await supabase.from('orders').insert({
           customer_id: customer?.id || null, branch_id: target_branch, subtotal: total, discount: 0, total, status: 'completed',
-          table_number: selectedTable?.table_number || null,
+          table_number: selectedTable?.table_number || null, order_type: orderType
         }).select().single()
         if (error) throw error
         order = newOrder
@@ -316,16 +342,24 @@ export default function BillingPage() {
         }
       }
 
-      setReceipt({ order, cart: [...cart], total, customer, payments: finalPayments, tableNumber: selectedTable?.table_number })
+      // Silent Receipt Generation for Bhat
+      const receiptData = { order, cart: [...cart], total, customer, payments: finalPayments, tableNumber: selectedTable?.table_number }
+      const isBhat = (branchId || selectedBranch) === 'bhat'
+      if (isBhat) {
+        // Run print seamlessly in background
+        printBillPDF(receiptData)
+      }
+
       // Clear table
       if (selectedTable) {
         await supabase.from('cafe_tables').update({ status: 'available', current_order_id: null }).eq('id', selectedTable.id)
         setSelectedTable(null)
       }
-      setCart([]); setCustomer(null); setCustomerSearch('');
+      // RESET POS (Blanking)
+      setCart([]); setCustomer(null); setCustomerSearch(''); setOrderType('Dine-in'); setShowAddCustomer(false); setNewCustName('');
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       setCartExpanded(false)
-      toast.success('Bill generated!')
+      toast.success('Bill generated & cart cleared!')
     } catch (e) {
       toast.error('Failed: ' + e.message)
     } finally {
@@ -388,62 +422,46 @@ export default function BillingPage() {
     setTimeout(() => { w.print(); w.close() }, 400)
   }
 
-
-  if (receipt) return (
-    <div className="max-w-sm mx-auto animate-slide-up pt-10">
-      <div className="card overflow-hidden">
-        <div className="bg-ink-900 dark:bg-white px-6 py-8 text-center">
-          <CheckCircle2 size={40} className="text-white dark:text-ink-900 mx-auto mb-3" />
-          <h2 className="text-xl font-bold text-white dark:text-ink-900">Bill Created</h2>
-          <p className="text-ink-400 dark:text-ink-600 text-sm mt-1 font-mono">#{receipt.order.order_number || receipt.order.id.slice(0, 8).toUpperCase()}</p>
-        </div>
-        <div className="p-5 space-y-4">
-          {receipt.customer && <div className="flex justify-between text-sm"><span className="text-ink-500">Customer</span><span className="font-semibold">{receipt.customer.name}</span></div>}
-          <div className="border border-ink-200 dark:border-ink-700 rounded-xl overflow-hidden divide-y divide-ink-100 dark:divide-ink-800">
-            {receipt.cart.map((c, i) => (
-              <div key={i} className="flex justify-between px-4 py-2 text-sm">
-                <span className="text-ink-600 dark:text-ink-400">{c.name} {c.variant && <span className="text-[10px] bg-ink-100 dark:bg-ink-800 px-1 rounded ml-1">{c.variant}</span>} <span className="text-ink-400 ml-1">× {c.quantity}</span></span>
-                <span className="font-semibold">₹{(c.price * c.quantity).toLocaleString('en-IN')}</span>
-              </div>
-            ))}
-            <div className="flex justify-between px-4 py-3 bg-ink-50 dark:bg-ink-800 font-bold">
-              <span>Total</span><span className="text-lg">₹{receipt.total.toLocaleString('en-IN')}</span>
-            </div>
-          </div>
-          <div className="flex gap-3 mt-4">
-            <button className="btn-primary flex-1 btn-lg" autoFocus onClick={() => setReceipt(null)}>+ New Bill</button>
-            {isBhatBranch && (
-              <button className="btn-secondary flex items-center gap-2 px-4" onClick={() => printBillPDF(receipt)}>
-                <Printer size={16} /> PDF
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-
   const activeSubcategories = useMemo(() => {
-    const subs = items
-      .filter(i => i.category === activeCategory)
-      .map(i => i.subcategory)
-      .filter(Boolean)
+    let filtered = items
+    if (itemSearch) {
+      filtered = filtered.filter(i => (i.name||'').toLowerCase().includes(itemSearch.toLowerCase()) || (i.variant||'').toLowerCase().includes(itemSearch.toLowerCase()))
+    } else {
+      filtered = filtered.filter(i => i.category === activeCategory)
+    }
+    const subs = filtered.map(i => i.subcategory).filter(Boolean)
     return [...new Set(subs)].sort()
-  }, [items, activeCategory])
+  }, [items, activeCategory, itemSearch])
 
-  const activeItems = items.filter(i => i.category === activeCategory)
+  const activeItems = useMemo(() => {
+    if (itemSearch) return items.filter(i => (i.name||'').toLowerCase().includes(itemSearch.toLowerCase()) || (i.variant||'').toLowerCase().includes(itemSearch.toLowerCase()))
+    return items.filter(i => i.category === activeCategory)
+  }, [items, activeCategory, itemSearch])
   const subcategories = activeSubcategories
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-5rem)] -m-4 md:-m-6 bg-ink-100 dark:bg-ink-950 relative overflow-hidden">
       
-      {/* LEFT / TOP: Category Tabs */}
-      <div className="md:w-32 lg:w-40 bg-white dark:bg-ink-900 border-b md:border-b-0 md:border-r border-ink-200 dark:border-ink-800 flex-shrink-0 z-10 overflow-x-auto md:overflow-y-auto no-scrollbar">
-        <div className="flex md:flex-col gap-2 p-3">
+      {/* LEFT / TOP: Category Tabs & Menu Search */}
+      <div className="md:w-32 lg:w-40 bg-white dark:bg-ink-900 border-b md:border-b-0 md:border-r border-ink-200 dark:border-ink-800 flex-shrink-0 z-10 flex flex-col overflow-hidden">
+        <div className="p-2 border-b border-ink-200 dark:border-ink-800">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
+            <input 
+              type="text" 
+              placeholder="Menu Search..." 
+              className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-lg pl-8 pr-2 py-2 text-xs focus:ring-2 focus:ring-ember outline-none"
+              value={itemSearch}
+              onChange={e => setItemSearch(e.target.value)}
+            />
+            {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={12}/></button>}
+          </div>
+        </div>
+        <div className="flex-1 overflow-x-auto md:overflow-y-auto no-scrollbar flex md:flex-col p-1.5 md:p-3 gap-1 md:gap-2">
           {availableTabs.map(cat => (
-            <button key={cat} onClick={() => setActiveCategory(cat)}
+            <button key={cat} onClick={() => { setActiveCategory(cat); setItemSearch(''); }}
               className={`px-4 py-3 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base font-bold whitespace-nowrap md:whitespace-normal text-left transition-all flex flex-col md:gap-1 
-              ${activeCategory === cat ? 'bg-ember text-white shadow-md shadow-ember/20' : 'bg-ink-50 dark:bg-ink-950/50 text-ink-600 dark:text-ink-400 hover:bg-ink-100 dark:hover:bg-ink-800'}`}>
+              ${activeCategory === cat && !itemSearch ? 'bg-ember text-white shadow-md shadow-ember/20' : 'bg-ink-50 dark:bg-ink-950/50 text-ink-600 dark:text-ink-400 hover:bg-ink-100 dark:hover:bg-ink-800'}`}>
               {cat}
             </button>
           ))}
@@ -511,13 +529,22 @@ export default function BillingPage() {
             <div className="flex-1 relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
               <input className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none" placeholder="Select Customer..." value={customerSearch} onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }} />
-              {dropdownOpen && customerResults.length > 0 && (
+              {dropdownOpen && customerSearch.length > 0 && (
                 <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-xl shadow-modal overflow-hidden">
                   {customerResults.map(c => (
                     <button key={c.id} className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0" onClick={() => selectCustomer(c)}>
-                      <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username}</span></p>
+                      <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username || c.mobile_number}</span></p>
                     </button>
                   ))}
+                  {customerResults.length === 0 && customerSearch.length >= 10 && (
+                    <div className="p-3">
+                      <p className="text-xs text-ink-500 mb-2">Customer not found. Register?</p>
+                      <button onClick={() => { setShowAddCustomer(true); setDropdownOpen(false) }} className="btn-secondary w-full py-2 flex justify-center text-sm"><UserPlus size={14} className="mr-2"/> Add New Customer</button>
+                    </div>
+                  )}
+                  {customerResults.length === 0 && customerSearch.length < 10 && (
+                    <div className="p-4 text-center text-xs text-ink-400">No results found</div>
+                  )}
                 </div>
               )}
             </div>
@@ -657,11 +684,38 @@ export default function BillingPage() {
         {/* Checkout Panel */}
         <div className="bg-white dark:bg-ink-900 p-4 border-t border-ink-200 dark:border-ink-800 shadow-[0_-10px_20px_rgba(0,0,0,0.03)] pb-[env(safe-area-inset-bottom)]">
           {cart.length > 0 && (
-            <div className="mb-4 space-y-2">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Payment Mode</span>
-                <button onClick={addPaymentSplit} className="text-[10px] font-bold text-ember bg-ember/10 hover:bg-ember/20 px-2 py-1 rounded transition-colors">Split Bill</button>
+            <div className="mb-4 space-y-3">
+              {/* Add Customer Inline Form */}
+              {showAddCustomer && (
+                <div className="p-3 bg-ember/5 border border-ember/20 rounded-xl space-y-2 mb-2 animate-slide-up">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-black text-ember uppercase tracking-widest">New Customer</span>
+                    <button onClick={() => setShowAddCustomer(false)} className="text-ink-400 hover:text-ink-900"><X size={14}/></button>
+                  </div>
+                  <input className="input text-sm w-full py-2 bg-white" placeholder="Customer Name" value={newCustName} onChange={e => setNewCustName(e.target.value)} autoFocus />
+                  <input className="input text-sm w-full py-2 bg-white text-ink-500" value={customerSearch} disabled />
+                  <button onClick={quickAddCustomer} disabled={addingCust} className="btn-primary w-full py-2.5 text-sm">{addingCust ? 'Registering...' : 'Save & Link Customer'}</button>
+                </div>
+              )}
+
+              {/* Order Type Toggle */}
+              <div>
+                <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest mb-1.5 block">Order Type</span>
+                <div className="flex bg-ink-50 dark:bg-ink-950 p-1 rounded-lg">
+                  {['Dine-in', 'Parcel (BB)', 'Parcel (Swiggy)'].map(type => (
+                    <button key={type} onClick={() => setOrderType(type)} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${orderType === type ? 'bg-white dark:bg-ink-800 shadow text-ink-900 dark:text-white' : 'text-ink-500 hover:text-ink-700'}`}>
+                      {type}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Payments */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Payment Mode</span>
+                  <button onClick={addPaymentSplit} className="text-[10px] font-bold text-ember bg-ember/10 hover:bg-ember/20 px-2 py-1 rounded transition-colors">Split Bill</button>
+                </div>
               {payments.map((p, i) => (
                 <div key={i} className="flex gap-2 items-center bg-ink-50 dark:bg-ink-950 p-2 rounded-xl border border-ink-200 dark:border-ink-800">
                   <select className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 text-xs font-bold p-2.5 rounded-lg w-24 focus:ring-1 focus:ring-ember outline-none appearance-none" value={p.mode} onChange={e => updatePayment(i, 'mode', e.target.value)}>

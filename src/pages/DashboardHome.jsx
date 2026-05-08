@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard } from 'lucide-react'
+import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 export default function DashboardHome() {
@@ -10,6 +10,12 @@ export default function DashboardHome() {
   const [lowStockItems, setLowStockItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [recentOrders, setRecentOrders] = useState([])
+  const [todayOrders, setTodayOrders] = useState([])
+  
+  // Modal states
+  const [activeModal, setActiveModal] = useState(null) // 'revenue', 'khata', 'orders', 'customers'
+  const [khataList, setKhataList] = useState([])
+  const [recentCustomers, setRecentCustomers] = useState([])
 
   useEffect(() => {
     async function fetchStats() {
@@ -31,11 +37,29 @@ export default function DashboardHome() {
         const lowStockList = (items || []).filter(i => i.stock_quantity <= (i.low_stock_threshold || 5))
         setLowStockItems(lowStockList)
 
-        let kQ = supabase.from('khata_ledger').select('type,amount')
+        let kQ = supabase.from('khata_ledger').select('type, amount, customers(id, name, mobile_number)')
         if (branchId) kQ = kQ.eq('branch_id', branchId)
         const { data: khataLedger } = await kQ
         
-        const outKhata = (khataLedger || []).reduce((sum, l) => l.type === 'CREDIT' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
+        let khataBalances = {}
+        let outKhataTotal = 0
+        ;(khataLedger || []).forEach(l => {
+          const amt = Number(l.amount)
+          const isCredit = l.type === 'CREDIT'
+          outKhataTotal += isCredit ? amt : -amt
+          
+          if (l.customers) {
+            const cid = l.customers.id
+            if (!khataBalances[cid]) khataBalances[cid] = { customer: l.customers, balance: 0 }
+            khataBalances[cid].balance += isCredit ? amt : -amt
+          }
+        })
+        setKhataList(Object.values(khataBalances).filter(k => k.balance > 0).sort((a,b) => b.balance - a.balance))
+
+        let rCQ = supabase.from('customers').select('id, name, mobile_number, created_at').order('created_at', { ascending: false }).limit(20)
+        if (branchId) rCQ = rCQ.eq('branch_id', branchId)
+        const { data: recCust } = await rCQ
+        setRecentCustomers(recCust || [])
 
         // Calculate Cash/Online
         let cashRev = 0; let onlineRev = 0;
@@ -51,9 +75,10 @@ export default function DashboardHome() {
           cashRev, onlineRev,
           orders: orders?.length || 0,
           customers: custCount || 0,
-          outKhata
+          outKhata: outKhataTotal
         })
         setRecentOrders((orders || []).slice(0, 5))
+        setTodayOrders(orders || [])
       } catch (e) {
         console.error(e)
       } finally {
@@ -64,10 +89,10 @@ export default function DashboardHome() {
   }, [branchId])
 
   const STATS = [
-    { label: "Today's Revenue", value: `₹${stats.revenue.toLocaleString('en-IN')}`, icon: TrendingUp, trend: '+', subtext: `Cash: ₹${stats.cashRev.toLocaleString('en-IN')} | UPI: ₹${stats.onlineRev.toLocaleString('en-IN')}` },
-    { label: 'Out. Khata (Levana)', value: `₹${stats.outKhata.toLocaleString('en-IN')}`, icon: CreditCard, trend: null, color: 'text-red-500' },
-    { label: 'Orders Today',    value: stats.orders,    icon: ShoppingCart, trend: null },
-    { label: 'Customers',       value: stats.customers, icon: Users, trend: null },
+    { id: 'revenue', label: "Today's Revenue", value: `₹${stats.revenue.toLocaleString('en-IN')}`, icon: TrendingUp, trend: '+', subtext: `Cash: ₹${stats.cashRev.toLocaleString('en-IN')} | UPI: ₹${stats.onlineRev.toLocaleString('en-IN')}` },
+    { id: 'khata', label: 'Out. Khata (Levana)', value: `₹${stats.outKhata.toLocaleString('en-IN')}`, icon: CreditCard, trend: null, color: 'text-red-500' },
+    { id: 'orders', label: 'Orders Today',    value: stats.orders,    icon: ShoppingCart, trend: null },
+    { id: 'customers', label: 'Customers',       value: stats.customers, icon: Users, trend: null },
   ]
 
   return (
@@ -90,7 +115,7 @@ export default function DashboardHome() {
         {loading
           ? Array(4).fill(0).map((_, i) => <div key={i} className="skeleton h-24 rounded-xl" />)
           : STATS.map((s, i) => (
-            <div key={i} className="stat-card">
+            <button key={i} onClick={() => setActiveModal(s.id)} className="stat-card text-left hover:scale-[1.02] transition-transform cursor-pointer focus:outline-none focus:ring-2 focus:ring-ember relative">
               <div className="flex-1 min-w-0">
                 <p className="label mb-2">{s.label}</p>
                 <p className={`text-2xl font-bold tracking-tight ${s.color || 'text-ink-900 dark:text-white'}`}>{s.value}</p>
@@ -100,7 +125,7 @@ export default function DashboardHome() {
               <div className="w-9 h-9 rounded-xl bg-ink-100 dark:bg-ink-800 flex items-center justify-center flex-shrink-0">
                 <s.icon size={16} className="text-ink-600 dark:text-ink-400" strokeWidth={2} />
               </div>
-            </div>
+            </button>
           ))
         }
       </div>
@@ -199,6 +224,103 @@ export default function DashboardHome() {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      {activeModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setActiveModal(null)}>
+          <div className="bg-white dark:bg-ink-900 rounded-2xl shadow-modal w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh] animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-900">
+              <h2 className="font-bold text-lg text-ink-900 dark:text-white">
+                {activeModal === 'revenue' ? "Today's Revenue Breakdown" :
+                 activeModal === 'khata' ? 'Outstanding Khata (Levana)' :
+                 activeModal === 'orders' ? "Today's Orders" :
+                 "Recent Customers"}
+              </h2>
+              <button onClick={() => setActiveModal(null)} className="p-2 text-ink-400 hover:text-ink-900 dark:hover:text-white bg-white dark:bg-ink-800 rounded-lg border border-ink-200 dark:border-ink-700"><X size={16}/></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto no-scrollbar">
+              {activeModal === 'revenue' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/30 rounded-xl">
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400">Cash Collections</span>
+                    <span className="text-xl font-black text-emerald-700 dark:text-emerald-400">₹{stats.cashRev.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30 rounded-xl">
+                    <span className="font-bold text-indigo-700 dark:text-indigo-400">Online (UPI) Collections</span>
+                    <span className="text-xl font-black text-indigo-700 dark:text-indigo-400">₹{stats.onlineRev.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="text-center pt-4">
+                    <p className="text-sm text-ink-500">Total: <span className="font-bold text-ink-900 dark:text-white">₹{stats.revenue.toLocaleString('en-IN')}</span></p>
+                  </div>
+                </div>
+              )}
+
+              {activeModal === 'khata' && (
+                <div className="space-y-3">
+                  {khataList.length === 0 ? <p className="text-center text-ink-400 py-4">No outstanding khata balances.</p> :
+                   khataList.map(k => (
+                     <div key={k.customer.id} className="flex justify-between items-center p-3 border border-ink-100 dark:border-ink-800 rounded-xl">
+                       <div>
+                         <p className="font-bold text-ink-900 dark:text-white">{k.customer.name}</p>
+                         <p className="text-[10px] text-ink-500 font-mono">{k.customer.mobile_number}</p>
+                       </div>
+                       <p className="font-black text-red-500">₹{k.balance}</p>
+                     </div>
+                   ))
+                  }
+                  <Link to="/admin/customers" className="btn-secondary w-full justify-center mt-4 text-sm">View All Customers</Link>
+                </div>
+              )}
+
+              {activeModal === 'orders' && (
+                <div className="space-y-3">
+                  {todayOrders.length === 0 ? <p className="text-center text-ink-400 py-4">No orders today.</p> :
+                   todayOrders.map(o => (
+                     <div key={o.id} className="flex justify-between items-center p-3 border border-ink-100 dark:border-ink-800 rounded-xl">
+                       <div>
+                         <p className="font-bold text-sm text-ink-900 dark:text-white">
+                           {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
+                           <span className="ml-2 text-[10px] font-normal text-ink-400">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
+                         </p>
+                         <p className="text-[10px] text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
+                       </div>
+                       <div className="text-right">
+                         <p className="font-black text-ink-900 dark:text-white">₹{o.total}</p>
+                         <div className="flex gap-1 justify-end mt-1">
+                           {(o.order_payments||[]).map((p,i) => <span key={i} className="text-[8px] font-bold px-1 py-0.5 bg-ink-100 dark:bg-ink-800 rounded text-ink-500">{p.mode}</span>)}
+                         </div>
+                       </div>
+                     </div>
+                   ))
+                  }
+                </div>
+              )}
+
+              {activeModal === 'customers' && (
+                <div className="space-y-3">
+                  <p className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-4">Total Customers: {stats.customers}</p>
+                  {recentCustomers.length === 0 ? <p className="text-center text-ink-400 py-4">No recent customers found.</p> :
+                   recentCustomers.map(c => (
+                     <div key={c.id} className="flex justify-between items-center p-3 border border-ink-100 dark:border-ink-800 rounded-xl">
+                       <div className="flex items-center gap-3">
+                         <div className="w-8 h-8 rounded-full bg-ember/10 text-ember flex items-center justify-center font-bold">{c.name[0]?.toUpperCase()}</div>
+                         <div>
+                           <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name}</p>
+                           <p className="text-[10px] text-ink-500 font-mono">{c.mobile_number}</p>
+                         </div>
+                       </div>
+                       <p className="text-[10px] text-ink-400">{new Date(c.created_at).toLocaleDateString('en-IN', {month:'short', day:'numeric'})}</p>
+                     </div>
+                   ))
+                  }
+                  <Link to="/admin/customers" className="btn-secondary w-full justify-center mt-4 text-sm">Manage Customers</Link>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

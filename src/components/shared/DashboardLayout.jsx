@@ -3,7 +3,7 @@ import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
-  BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode
+  BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -12,6 +12,7 @@ const NAV = [
   { to: '/admin/billing',   label: 'Billing / POS',icon: ShoppingCart,    roles: ['super_admin','admin','manager'] },
   { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'] },
   { to: '/admin/tables',    label: 'Tables & QR',  icon: QrCode,          roles: ['super_admin','admin','manager'] },
+  { to: '/admin/menu',      label: 'BB Cafe Menu', icon: Coffee,          roles: ['super_admin','admin','manager'] },
   { to: '/admin/customers', label: 'Customers',    icon: Users,           roles: ['super_admin','admin'] },
   { to: '/admin/salary',    label: 'Salary',       icon: Users,           roles: ['super_admin','admin'] },
   { to: '/admin/rewards',   label: 'Rewards (GHODA)', icon: Gift,      roles: ['super_admin','admin'] },

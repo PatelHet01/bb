@@ -17,6 +17,7 @@ import AnnouncementsPage from '../pages/AnnouncementsPage'
 import ExpensesPage from '../pages/ExpensesPage'
 import SettingsPage from '../pages/SettingsPage'
 import TableManagementPage from '../pages/TableManagementPage'
+import MenuPage from '../pages/MenuPage'
 import GamesPage from '../pages/GamesPage'
 import LandingPage from '../pages/LandingPage'
 import MyBethakLogin from '../pages/MyBethakLogin'
@@ -84,6 +85,9 @@ export default function AppRoutes() {
         } />
         <Route path="tables" element={
           <AdminRoute allowedRoles={['super_admin', 'admin', 'manager']}><TableManagementPage /></AdminRoute>
+        } />
+        <Route path="menu" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin', 'manager']}><MenuPage /></AdminRoute>
         } />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Route>

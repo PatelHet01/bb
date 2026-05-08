@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
@@ -9,12 +10,13 @@ const UNITS = ['piece','gram','ml','kg','litre','pack','session']
 
 export default function InventoryPage() {
   const { branchId, role } = useAuthStore()
+  const [searchParams] = useSearchParams()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
   const [mainTab, setMainTab] = useState('Active') // Active, Archived, Disposables
-  const [lowStockFilter, setLowStockFilter] = useState(false)
+  const [lowStockFilter, setLowStockFilter] = useState(searchParams.get('filter') === 'low_stock')
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
   const [showForm, setShowForm] = useState(false)

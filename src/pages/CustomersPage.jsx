@@ -392,7 +392,7 @@ export default function CustomersPage() {
                 {ordersHistory.map(o => (
                   <div key={o.id} className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
                     <div className="flex justify-between items-center border-b border-ink-100 dark:border-ink-800 pb-2 mb-2">
-                      <p className="font-mono text-xs font-bold text-ink-500">#{o.id.slice(0,8).toUpperCase()}</p>
+                      <p className="font-mono text-xs font-bold text-ink-500">#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
                       <p className="font-black text-lg text-ink-900 dark:text-white">₹{o.total}</p>
                     </div>
                     <div className="flex justify-between items-end text-xs">

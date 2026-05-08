@@ -295,13 +295,13 @@ export default function BillingPage() {
         if (p.mode === 'KHATA') {
           await supabase.from('khata_ledger').insert({
             customer_id: customer.id, branch_id: target_branch, type: 'CREDIT', amount: parseFloat(p.amount),
-            reason: `Order #${order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username
+            reason: `Order #${order.order_number || order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username
           })
         }
         if (p.mode === 'ADVANCE') {
           await supabase.from('advance_ledger').insert({
             customer_id: customer.id, branch_id: target_branch, type: 'DEDUCTION', amount: parseFloat(p.amount),
-            reason: `Order #${order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username
+            reason: `Order #${order.order_number || order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username
           })
         }
       }
@@ -370,7 +370,7 @@ export default function BillingPage() {
       @media print{body{margin:0;padding:8px;}}
     </style></head><body>
       <h2>BB CAFE</h2>
-      <div class="sub">Bhat · Order #${r.order.id.slice(0,8).toUpperCase()}</div>
+      <div class="sub">Bhat · Order #${r.order.order_number || r.order.id.slice(0,8).toUpperCase()}</div>
       <div class="sub">${new Date().toLocaleString('en-IN')}</div>
       ${r.customer ? `<div class="sub">Customer: <b>${r.customer.name}</b>${r.customer.mobile_number ? ' · '+r.customer.mobile_number : ''}</div>` : ''}
       <div class="divider"></div>
@@ -395,7 +395,7 @@ export default function BillingPage() {
         <div className="bg-ink-900 dark:bg-white px-6 py-8 text-center">
           <CheckCircle2 size={40} className="text-white dark:text-ink-900 mx-auto mb-3" />
           <h2 className="text-xl font-bold text-white dark:text-ink-900">Bill Created</h2>
-          <p className="text-ink-400 dark:text-ink-600 text-sm mt-1 font-mono">#{receipt.order.id.slice(0, 8).toUpperCase()}</p>
+          <p className="text-ink-400 dark:text-ink-600 text-sm mt-1 font-mono">#{receipt.order.order_number || receipt.order.id.slice(0, 8).toUpperCase()}</p>
         </div>
         <div className="p-5 space-y-4">
           {receipt.customer && <div className="flex justify-between text-sm"><span className="text-ink-500">Customer</span><span className="font-semibold">{receipt.customer.name}</span></div>}

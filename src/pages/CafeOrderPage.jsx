@@ -168,7 +168,7 @@ export default function CafeOrderPage() {
         </p>
         <div style={{ marginTop: '1.5rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '1.25rem', display: 'inline-block' }}>
           <div style={{ fontSize: '0.65rem', letterSpacing: '0.3em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.5rem' }}>ORDER ID</div>
-          <div style={{ fontFamily: 'monospace', fontWeight: 900 }}>#{orderPlaced.id.slice(0, 8).toUpperCase()}</div>
+          <div style={{ fontFamily: 'monospace', fontWeight: 900 }}>#{orderPlaced.order_number || orderPlaced.id.slice(0, 8).toUpperCase()}</div>
         </div>
         <p style={{ marginTop: '1rem', color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem' }}>Your order is being prepared 🎉</p>
       </div>

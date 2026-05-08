@@ -115,7 +115,7 @@ export default function MyBethakDashboard() {
                     {orders.map(o => (
                       <div key={o.id} style={{ ...S.card, marginBottom: 0 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
-                          <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)' }}>#{o.id.slice(0,8).toUpperCase()}</p>
+                          <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)' }}>#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
                           <p style={{ fontWeight: 900, fontSize: '1.1rem' }}>₹{o.total}</p>
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.4rem' }}>

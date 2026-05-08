@@ -42,6 +42,11 @@ export default function BillingPage() {
   const [loadingTable, setLoadingTable] = useState(false)
   const isBhatBranch = (branchId || selectedBranch) === 'bhat'
 
+  // Order Management
+  const [editingOrderId, setEditingOrderId] = useState(null)
+  const [showOrdersModal, setShowOrdersModal] = useState(false)
+  const [recentOrders, setRecentOrders] = useState([])
+
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
   const totalPaid = payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
 
@@ -137,6 +142,62 @@ export default function BillingPage() {
     } finally {
       setAddingCust(false)
     }
+  }
+
+  async function fetchRecentOrders() {
+    const today = new Date().toISOString().split('T')[0]
+    let q = supabase.from('orders').select('*, customers(name), order_payments(mode, amount), order_items(quantity, price, items(name, variant))').gte('created_at', today).order('created_at', {ascending: false})
+    if (branchId || selectedBranch) q = q.eq('branch_id', branchId || selectedBranch)
+    const { data } = await q
+    setRecentOrders(data || [])
+  }
+
+  async function editOrder(order) {
+    if (order.status === 'cancelled') { toast.error('Order is cancelled'); return }
+    setLoading(true)
+    const { data: orderItems } = await supabase.from('order_items').select('*, items(*)').eq('order_id', order.id)
+    const cartItems = orderItems.map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
+    setCart(cartItems)
+    setEditingOrderId(order.id)
+    setOrderType(order.order_type || 'Dine-in')
+    if (order.customer_id && order.customers) {
+      setCustomer({ id: order.customer_id, name: order.customers.name })
+      const [khata, adv] = await Promise.all([
+        supabase.from('khata_ledger').select('type,amount').eq('customer_id', order.customer_id),
+        supabase.from('advance_ledger').select('type,amount').eq('customer_id', order.customer_id)
+      ])
+      const khataBal = (khata.data || []).reduce((sum, l) => l.type === 'CREDIT' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
+      const advBal = (adv.data || []).reduce((sum, l) => l.type === 'TOPUP' ? sum + Number(l.amount) : sum - Number(l.amount), 0)
+      setCustBalances({ khata: khataBal, advance: advBal })
+    }
+    const { data: payments } = await supabase.from('order_payments').select('*').eq('order_id', order.id)
+    if (payments && payments.length > 0) {
+      setPayments(payments.map(p => {
+        if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD'].includes(p.mode)) {
+          return { mode: 'ONLINE', subtype: p.mode, amount: p.amount }
+        }
+        return { mode: p.mode, subtype: '', amount: p.amount }
+      }))
+    }
+    setShowOrdersModal(false)
+    setLoading(false)
+    toast.success('Order loaded for editing')
+  }
+
+  async function cancelOrder(orderId) {
+    if (!window.confirm('Are you sure you want to cancel this order?')) return
+    // restore stock
+    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity').eq('order_id', orderId)
+    if (oldItems) {
+       for (const oi of oldItems) {
+          await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -oi.quantity })
+       }
+    }
+    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId)
+    await supabase.from('khata_ledger').delete().eq('order_id', orderId)
+    await supabase.from('advance_ledger').delete().eq('order_id', orderId)
+    toast.success('Order cancelled & stock restored')
+    fetchRecentOrders()
   }
 
   // Load table order into cart
@@ -252,17 +313,34 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const target_branch = branchId || selectedBranch
-      // If billing from a table, update the existing order; otherwise create new
+      
+      // If editing an order, restore stock for old items first
+      if (editingOrderId) {
+        const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity').eq('order_id', editingOrderId)
+        if (oldItems) {
+           for (const oi of oldItems) {
+              await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -oi.quantity })
+           }
+        }
+      }
+
+      // If billing from a table or editing, update the existing order; otherwise create new
       let order
-      if (selectedTable?.current_order_id) {
+      if (editingOrderId || selectedTable?.current_order_id) {
+        const orderIdToUpdate = editingOrderId || selectedTable.current_order_id
         const { data: updatedOrder, error } = await supabase.from('orders')
           .update({ customer_id: customer?.id || null, subtotal: total, total, status: 'completed', order_type: orderType })
-          .eq('id', selectedTable.current_order_id)
+          .eq('id', orderIdToUpdate)
           .select().single()
         if (error) throw error
         order = updatedOrder
-        // Replace order items with final cart
+        
+        await supabase.from('khata_ledger').delete().eq('order_id', order.id)
+        await supabase.from('advance_ledger').delete().eq('order_id', order.id)
         await supabase.from('order_items').delete().eq('order_id', order.id)
+        await supabase.from('order_payments').delete().eq('order_id', order.id)
+
+        // Replace order items with final cart
         await supabase.from('order_items').insert(cart.map(c => ({
           order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
         })))
@@ -313,9 +391,15 @@ export default function BillingPage() {
         }
       }
 
-      await supabase.from('order_payments').insert(finalPayments.map(p => ({
-        order_id: order.id, mode: p.mode, online_subtype: p.subtype || null, amount: parseFloat(p.amount)
+      const { error: paymentError } = await supabase.from('order_payments').insert(finalPayments.map(p => ({
+        order_id: order.id, 
+        mode: p.mode === 'ONLINE' ? (p.subtype || 'UPI') : p.mode, 
+        amount: parseFloat(p.amount)
       })))
+      if (paymentError) {
+         console.error('Payment Error:', paymentError)
+         throw paymentError
+      }
 
       for (const p of finalPayments) {
         if (p.mode === 'KHATA') {
@@ -359,7 +443,9 @@ export default function BillingPage() {
       setCart([]); setCustomer(null); setCustomerSearch(''); setOrderType('Dine-in'); setShowAddCustomer(false); setNewCustName('');
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       setCartExpanded(false)
-      toast.success('Bill generated & cart cleared!')
+      const wasEditing = editingOrderId
+      setEditingOrderId(null)
+      toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
     } catch (e) {
       toast.error('Failed: ' + e.message)
     } finally {
@@ -442,76 +528,108 @@ export default function BillingPage() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-5rem)] -m-4 md:-m-6 bg-ink-100 dark:bg-ink-950 relative overflow-hidden">
       
-      {/* LEFT / TOP: Category Tabs & Menu Search */}
+      {/* LEFT / TOP: Category Tabs */}
       <div className="md:w-32 lg:w-40 bg-white dark:bg-ink-900 border-b md:border-b-0 md:border-r border-ink-200 dark:border-ink-800 flex-shrink-0 z-10 flex flex-col overflow-hidden">
-        <div className="p-2 border-b border-ink-200 dark:border-ink-800">
-          <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
-            <input 
-              type="text" 
-              placeholder="Menu Search..." 
-              className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-lg pl-8 pr-2 py-2 text-xs focus:ring-2 focus:ring-ember outline-none"
-              value={itemSearch}
-              onChange={e => setItemSearch(e.target.value)}
-            />
-            {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={12}/></button>}
-          </div>
-        </div>
-        <div className="flex-1 overflow-x-auto md:overflow-y-auto no-scrollbar flex md:flex-col p-1.5 md:p-3 gap-1 md:gap-2">
+        <div className="flex-1 overflow-x-auto md:overflow-y-auto no-scrollbar flex md:flex-col p-1.5 md:p-3 gap-1 md:gap-2 mt-2 md:mt-0">
           {availableTabs.map(cat => (
             <button key={cat} onClick={() => { setActiveCategory(cat); setItemSearch(''); }}
-              className={`px-4 py-3 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base font-bold whitespace-nowrap md:whitespace-normal text-left transition-all flex flex-col md:gap-1 
+              className={`px-4 py-3 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base font-bold whitespace-nowrap md:whitespace-normal text-left transition-all flex flex-col md:gap-1 flex-shrink-0
               ${activeCategory === cat && !itemSearch ? 'bg-ember text-white shadow-md shadow-ember/20' : 'bg-ink-50 dark:bg-ink-950/50 text-ink-600 dark:text-ink-400 hover:bg-ink-100 dark:hover:bg-ink-800'}`}>
               {cat}
             </button>
           ))}
+
+          {/* Table Selector — Bhat only */}
+          {isBhatBranch && (
+            <div className="mt-4 border-t border-ink-200 dark:border-ink-800 pt-4 pb-2 w-full">
+              <div className="flex items-center gap-2 mb-3 px-1">
+                <Grid3X3 size={14} className="text-ink-400" />
+                <span className="text-[11px] font-black uppercase tracking-widest text-ink-400">Tables</span>
+                {selectedTable && (
+                  <button onClick={clearTable} className="ml-auto text-[10px] font-bold text-red-400 hover:text-red-600 bg-red-50 px-2 py-1 rounded">✕ Clear</button>
+                )}
+              </div>
+              
+              {cafeTables.length === 0 ? (
+                <div className="text-[10px] text-ink-400 px-1 py-2 text-center">No tables active.</div>
+              ) : (
+                <div className="flex justify-between gap-2 px-1">
+                  {/* Left Column (Odd Tables) */}
+                  <div className="flex flex-col gap-2 flex-1">
+                    {cafeTables.filter(t => {
+                      const num = parseInt(t.table_number?.toString().replace(/\D/g, ''))
+                      return !isNaN(num) && num % 2 !== 0
+                    }).map(t => {
+                      const isSelected = selectedTable?.id === t.id
+                      const isOccupied = t.status === 'occupied'
+                      const isAvail = t.status === 'available'
+                      return (
+                        <button key={t.id} onClick={() => loadTableOrder(t)} disabled={loadingTable}
+                          className={`w-full py-2.5 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
+                            isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
+                            isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
+                            isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
+                            'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
+                          }`}>
+                          <span>{t.table_number}</span>
+                          <span className="text-[9px] font-bold opacity-60 capitalize">{t.status}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  
+                  {/* Right Column (Even Tables) */}
+                  <div className="flex flex-col gap-2 flex-1">
+                    {cafeTables.filter(t => {
+                      const num = parseInt(t.table_number?.toString().replace(/\D/g, ''))
+                      return !isNaN(num) && num % 2 === 0
+                    }).map(t => {
+                      const isSelected = selectedTable?.id === t.id
+                      const isOccupied = t.status === 'occupied'
+                      const isAvail = t.status === 'available'
+                      return (
+                        <button key={t.id} onClick={() => loadTableOrder(t)} disabled={loadingTable}
+                          className={`w-full py-2.5 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
+                            isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
+                            isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
+                            isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
+                            'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
+                          }`}>
+                          <span>{t.table_number}</span>
+                          <span className="text-[9px] font-bold opacity-60 capitalize">{t.status}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* MIDDLE: Items Grid (The POS area) */}
       <div className="flex-1 flex flex-col min-w-0 bg-ink-50 dark:bg-ink-950 pb-16 md:pb-0 relative overflow-hidden">
-        
-        {/* Table Selector — Bhat only */}
-        {isBhatBranch && (
-          <div className="p-2 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800">
-            <div className="flex items-center gap-2 mb-1.5 px-1">
-              <Grid3X3 size={12} className="text-ink-400" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-ink-400">Tables</span>
-              {selectedTable && (
-                <button onClick={clearTable} className="ml-auto text-[10px] font-bold text-red-400 hover:text-red-600">✕ Clear Table</button>
-              )}
-            </div>
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
-              {cafeTables.length === 0 ? (
-                <div className="text-[10px] text-ink-400 px-1 py-2">No tables active for Bhat branch.</div>
-              ) : (
-                cafeTables.map(t => {
-                  const isSelected = selectedTable?.id === t.id
-                  const isOccupied = t.status === 'occupied'
-                  const isAvail = t.status === 'available'
-                  return (
-                    <button key={t.id}
-                      onClick={() => loadTableOrder(t)}
-                      disabled={loadingTable}
-                      className={`flex-shrink-0 w-14 h-12 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
-                        isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
-                        isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
-                        isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
-                        'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
-                      }`}>
-                      <span>{t.table_number}</span>
-                      <span className="text-[8px] font-bold opacity-60 capitalize">{t.status}</span>
-                    </button>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        )}
+        {/* Table Selector moved to left sidebar */}
 
-        {/* Customer Bar */}
-        <div className="p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex items-center gap-2 shadow-sm z-20">
-          {customer ? (
+        {/* Top Search Bar (Menu + Customer) */}
+        <div className="p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex flex-col md:flex-row items-center gap-3 shadow-sm z-20">
+          <div className="flex w-full gap-3">
+            {/* 1. Menu Search */}
+            <div className="flex-1 relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+              <input 
+                type="text" 
+                placeholder="Search Cafe Menu..." 
+                className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none transition-all"
+                value={itemSearch}
+                onChange={e => setItemSearch(e.target.value)}
+              />
+              {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+            </div>
+
+            {/* 2. Customer Search / Selected Customer */}
+            {customer ? (
             <div className="flex-1 flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer.name[0]}</div>
@@ -549,12 +667,25 @@ export default function BillingPage() {
               )}
             </div>
           )}
-          {!branchId && (
-            <select className="input text-xs w-24 py-2.5 bg-white dark:bg-ink-900" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}>
-              <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
-            </select>
-          )}
+          </div>
+          
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            {!branchId && (
+              <select className="input text-xs w-24 py-2.5 bg-white dark:bg-ink-900 flex-shrink-0" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}>
+                <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
+              </select>
+            )}
+            <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary whitespace-nowrap text-xs px-3 py-2.5 bg-white dark:bg-ink-900 font-bold flex-1 md:flex-none">Manage Orders</button>
+          </div>
         </div>
+
+        {/* Editing Banner */}
+        {editingOrderId && (
+          <div className="bg-amber-100 text-amber-800 text-xs font-bold p-2 text-center flex justify-center items-center gap-2">
+            ⚠️ EDITING ORDER: #{editingOrderId.slice(0,8).toUpperCase()}
+            <button onClick={() => setEditingOrderId(null)} className="underline ml-2 hover:text-amber-900">Cancel Edit</button>
+          </div>
+        )}
 
         {/* Subcategories Grid Area */}
         <div className="flex-1 overflow-y-auto p-2 pb-24 md:pb-4 relative">
@@ -733,6 +864,7 @@ export default function BillingPage() {
                   {payments.length > 1 && <button onClick={() => removePayment(i)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><X size={16}/></button>}
                 </div>
               ))}
+              </div>
             </div>
           )}
           
@@ -774,6 +906,52 @@ export default function BillingPage() {
             <div className="flex gap-2">
               <button onClick={() => setQtyEditor(null)} className="flex-1 py-3 font-bold text-ink-600 bg-ink-100 dark:bg-ink-800 rounded-xl">Cancel</button>
               <button onClick={() => { setExactQty(qtyEditor.id, qtyEditor.editQty !== undefined ? qtyEditor.editQty : 0); setQtyEditor(null) }} className="flex-1 py-3 font-bold text-white bg-ember rounded-xl shadow-lg shadow-ember/30">Set Qty</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Orders Management Modal */}
+      {showOrdersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowOrdersModal(false)}>
+          <div className="bg-white dark:bg-ink-900 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[85vh] animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-ink-200 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+              <h2 className="font-bold text-lg text-ink-900 dark:text-white">Manage Today's Orders</h2>
+              <button onClick={() => setShowOrdersModal(false)} className="p-2 text-ink-400 hover:text-ink-900"><X size={18}/></button>
+            </div>
+            <div className="p-4 overflow-y-auto no-scrollbar space-y-3 flex-1">
+              {recentOrders.length === 0 ? <p className="text-center text-ink-400 py-10">No orders today.</p> :
+               recentOrders.map(o => (
+                 <div key={o.id} className={`p-4 rounded-xl border ${o.status==='cancelled'?'bg-red-50/50 border-red-100':'bg-white dark:bg-ink-900 border-ink-200 dark:border-ink-800'}`}>
+                   <div className="flex justify-between items-start mb-2">
+                     <div>
+                       <p className={`font-bold text-sm ${o.status==='cancelled'?'text-red-500 line-through':'text-ink-900 dark:text-white'}`}>
+                         {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
+                         <span className="ml-2 text-xs font-normal text-ink-400 no-underline">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
+                       </p>
+                       <p className="text-xs text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
+                     </div>
+                     <div className="text-right">
+                       <p className="font-black text-lg text-ink-900 dark:text-white">₹{o.total}</p>
+                       {o.status === 'cancelled' ? <span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-0.5 rounded">Cancelled</span> :
+                        <div className="flex gap-2 justify-end mt-1">
+                          <button onClick={() => editOrder(o)} className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded">Edit</button>
+                          <button onClick={() => cancelOrder(o.id)} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded">Cancel</button>
+                        </div>
+                       }
+                     </div>
+                   </div>
+                   <div className="text-xs text-ink-500 mt-2 border-t border-ink-100 dark:border-ink-800/50 pt-2 flex flex-col gap-0.5">
+                     {(o.order_items||[]).map((oi, idx) => (
+                       <div key={idx} className="flex justify-between">
+                         <span><span className="font-bold">{oi.quantity}x</span> {oi.items?.name} {oi.items?.variant && `(${oi.items.variant})`}</span>
+                         <span>₹{oi.price * oi.quantity}</span>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               ))
+              }
             </div>
           </div>
         </div>

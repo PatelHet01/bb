@@ -22,7 +22,7 @@ export default function DashboardHome() {
       try {
         const today = new Date().toISOString().split('T')[0]
 
-        let oQ = supabase.from('orders').select('id, order_number, total, created_at, table_number, order_payments(mode, amount), customers(name)').gte('created_at', today)
+        let oQ = supabase.from('orders').select('id, order_number, total, created_at, table_number, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
         if (branchId) oQ = oQ.eq('branch_id', branchId)
         const { data: orders } = await oQ.order('created_at', { ascending: false })
 
@@ -77,7 +77,7 @@ export default function DashboardHome() {
           customers: custCount || 0,
           outKhata: outKhataTotal
         })
-        setRecentOrders((orders || []).slice(0, 5))
+        setRecentOrders(orders || [])
         setTodayOrders(orders || [])
       } catch (e) {
         console.error(e)
@@ -86,6 +86,15 @@ export default function DashboardHome() {
       }
     }
     fetchStats()
+
+    // Real-time Sync
+    const channel = supabase.channel('dashboard_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_payments' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'khata_ledger' }, fetchStats)
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
   }, [branchId])
 
   const STATS = [
@@ -144,43 +153,45 @@ export default function DashboardHome() {
           : recentOrders.length === 0
             ? <p className="text-center py-10 text-sm text-ink-400">No orders today yet</p>
             : (
-              <table className="w-full text-sm">
-                <thead className="bg-ink-50 dark:bg-ink-800/50">
-                  <tr>
-                    {['Date', 'Order ID', 'Customer', 'Table No', 'Total', 'Payment'].map(h => (
-                      <th key={h} className="tbl-head">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentOrders.map(o => (
-                    <tr key={o.id} className="tbl-row">
-                      <td className="tbl-cell text-ink-500 whitespace-nowrap">
-                        {new Date(o.created_at).toLocaleDateString('en-IN', {day:'2-digit', month:'short'})} <span className="text-[10px]">{new Date(o.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
-                      </td>
-                      <td className="tbl-cell font-mono text-[11px] text-ember font-bold">
-                        {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
-                      </td>
-                      <td className="tbl-cell text-ink-700 dark:text-ink-300 truncate max-w-[120px]">
-                        {o.customers?.name || <span className="italic text-ink-400">Guest</span>}
-                      </td>
-                      <td className="tbl-cell text-ink-500 font-mono">
-                        {o.table_number || '-'}
-                      </td>
-                      <td className="tbl-cell font-semibold text-ink-900 dark:text-white">₹{o.total.toLocaleString('en-IN')}</td>
-                      <td className="tbl-cell">
-                        <div className="flex gap-1 flex-wrap">
-                          {(o.order_payments || []).map((p, idx) => (
-                            <span key={idx} className={`badge text-[9px] ${p.mode === 'UPI' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : p.mode === 'CASH' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-ink-100 text-ink-600'}`}>
-                              {p.mode}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
+              <div className="flex-1 overflow-y-auto max-h-[400px] no-scrollbar">
+                <table className="w-full text-sm">
+                  <thead className="bg-ink-50 dark:bg-ink-800/50">
+                    <tr>
+                      {['Date', 'Order ID', 'Customer', 'Table No', 'Total', 'Payment'].map(h => (
+                        <th key={h} className="tbl-head">{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {recentOrders.map(o => (
+                      <tr key={o.id} className="tbl-row">
+                        <td className="tbl-cell text-ink-500 whitespace-nowrap">
+                          {new Date(o.created_at).toLocaleDateString('en-IN', {day:'2-digit', month:'short'})} <span className="text-[10px]">{new Date(o.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                        </td>
+                        <td className="tbl-cell font-mono text-[11px] text-ember font-bold">
+                          {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
+                        </td>
+                        <td className="tbl-cell text-ink-700 dark:text-ink-300 truncate max-w-[120px]">
+                          {o.customers?.name || <span className="italic text-ink-400">Guest</span>}
+                        </td>
+                        <td className="tbl-cell text-ink-500 font-mono">
+                          {o.table_number || '-'}
+                        </td>
+                        <td className="tbl-cell font-semibold text-ink-900 dark:text-white">₹{o.total.toLocaleString('en-IN')}</td>
+                        <td className="tbl-cell">
+                          <div className="flex gap-1 flex-wrap">
+                            {(o.order_payments || []).map((p, idx) => (
+                              <span key={idx} className={`badge text-[9px] ${p.mode === 'UPI' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : p.mode === 'CASH' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-ink-100 text-ink-600'}`}>
+                                {p.mode}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )
         }
         </div>
@@ -277,19 +288,31 @@ export default function DashboardHome() {
                 <div className="space-y-3">
                   {todayOrders.length === 0 ? <p className="text-center text-ink-400 py-4">No orders today.</p> :
                    todayOrders.map(o => (
-                     <div key={o.id} className="flex justify-between items-center p-3 border border-ink-100 dark:border-ink-800 rounded-xl">
-                       <div>
-                         <p className="font-bold text-sm text-ink-900 dark:text-white">
-                           {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
-                           <span className="ml-2 text-[10px] font-normal text-ink-400">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
-                         </p>
-                         <p className="text-[10px] text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
-                       </div>
-                       <div className="text-right">
-                         <p className="font-black text-ink-900 dark:text-white">₹{o.total}</p>
-                         <div className="flex gap-1 justify-end mt-1">
-                           {(o.order_payments||[]).map((p,i) => <span key={i} className="text-[8px] font-bold px-1 py-0.5 bg-ink-100 dark:bg-ink-800 rounded text-ink-500">{p.mode}</span>)}
+                     <div key={o.id} className="p-3 border border-ink-100 dark:border-ink-800 rounded-xl space-y-2">
+                       <div className="flex justify-between items-center">
+                         <div>
+                           <p className="font-bold text-sm text-ink-900 dark:text-white">
+                             {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
+                             <span className="ml-2 text-[10px] font-normal text-ink-400">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
+                           </p>
+                           <p className="text-[10px] text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
                          </div>
+                         <div className="text-right">
+                           <p className="font-black text-ink-900 dark:text-white">₹{o.total}</p>
+                           <div className="flex gap-1 justify-end mt-1">
+                             {(o.order_payments||[]).map((p,i) => <span key={i} className="text-[8px] font-bold px-1 py-0.5 bg-ink-100 dark:bg-ink-800 rounded text-ink-500">{p.mode}</span>)}
+                           </div>
+                         </div>
+                       </div>
+                       
+                       {/* Show Items */}
+                       <div className="pt-2 border-t border-ink-100 dark:border-ink-800/50 flex flex-col gap-1">
+                         {(o.order_items||[]).map((oi, idx) => (
+                           <div key={idx} className="flex justify-between text-xs text-ink-600 dark:text-ink-400">
+                             <span><span className="font-bold">{oi.quantity}x</span> {oi.items?.name} {oi.items?.variant && <span className="text-[9px]">({oi.items?.variant})</span>}</span>
+                             <span>₹{oi.price * oi.quantity}</span>
+                           </div>
+                         ))}
                        </div>
                      </div>
                    ))

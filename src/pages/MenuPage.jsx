@@ -2,29 +2,46 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Edit2, Trash2, X, Check, ToggleLeft, ToggleRight, Coffee, Search } from 'lucide-react'
-
-const CAFE_SUBCATS = ['Hot Beverages', 'Cold Beverages', 'Food', 'Combos']
-
-const SUBCAT_ICONS = {
-  'Hot Beverages':  '☕',
-  'Cold Beverages': '🧋',
-  'Food':           '🍽️',
-  'Combos':         '🎁',
-}
+import { Plus, Edit2, Trash2, X, Check, ToggleLeft, ToggleRight, Coffee, Search, Utensils } from 'lucide-react'
 
 const EMPTY_FORM = {
-  name: '', variant: '', subcategory: 'Hot Beverages',
-  price: '', cost_price: '', stock_quantity: 0,
+  name: '', variant: '', subcategory: '',
+  price: '', cost_price: '', stock_quantity: 100,
   low_stock_threshold: 5, is_active: true,
+}
+
+const SUBCAT_ICONS = {
+  'Beverages': '☕',
+  'Dessert': '🍰',
+  'Pizza': '🍕',
+  'Pasta': '🍝',
+  'Sandwich': '🥪',
+  'Burger': '🍔',
+  'Fries': '🍟',
+  'Maggi': '🍜',
+  'Frankie': '🌯',
+  'Pav Bhaji': '🥘',
+  'Masala Pav': '🍞',
+  'Rice': '🍚',
+  'Snacks': '🥟',
+  'Paratha': '🫓',
 }
 
 export default function MenuPage() {
   const { branchId, role } = useAuthStore()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('Hot Beverages')
+  const [activeTab, setActiveTab] = useState('')
   const [search, setSearch] = useState('')
+
+  // Derived subcategories
+  const subcategories = [...new Set(items.map(i => i.subcategory))].sort()
+  
+  useEffect(() => {
+    if (subcategories.length > 0 && !activeTab) {
+      setActiveTab(subcategories[0])
+    }
+  }, [subcategories, activeTab])
 
   // Modal state
   const [modal, setModal] = useState(null) // null | 'add' | 'edit'
@@ -129,7 +146,7 @@ export default function MenuPage() {
     .filter(i => i.subcategory === activeTab)
     .filter(i => !search || i.name.toLowerCase().includes(search.toLowerCase()) || (i.variant || '').toLowerCase().includes(search.toLowerCase()))
 
-  const counts = CAFE_SUBCATS.reduce((acc, s) => {
+  const counts = subcategories.reduce((acc, s) => {
     acc[s] = items.filter(i => i.subcategory === s).length
     return acc
   }, {})
@@ -161,19 +178,19 @@ export default function MenuPage() {
       </div>
 
       {/* Category Tabs */}
-      <div className="flex gap-1 border-b border-dash-border dark:border-dash-borderDark">
-        {CAFE_SUBCATS.map(cat => (
+      <div className="flex gap-1 border-b border-dash-border dark:border-dash-borderDark overflow-x-auto no-scrollbar">
+        {subcategories.map(cat => (
           <button
             key={cat}
             onClick={() => setActiveTab(cat)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px flex-shrink-0 ${
               activeTab === cat
                 ? 'border-dash-primary text-dash-primary dark:text-white dark:border-white'
                 : 'border-transparent text-dash-muted hover:text-dash-text dark:hover:text-dash-textDark'
             }`}
           >
-            <span>{SUBCAT_ICONS[cat]}</span>
-            <span className="hidden sm:inline">{cat}</span>
+            <span>{SUBCAT_ICONS[cat] || '🍽️'}</span>
+            <span className="whitespace-nowrap">{cat}</span>
             <span className="text-xs font-bold opacity-60">{counts[cat] || 0}</span>
           </button>
         ))}
@@ -186,7 +203,7 @@ export default function MenuPage() {
         </div>
       ) : displayItems.length === 0 ? (
         <div className="card p-16 text-center">
-          <div className="text-4xl mb-4">{SUBCAT_ICONS[activeTab]}</div>
+          <div className="text-4xl mb-4">{SUBCAT_ICONS[activeTab] || '🍽️'}</div>
           <h2 className="text-lg font-bold text-dash-text dark:text-dash-textDark mb-2">No items in {activeTab}</h2>
           <p className="text-dash-muted text-sm mb-6">{search ? 'No results found.' : 'Start by adding your first menu item.'}</p>
           {canEdit && !search && <button onClick={openAdd} className="btn-primary mx-auto">Add First Item</button>}
@@ -294,7 +311,7 @@ export default function MenuPage() {
               <div>
                 <label className="label">Category</label>
                 <select className="input w-full" value={form.subcategory} onChange={e => setForm(p => ({...p, subcategory: e.target.value}))}>
-                  {CAFE_SUBCATS.map(s => <option key={s} value={s}>{SUBCAT_ICONS[s]} {s}</option>)}
+                  {subcategories.map(s => <option key={s} value={s}>{SUBCAT_ICONS[s] || '🍽️'} {s}</option>)}
                 </select>
               </div>
 

@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { WheelGame, SlotsGame, OXOGame } from '../components/games/GameComponents'
 import { ShoppingCart, Plus, Minus, Trash2, ChevronUp, ChevronDown, Check } from 'lucide-react'
 
-const CAFE_CATS = ['Hot Beverages', 'Cold Beverages', 'Food', 'Combos']
-
 export default function CafeOrderPage() {
   const [params] = useSearchParams()
   const token = params.get('table')
@@ -14,15 +12,23 @@ export default function CafeOrderPage() {
   const [tableInfo, setTableInfo] = useState(null)
   const [tokenError, setTokenError] = useState(false)
   const [items, setItems] = useState([])
-  const [activeTab, setActiveTab] = useState('Hot Beverages')
+  const [activeTab, setActiveTab] = useState('')
   const [cart, setCart] = useState([])
   const [cartOpen, setCartOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [orderPlaced, setOrderPlaced] = useState(null)
-  const [name, setName] = useState('')
   const [placing, setPlacing] = useState(false)
   const [activeGame, setActiveGame] = useState(null)
   const [coins, setCoins] = useState(0)
+
+  // Derived categories
+  const categories = [...new Set(items.map(i => i.subcategory))].sort()
+
+  useEffect(() => {
+    if (categories.length > 0 && !activeTab) {
+      setActiveTab(categories[0])
+    }
+  }, [categories, activeTab])
 
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0)
@@ -192,9 +198,9 @@ export default function CafeOrderPage() {
 
       {/* Category Tabs */}
       <div style={{ display: 'flex', gap: '0.5rem', padding: '1rem 1.5rem', overflowX: 'auto', borderBottom: '1px solid rgba(255,255,255,0.06)', scrollbarWidth: 'none' }}>
-        {CAFE_CATS.map(cat => (
+        {categories.map(cat => (
           <button key={cat} onClick={() => setActiveTab(cat)}
-            style={{ flexShrink: 0, padding: '0.5rem 1rem', borderRadius: '50px', border: `1px solid ${activeTab === cat ? 'white' : 'rgba(255,255,255,0.12)'}`, background: activeTab === cat ? 'white' : 'transparent', color: activeTab === cat ? 'black' : 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.15s' }}>
+            style={{ flexShrink: 0, padding: '0.5rem 1rem', borderRadius: '50px', border: `1px solid ${activeTab === cat ? 'white' : 'rgba(255,255,255,0.12)'}`, background: activeTab === cat ? 'white' : 'transparent', color: activeTab === cat ? 'black' : 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.15s', whiteSpace: 'nowrap' }}>
             {cat}
           </button>
         ))}

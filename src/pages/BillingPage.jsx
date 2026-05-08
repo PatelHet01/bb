@@ -8,15 +8,6 @@ const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
 ]
 
-const CATEGORY_SUBCATEGORIES = {
-  'Smoke': ['Cigarettes', 'Dipa / Masala'],
-  'Paan': ['Tobacco', 'Mouth Freshener'],
-  'Candy & Chewing': ['Chewing Gum', 'Chocolates & Candy'],
-  'Beverages': ['Cold Drinks', 'Water & Juices'],
-  'Snacks': ['Biscuits', 'Bread & Rusk', 'Packaged Snacks'],
-  'BB Cafe': ['Hot Beverages', 'Cold Beverages', 'Food', 'Combos'],
-}
-
 export default function BillingPage() {
   const { branchId, user } = useAuthStore()
   const [selectedBranch, setSelectedBranch] = useState(branchId || 'gurukul')
@@ -304,8 +295,16 @@ export default function BillingPage() {
     </div>
   )
 
+  const activeSubcategories = useMemo(() => {
+    const subs = items
+      .filter(i => i.category === activeCategory)
+      .map(i => i.subcategory)
+      .filter(Boolean)
+    return [...new Set(subs)].sort()
+  }, [items, activeCategory])
+
   const activeItems = items.filter(i => i.category === activeCategory)
-  const subcategories = CATEGORY_SUBCATEGORIES[activeCategory] || []
+  const subcategories = activeSubcategories
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-5rem)] -m-4 md:-m-6 bg-ink-100 dark:bg-ink-950 relative overflow-hidden">

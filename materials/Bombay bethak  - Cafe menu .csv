@@ -1,0 +1,244 @@
+Category,SubCategory,ItemName,Variant,Price
+Snacks,Vada Pav,Vada Pav,Oil,30
+Snacks,Vada Pav,Vada Pav,Butter,40
+Snacks,Vada Pav,Bombay Vada Pav,Regular,25
+Snacks,Vada Pav,Masala Pav,Regular,50
+Snacks,Vada Pav,Cheese Vada Pav,Oil,60
+Snacks,Vada Pav,Cheese Vada Pav,Butter,70
+Snacks,Vada Pav,Mayo Cheese Vada Pav,Regular,90
+Snacks,Dabeli,Dabeli,Oil,30
+Snacks,Dabeli,Dabeli,Butter,40
+Snacks,Dabeli,Kutchi Dabeli,Regular,30
+Snacks,Dabeli,Cheese Dabeli,Oil,60
+Snacks,Dabeli,Cheese Dabeli,Butter,70
+Snacks,Dabeli,Mayo Cheese Dabeli,Regular,90
+Snacks,Puff,Regular Puff,Oil,30
+Snacks,Puff,Regular Puff,Butter,40
+Snacks,Puff,Cheese Puff,Oil,60
+Snacks,Puff,Cheese Puff,Butter,70
+Snacks,Puff,Mayo Puff,Regular,70
+Snacks,Puff,Bombay Bethak Special Puff,Regular,80
+Pizza,Standard,Single Cheese Pizza,Regular,120
+Pizza,Standard,Peri Peri Tandoori Pizza,Regular,140
+Pizza,Standard,Lasaniya Pizza,Regular,140
+Pizza,Standard,Double Cheese Pizza,Regular,180
+Pizza,Standard,Garlic Cheese Pizza,Regular,180
+Paratha,Indian,Aloo Paratha,Oil,70
+Paratha,Indian,Butter Paratha,Regular,90
+Paratha,Indian,Butter Gobi Paratha,Regular,120
+Paratha,Indian,Garlic Paratha,Regular,120
+Paratha,Indian,Tandoori Paratha,Regular,120
+Paratha,Indian,Cheese Gobi Paratha,Regular,130
+Paratha,Indian,Paneer Paratha,Regular,150
+Paratha,Indian,Mix Cheese Paratha,Regular,150
+Paratha,Indian,Paneer Cheese Garlic Paratha,Regular,160
+Sandwich,Basic,Bread Butter,Normal,30
+Sandwich,Classic,Aloo Mater Sandwich,Normal,40
+Sandwich,Classic,Aloo Mater Sandwich,Grill,70
+Sandwich,Classic,Veg Sandwich,Normal,40
+Sandwich,Classic,Veg Sandwich,Grill,70
+Sandwich,Classic,Jam Sandwich,Normal,40
+Sandwich,Classic,Chutney Sandwich,Normal,40
+Sandwich,Classic,Chutney Sandwich,Grill,70
+Sandwich,Classic,Chocolate Sandwich,Normal,80
+Sandwich,Cheese,Cheese Aloo Mater Sandwich,Normal,70
+Sandwich,Cheese,Cheese Aloo Mater Sandwich,Grill,150
+Sandwich,Cheese,Cheese Veg Sandwich,Normal,70
+Sandwich,Cheese,Cheese Veg Sandwich,Grill,150
+Sandwich,Cheese,Cheese Jam Sandwich,Normal,70
+Sandwich,Cheese,Cheese Chutney Sandwich,Normal,70
+Sandwich,Cheese,Cheese Chutney Sandwich,Grill,150
+Sandwich,Premium,Peri Peri Sandwich,Grill,150
+Sandwich,Premium,Cheese Mexican Sandwich,Grill,150
+Sandwich,Premium,Cheese Paneer Mexican Sandwich,Grill,170
+Sandwich,Premium,Russian Sandwich,Grill,170
+Sandwich,Premium,Pizza Sandwich,Grill,170
+Sandwich,Premium,Cheese Garlic Corn Sandwich,Grill,170
+Sandwich,Premium,Cheese Chutney Corn Sandwich,Grill,170
+Sandwich,Premium,Cheese Chocolate Sandwich,Normal,150
+Sandwich,Premium,Cheese Paneer Corn Sandwich,Grill,170
+Sandwich,Premium,Peri Peri Paneer Sandwich,Grill,170
+Sandwich,Premium,Peri Peri Corn Sandwich,Grill,170
+Sandwich,Premium,Club Sandwich,Grill,170
+Sandwich,Premium,Tadka Sandwich,Grill,180
+Sandwich,Premium,Paneer Tadka Sandwich,Grill,180
+Sandwich,Premium,Cheese Paneer Tadka Sandwich,Grill,200
+Sandwich,Premium,Ghughra Sandwich,Grill,170
+Sandwich,Premium,Garlic Sandwich,Grill,170
+Sandwich,Premium,Paneer Garlic Sandwich,Grill,180
+Sandwich,Premium,Cheese Grill Garlic Sandwich,Grill,180
+Sandwich,Premium,Bombay Style Sandwich,Grill,180
+Sandwich,Premium,Tofan Sandwich,Grill,180
+Sandwich,Premium,Thousand Island Sandwich,Grill,190
+Sandwich,Premium,Talap Sandwich,Grill,190
+Sandwich,Premium,Bombay Bethak Special Sandwich,Grill,200
+Sandwich,Premium,Cheese Grill Paneer Garlic Sandwich,Grill,200
+Burger,Fast Food,Aloo Tikki Burger,Regular,60
+Burger,Fast Food,Aloo Tikki Burger,Cheese,70
+Burger,Fast Food,Tandoori Burger,Regular,80
+Burger,Fast Food,Tandoori Burger,Cheese,90
+Burger,Fast Food,Mexican Burger,Regular,80
+Burger,Fast Food,Mexican Burger,Cheese,90
+Burger,Fast Food,Chipotle Burger,Regular,80
+Burger,Fast Food,Chipotle Burger,Cheese,90
+Burger,Fast Food,Peri Peri Burger,Regular,80
+Burger,Fast Food,Peri Peri Burger,Cheese,90
+Fries,Fast Food,Salted Fries,Regular,90
+Fries,Fast Food,Salted Fries,Cheese,100
+Fries,Fast Food,Peri Peri Fries,Regular,110
+Fries,Fast Food,Peri Peri Fries,Cheese,120
+Fries,Fast Food,Tandoori Fries,Regular,110
+Fries,Fast Food,Tandoori Fries,Cheese,120
+Fries,Fast Food,Chipotle Fries,Regular,110
+Fries,Fast Food,Chipotle Fries,Cheese,120
+Fries,Fast Food,Mexican Fries,Regular,110
+Fries,Fast Food,Mexican Fries,Cheese,120
+Fries,Fast Food,Bombay Special Fries,Cheese,150
+Maska Bun,Bakery,Butter Maska Bun,Regular,30
+Maska Bun,Bakery,Butter Maska Bun,Cheese,40
+Maska Bun,Bakery,Butter Jam Maska Bun,Regular,40
+Maska Bun,Bakery,Butter Jam Maska Bun,Cheese,50
+Maska Bun,Bakery,Butter Chocolate Maska Bun,Regular,60
+Maska Bun,Bakery,Butter Chocolate Maska Bun,Cheese,70
+Slice,Bakery,Bread Butter Slice,Regular,15
+Slice,Bakery,Chutney Slice,Regular,20
+Slice,Bakery,Sing Sev Slice,Regular,20
+Slice,Bakery,Chocolate Slice,Regular,30
+Slice,Bakery,Cheese Chocolate Slice,Regular,40
+Slice,Bakery,Butter Jam Slice,Regular,30
+Slice,Bakery,Cheese Jam Slice,Regular,40
+Maggi,Quick Bites,Masala Maggi,Regular,80
+Maggi,Quick Bites,Masala Maggi,Butter,90
+Maggi,Quick Bites,Masala Maggi,Cheese,100
+Maggi,Quick Bites,Veg Maggi,Regular,90
+Maggi,Quick Bites,Veg Maggi,Butter,100
+Maggi,Quick Bites,Veg Maggi,Cheese,120
+Maggi,Quick Bites,Garlic Tadka Maggi,Butter,120
+Maggi,Quick Bites,Garlic Tadka Maggi,Cheese,140
+Maggi,Quick Bites,Tadka Maggi,Butter,120
+Maggi,Quick Bites,Tadka Maggi,Cheese,140
+Maggi,Quick Bites,Veg Tadka Maggi,Butter,130
+Maggi,Quick Bites,Veg Tadka Maggi,Cheese,150
+Maggi,Quick Bites,Cheese Butter Maggi,Cheese,120
+Maggi,Quick Bites,Veg Cheese Butter Maggi,Cheese,130
+Pasta,Italian,Masala Pasta,Regular,80
+Pasta,Italian,Masala Pasta,Butter,120
+Pasta,Italian,Masala Pasta,Cheese,130
+Pasta,Italian,Veg Pasta,Regular,100
+Pasta,Italian,Veg Pasta,Butter,120
+Pasta,Italian,Veg Pasta,Cheese,130
+Pasta,Italian,Tadka Pasta,Butter,140
+Pasta,Italian,Tadka Pasta,Cheese,160
+Pasta,Italian,Veg Tadka Pasta,Butter,150
+Pasta,Italian,Veg Tadka Pasta,Cheese,170
+Pasta,Italian,Garlic Tadka Pasta,Butter,120
+Pasta,Italian,Garlic Tadka Pasta,Cheese,140
+Pasta,Italian,Cheese Butter Pasta,Cheese,150
+Pasta,Italian,Veg Cheese Butter Pasta,Cheese,150
+Frankie,Wraps,Veg Frankie,Regular,80
+Frankie,Wraps,Veg Frankie,Paneer,100
+Frankie,Wraps,Veg Frankie,Cheese,120
+Frankie,Wraps,Sechz Frankie,Regular,100
+Frankie,Wraps,Sechz Frankie,Cheese,130
+Frankie,Wraps,Mayo Veg Frankie,Regular,100
+Frankie,Wraps,Mayo Veg Frankie,Paneer,120
+Frankie,Wraps,Mayo Veg Frankie,Cheese,130
+Frankie,Wraps,Peri Peri Veg Frankie,Regular,100
+Frankie,Wraps,Peri Peri Veg Frankie,Paneer,120
+Frankie,Wraps,Peri Peri Veg Frankie,Cheese,140
+Frankie,Wraps,Mexican Veg Frankie,Regular,100
+Frankie,Wraps,Mexican Veg Frankie,Cheese,150
+Frankie,Wraps,Chipotle Veg Frankie,Regular,100
+Frankie,Wraps,Chipotle Veg Frankie,Cheese,150
+Frankie,Wraps,Juglee Frankie,Regular,120
+Frankie,Wraps,Juglee Frankie,Paneer,130
+Frankie,Wraps,Juglee Frankie,Cheese,170
+Dessert,Waffle,Choco Blast,Single,50
+Dessert,Waffle,Choco Blast,Double,100
+Dessert,Waffle,Dark Desire,Single,50
+Dessert,Waffle,Dark Desire,Double,100
+Dessert,Waffle,Black & White,Single,50
+Dessert,Waffle,Black & White,Double,100
+Dessert,Waffle,White Chocolate,Single,50
+Dessert,Waffle,White Chocolate,Double,100
+Dessert,Waffle,Blue Berry,Single,50
+Dessert,Waffle,Blue Berry,Double,100
+Dessert,Waffle,Strawberry,Single,50
+Dessert,Waffle,Strawberry,Double,100
+Dessert,Special,Kitkat Waffle,Single,90
+Dessert,Special,Kitkat Waffle,Double,150
+Dessert,Special,Choco Devil Waffle,Single,90
+Dessert,Special,Choco Devil Waffle,Double,150
+Dessert,Special,Me Oreo Waffle,Single,90
+Dessert,Special,Me Oreo Waffle,Double,150
+Dessert,Special,Coffee Waffle,Single,90
+Dessert,Special,Coffee Waffle,Double,150
+Dessert,Special,Blueberry White Choco Waffle,Single,90
+Dessert,Special,Blueberry White Choco Waffle,Double,150
+Dessert,Special,Triple Chocolate Waffle,Single,90
+Dessert,Special,Triple Chocolate Waffle,Double,170
+Dessert,Special,Kitkat Oreo Waffle,Single,100
+Dessert,Special,Kitkat Oreo Waffle,Double,170
+Dessert,Special,Ferrero Rocher Waffle,Single,130
+Dessert,Special,Ferrero Rocher Waffle,Double,230
+Dessert,Special,Biscoff Waffle,Single,130
+Dessert,Special,Biscoff Waffle,Double,230
+Dessert,Special,Naked Nutella Waffle,Single,100
+Dessert,Special,Naked Nutella Waffle,Double,180
+Dessert,Brownie,Sizzling Brownie with Ice Cream,Regular,149
+Dessert,Brownie,Waffle Bowl,Regular,149
+Dessert,Brownie,Brownie Bowl,Regular,169
+Snacks,Special,Cheese Balls,Regular,90
+Snacks,Special,Monaco Topping Single Cheese,Regular,90
+Snacks,Special,Nachos Topping Single Cheese,Regular,90
+Snacks,Special,Monaco Topping Double Cheese,Regular,120
+Snacks,Special,Nachos Topping Double Cheese,Regular,120
+Beverages,Hot,Tea,Regular,15
+Beverages,Hot,Masala Tea,Regular,20
+Beverages,Hot,Chocolate Tea,Regular,30
+Beverages,Hot,Bournvita Hot,Regular,30
+Beverages,Cold,Bournvita Cold,Regular,70
+Beverages,Cold Coffee,Cold Coffee,Regular,79
+Beverages,Cold Coffee,Peach Ice Tea Cold Coffee,Regular,79
+Beverages,Cold Coffee,Ice Blend Cold Coffee,Regular,89
+Beverages,Cold Coffee,Hazelnut Cold Coffee,Regular,99
+Beverages,Cold Coffee,Caramel Cold Coffee,Regular,99
+Beverages,Cold Coffee,Biscoff Cold Coffee,Regular,119
+Pav Bhaji,Main,Only Bhaji,Regular,100
+Pav Bhaji,Main,Only Bhaji,Cheese,150
+Pav Bhaji,Main,Only Bhaji Jain,Regular,120
+Pav Bhaji,Main,Only Bhaji Jain,Cheese,170
+Pav Bhaji,Main,Only Bhaji Swaminarayan,Regular,120
+Pav Bhaji,Main,Only Bhaji Swaminarayan,Cheese,170
+Pav Bhaji,Main,Pav Bhaji,Regular,120
+Pav Bhaji,Main,Pav Bhaji,Cheese,160
+Pav Bhaji,Main,Pav Bhaji Jain,Regular,140
+Pav Bhaji,Main,Pav Bhaji Jain,Cheese,180
+Pav Bhaji,Main,Pav Bhaji Swaminarayan,Regular,140
+Pav Bhaji,Main,Pav Bhaji Swaminarayan,Cheese,180
+Pav Bhaji,Main,Cheese Pav Bhaji,Regular,150
+Pav Bhaji,Main,Cheese Pav Bhaji,Cheese,190
+Pav Bhaji,Main,Paneer Pav Bhaji,Regular,160
+Pav Bhaji,Main,Paneer Pav Bhaji,Cheese,200
+Pav Bhaji,Addon,Extra Pav Pair,Regular,20
+Pav Bhaji,Addon,Extra Pav Pair,Cheese,30
+Masala Pav,Street,Masala Pav,Oil,120
+Masala Pav,Street,Masala Pav,Butter,160
+Masala Pav,Street,Cheese Masala Pav,Oil,150
+Masala Pav,Street,Cheese Masala Pav,Butter,190
+Masala Pav,Street,Garlic Pav,Oil,80
+Masala Pav,Street,Garlic Pav,Butter,120
+Rice,Pulav,Tawa Pulav,Oil,120
+Rice,Pulav,Tawa Pulav,Butter,160
+Rice,Pulav,Veg Tawa Pulav,Oil,140
+Rice,Pulav,Veg Tawa Pulav,Butter,180
+Rice,Pulav,Cheese Pulav,Oil,150
+Rice,Pulav,Cheese Pulav,Butter,200
+Rice,Pulav,Paneer Pulav,Oil,150
+Rice,Pulav,Paneer Pulav,Butter,200
+Rice,Pulav,Jain Pulav,Oil,140
+Rice,Pulav,Jain Pulav,Butter,180
+Rice,Pulav,Plain Pulav,Regular,100
+Rice,Pulav,Jeera Pulav,Regular,120
+Rice,Pulav,Bombay Special Green Pulav,Oil,180
+Rice,Pulav,Bombay Special Green Pulav,Butter,240

@@ -1,0 +1,14 @@
+[
+  {
+    id: '45151e27-33e5-4c8b-8b85-ed9722ea7b4d',
+    branch_id: 'bhat',
+    table_number: 1,
+    label: 'Table 01',
+    capacity: 4,
+    status: 'occupied',
+    current_order_id: 'd6dfdcad-8bab-49e4-b39a-a3e997ed4a3f',
+    qr_token: '00afa029-4def-422d-b556-41924c8e562d',
+    is_active: true,
+    created_at: '2026-05-08T00:03:11.003649+00:00'
+  }
+]

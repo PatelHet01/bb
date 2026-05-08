@@ -12,7 +12,7 @@ export default function BillingPage() {
   const { branchId, user } = useAuthStore()
   const [selectedBranch, setSelectedBranch] = useState(branchId || 'gurukul')
   const [items, setItems] = useState([])
-  const [activeCategory, setActiveCategory] = useState('Paan')
+  const [activeCategory, setActiveCategory] = useState(branchId === 'bhat' || selectedBranch === 'bhat' ? 'BB Cafe' : 'Paan')
   
   const [cart, setCart] = useState([])
   const [cartExpanded, setCartExpanded] = useState(false)
@@ -455,7 +455,7 @@ export default function BillingPage() {
       <div className="flex-1 flex flex-col min-w-0 bg-ink-50 dark:bg-ink-950 pb-16 md:pb-0 relative overflow-hidden">
         
         {/* Table Selector — Bhat only */}
-        {isBhatBranch && cafeTables.length > 0 && (
+        {isBhatBranch && (
           <div className="p-2 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800">
             <div className="flex items-center gap-2 mb-1.5 px-1">
               <Grid3X3 size={12} className="text-ink-400" />
@@ -465,25 +465,29 @@ export default function BillingPage() {
               )}
             </div>
             <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
-              {cafeTables.map(t => {
-                const isSelected = selectedTable?.id === t.id
-                const isOccupied = t.status === 'occupied'
-                const isAvail = t.status === 'available'
-                return (
-                  <button key={t.id}
-                    onClick={() => loadTableOrder(t)}
-                    disabled={loadingTable}
-                    className={`flex-shrink-0 w-14 h-12 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
-                      isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
-                      isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
-                      isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
-                      'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
-                    }`}>
-                    <span>{t.table_number}</span>
-                    <span className="text-[8px] font-bold opacity-60 capitalize">{t.status}</span>
-                  </button>
-                )
-              })}
+              {cafeTables.length === 0 ? (
+                <div className="text-[10px] text-ink-400 px-1 py-2">No tables active for Bhat branch.</div>
+              ) : (
+                cafeTables.map(t => {
+                  const isSelected = selectedTable?.id === t.id
+                  const isOccupied = t.status === 'occupied'
+                  const isAvail = t.status === 'available'
+                  return (
+                    <button key={t.id}
+                      onClick={() => loadTableOrder(t)}
+                      disabled={loadingTable}
+                      className={`flex-shrink-0 w-14 h-12 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
+                        isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
+                        isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
+                        isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
+                        'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
+                      }`}>
+                      <span>{t.table_number}</span>
+                      <span className="text-[8px] font-bold opacity-60 capitalize">{t.status}</span>
+                    </button>
+                  )
+                })
+              )}
             </div>
           </div>
         )}

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import SmokeCanvas from '../components/landing/SmokeCanvas'
 import RoadJourney from '../components/landing/RoadJourney'
 import { useAuthStore } from '../store/authStore'
+import { WheelGame, SlotsGame, OXOGame } from '../components/games/GameComponents'
 
 const STAFF_USERS = {
   superadmin: { password: 'Bethak@SuperAdmin#2025', role: 'super_admin', branchId: null,     branchName: 'All Branches' },
@@ -150,31 +151,50 @@ function GhodaSection() {
 
 /* ── GAMES ── */
 function GamesSection() {
-  const icons = [
-    { key: 'wheel', label: 'Spin the Wheel', svg: <svg viewBox="0 0 80 80" className="w-full h-auto"><g stroke="white" strokeWidth="1.4" fill="none"><circle cx="40" cy="40" r="30" /><circle cx="40" cy="40" r="3" fill="white" /><path d="M40 10 L40 70 M10 40 L70 40 M19 19 L61 61 M61 19 L19 61" /><path d="M40 6 L36 14 L44 14 Z" fill="white" /></g></svg> },
-    { key: 'slot',  label: 'Slots',          svg: <svg viewBox="0 0 80 80" className="w-full h-auto"><g stroke="white" strokeWidth="1.4" fill="none"><rect x="12" y="18" width="56" height="44" rx="3" /><path d="M12 30 L68 30 M12 50 L68 50 M30 18 L30 62 M50 18 L50 62" /><circle cx="21" cy="40" r="2" fill="white" /><circle cx="40" cy="40" r="2" fill="white" /><circle cx="59" cy="40" r="2" fill="white" /><path d="M40 18 L40 12 M30 12 L50 12" /></g></svg> },
-    { key: 'ox',    label: 'O / X',          svg: <svg viewBox="0 0 80 80" className="w-full h-auto"><g stroke="white" strokeWidth="1.4" fill="none"><path d="M28 14 L28 66 M52 14 L52 66 M14 28 L66 28 M14 52 L66 52" /><circle cx="40" cy="40" r="6" /><path d="M16 16 L26 26 M26 16 L16 26" /><path d="M54 54 L64 64 M64 54 L54 64" /></g></svg> },
-  ]
+  const [activeGame, setActiveGame] = useState(null)
+  const [coins, setCoins] = useState(0)
+
   return (
-    <section className="relative bg-black px-6 py-32 text-center">
+    <section className="relative bg-black px-6 py-24 text-center">
       <h2 className="font-display text-4xl text-white md:text-6xl leading-tight">
         Kill Time. <span className="font-script text-ember text-5xl md:text-7xl">win ghoda.</span>
       </h2>
       <p className="mx-auto mt-4 max-w-xl text-white/60">Play while you wait. Spin the wheel. Roll the slots. Challenge a friend to O/X.</p>
-      <div className="mx-auto mt-14 grid max-w-3xl grid-cols-3 gap-4 md:gap-8">
-        {icons.map((i) => (
-          <div key={i.key} className="flex flex-col items-center gap-3">
-            <div className="flex aspect-square w-full items-center justify-center rounded-3xl border border-white/15 bg-white/[0.02] p-5 hover:border-ember/60 hover:bg-white/[0.04] transition">
-              <div className="w-14 md:w-20">{i.svg}</div>
-            </div>
-            <span className="text-[10px] tracking-[0.2em] text-white/40 uppercase">{i.label}</span>
-          </div>
+
+      {/* Game Selector Cards */}
+      <div className="mx-auto mt-10 grid max-w-lg grid-cols-3 gap-3">
+        {[
+          { key: 'wheel', icon: '🎡', label: 'Spin Wheel' },
+          { key: 'slots', icon: '🎰', label: 'GHODA Slots' },
+          { key: 'oxo',   icon: '⭕', label: 'O / X' },
+        ].map(g => (
+          <button key={g.key} onClick={() => setActiveGame(activeGame === g.key ? null : g.key)}
+            className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all cursor-pointer ${
+              activeGame === g.key
+                ? 'border-white bg-white/10 text-white'
+                : 'border-white/15 bg-white/[0.02] text-white/60 hover:border-white/40 hover:text-white'
+            }`}>
+            <span style={{ fontSize: '2rem' }}>{g.icon}</span>
+            <span style={{ fontSize: '0.65rem', letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 700 }}>{g.label}</span>
+          </button>
         ))}
       </div>
-      <Link to="/games" className="mt-12 inline-block rounded-full border border-white px-8 py-3.5 font-display text-sm tracking-[0.25em] text-white hover:bg-white hover:text-black transition">
-        PLAY NOW
-      </Link>
-      <div className="mt-4 text-[10px] tracking-[0.25em] text-white/40">SIGN UP TO SAVE YOUR COINS AND CLIMB THE LEADERBOARD.</div>
+
+      {/* Inline Game */}
+      <div className="mx-auto mt-4 max-w-lg">
+        <AnimatePresence mode="wait">
+          {activeGame === 'wheel' && <WheelGame key="wheel" coins={coins} setCoins={setCoins} onClose={() => setActiveGame(null)} />}
+          {activeGame === 'slots' && <SlotsGame key="slots" coins={coins} setCoins={setCoins} onClose={() => setActiveGame(null)} />}
+          {activeGame === 'oxo'   && <OXOGame   key="oxo"   onClose={() => setActiveGame(null)} />}
+        </AnimatePresence>
+      </div>
+
+      {coins > 0 && (
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 text-sm text-ember font-bold">
+          🪙 {coins} GHODA earned!
+        </motion.p>
+      )}
+      <p className="mt-4 text-[10px] tracking-[0.2em] text-white/30 uppercase">Sign up to save your coins · <Link to="/my-bethak" className="text-white/50 underline">Join My Bethak</Link></p>
     </section>
   )
 }

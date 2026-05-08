@@ -89,6 +89,9 @@ export default function KDSPage() {
                 <div>
                   <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Order</span>
                   <p className="font-mono font-bold text-lg">#{order.id.slice(0,6).toUpperCase()}</p>
+                  {order.table_number && (
+                    <p className="text-xs font-bold text-amber-400 mt-0.5">🪑 Table {order.table_number}</p>
+                  )}
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Time</span>

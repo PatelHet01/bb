@@ -16,10 +16,12 @@ import StaffPage from '../pages/StaffPage'
 import AnnouncementsPage from '../pages/AnnouncementsPage'
 import ExpensesPage from '../pages/ExpensesPage'
 import SettingsPage from '../pages/SettingsPage'
+import TableManagementPage from '../pages/TableManagementPage'
+import GamesPage from '../pages/GamesPage'
 import LandingPage from '../pages/LandingPage'
 import MyBethakLogin from '../pages/MyBethakLogin'
 import MyBethakDashboard from '../pages/MyBethakDashboard'
-import GamesPage from '../pages/GamesPage'
+import CafeOrderPage from '../pages/CafeOrderPage'
 
 function AdminRoute({ children, allowedRoles }) {
   const { user, role } = useAuthStore()
@@ -80,10 +82,15 @@ export default function AppRoutes() {
         <Route path="settings" element={
           <AdminRoute allowedRoles={['super_admin', 'admin']}><SettingsPage /></AdminRoute>
         } />
+        <Route path="tables" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin', 'manager']}><TableManagementPage /></AdminRoute>
+        } />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Route>
 
       <Route path="/kitchen" element={<AdminRoute allowedRoles={['super_admin', 'admin', 'manager']}><KDSPage /></AdminRoute>} />
+      <Route path="/cafe/order" element={<CafeOrderPage />} />
+
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

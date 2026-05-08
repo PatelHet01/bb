@@ -3,7 +3,7 @@ import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
-  BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils
+  BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -11,11 +11,12 @@ const NAV = [
   { to: '/admin/dashboard', label: 'Dashboard',   icon: LayoutDashboard, roles: ['super_admin','admin','developer','manager'] },
   { to: '/admin/billing',   label: 'Billing / POS',icon: ShoppingCart,    roles: ['super_admin','admin','manager'] },
   { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'] },
+  { to: '/admin/tables',    label: 'Tables & QR',  icon: QrCode,          roles: ['super_admin','admin','manager'] },
   { to: '/admin/customers', label: 'Customers',    icon: Users,           roles: ['super_admin','admin'] },
   { to: '/admin/salary',    label: 'Salary',       icon: Users,           roles: ['super_admin','admin'] },
   { to: '/admin/rewards',   label: 'Rewards (GHODA)', icon: Gift,      roles: ['super_admin','admin'] },
   { to: '/admin/analytics', label: 'Analytics',    icon: BarChart2, roles: ['super_admin','admin'] },
-  { to: '/kitchen',         label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'] }, // Only Bhat, but filter is logic
+  { to: '/kitchen',         label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'] },
   { to: '/admin/branches',  label: 'Branches',     icon: GitBranch, roles: ['super_admin'] },
   { to: '/admin/staff',     label: 'Staff',        icon: Users,           roles: ['super_admin','admin'] },
   { to: '/admin/announcements', label: 'Announcements', icon: Megaphone,    roles: ['super_admin','admin','manager'] },

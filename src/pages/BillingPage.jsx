@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3 } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -36,11 +36,12 @@ export default function BillingPage() {
   const [newCustName, setNewCustName] = useState('')
   const [addingCust, setAddingCust] = useState(false)
 
-  // Table billing (Bhat only)
+  // Table billing
   const [cafeTables, setCafeTables] = useState([])
   const [selectedTable, setSelectedTable] = useState(null) // { id, table_number, current_order_id }
   const [loadingTable, setLoadingTable] = useState(false)
   const isBhatBranch = (branchId || selectedBranch) === 'bhat'
+  const [posMode, setPosMode] = useState(false) // Toggle between Tables Grid vs POS UI
 
   // Order Management
   const [editingOrderId, setEditingOrderId] = useState(null)
@@ -96,7 +97,7 @@ export default function BillingPage() {
     const branch = branchId || selectedBranch
     if (branch !== 'bhat') { setCafeTables([]); return }
     async function fetchTables() {
-      const { data } = await supabase.from('cafe_tables').select('*').eq('branch_id', 'bhat').order('table_number')
+      const { data } = await supabase.from('cafe_tables').select('*').eq('branch_id', branch).order('table_number')
       setCafeTables(data || [])
     }
     fetchTables()
@@ -545,6 +546,122 @@ export default function BillingPage() {
   }, [items, activeCategory, itemSearch])
   const subcategories = activeSubcategories
 
+  const renderTableDashboard = () => (
+    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-8 animate-fade-in pb-20">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-black text-ink-900 dark:text-white">Active Orders</h1>
+        <div className="flex gap-2">
+          {!branchId && (
+            <select className="input font-bold" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}>
+              <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
+            </select>
+          )}
+          <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary whitespace-nowrap text-xs md:text-sm px-4">Manage Orders</button>
+        </div>
+      </div>
+
+      {isBhatBranch && (
+        <div>
+          <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-ink-900 dark:text-white"><Grid3X3 className="text-ember"/> Dine-in Tables</h2>
+          {cafeTables.length === 0 ? (
+            <p className="text-ink-500 italic">No tables active.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {cafeTables.map(t => {
+                const isOccupied = t.status === 'occupied'
+                return (
+                  <div key={t.id} className={`card p-4 flex flex-col items-center justify-center gap-3 border-2 transition-all shadow-md ${isOccupied ? 'border-red-400 bg-red-50 dark:bg-red-900/10' : 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/10'}`}>
+                    <h3 className={`text-3xl font-black ${isOccupied ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{t.table_number}</h3>
+                    <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-full ${isOccupied ? 'bg-red-200 dark:bg-red-900/50 text-red-800 dark:text-red-300' : 'bg-emerald-200 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300'}`}>
+                      {t.status}
+                    </span>
+                    <button onClick={() => { loadTableOrder(t); setPosMode(true); }} className={`w-full py-2.5 rounded-xl text-sm font-black text-white shadow-lg transition-transform active:scale-95 ${isOccupied ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'}`}>
+                      {isOccupied ? 'Update Order' : 'New Order'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div>
+        <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-ink-900 dark:text-white"><ShoppingBag className="text-ember"/> Direct Orders</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="card p-6 border-2 border-amber-500 flex flex-col justify-between gap-4 bg-amber-50/30 dark:bg-amber-900/10">
+            <div>
+              <h3 className="text-2xl font-black text-amber-600 mb-1">Takeaway</h3>
+              <p className="text-sm text-ink-500 font-medium">Walk-in customers picking up orders.</p>
+            </div>
+            <button onClick={() => { setOrderType('Takeaway'); setSelectedTable(null); setPosMode(true); }} className="btn-primary bg-amber-500 hover:bg-amber-600 w-full py-3.5 shadow-lg shadow-amber-500/30 font-black">Start Takeaway Order</button>
+          </div>
+          <div className="card p-6 border-2 border-rose-500 flex flex-col justify-between gap-4 bg-rose-50/30 dark:bg-rose-900/10">
+            <div>
+              <h3 className="text-2xl font-black text-rose-600 mb-1">Zomato / Swiggy</h3>
+              <p className="text-sm text-ink-500 font-medium">Online delivery aggregators.</p>
+            </div>
+            <button onClick={() => { setOrderType('Zomato/Swiggy'); setSelectedTable(null); setPosMode(true); }} className="btn-primary bg-rose-500 hover:bg-rose-600 w-full py-3.5 shadow-lg shadow-rose-500/30 font-black">Start Delivery Order</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  if (!posMode) {
+    return (
+      <div className="h-full overflow-y-auto">
+        {renderTableDashboard()}
+        
+        {/* Manage Orders Modal (shared) */}
+        {showOrdersModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/80 backdrop-blur-sm">
+            <div className="bg-ink-50 dark:bg-ink-950 w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-scale-up">
+              <div className="flex justify-between items-center p-4 border-b border-ink-200 dark:border-ink-800 bg-white dark:bg-ink-900">
+                <h3 className="font-black text-lg text-ink-900 dark:text-white flex items-center gap-2"><Receipt size={20} className="text-ember"/> Manage Today's Orders</h3>
+                <button onClick={() => setShowOrdersModal(false)} className="text-ink-400 hover:text-red-500"><X size={24}/></button>
+              </div>
+              <div className="p-4 overflow-y-auto no-scrollbar space-y-3 flex-1">
+                {recentOrders.length === 0 ? <p className="text-center text-ink-400 py-10">No orders today.</p> :
+                 recentOrders.map(o => (
+                   <div key={o.id} className={`p-4 rounded-xl border ${o.status==='cancelled'?'bg-red-50/50 border-red-100':'bg-white dark:bg-ink-900 border-ink-200 dark:border-ink-800'}`}>
+                     <div className="flex justify-between items-start mb-2">
+                       <div>
+                         <p className={`font-bold text-sm ${o.status==='cancelled'?'text-red-500 line-through':'text-ink-900 dark:text-white'}`}>
+                           {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
+                           <span className="ml-2 text-xs font-normal text-ink-400 no-underline">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
+                         </p>
+                         <p className="text-xs text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
+                       </div>
+                       <div className="text-right">
+                         <p className="font-black text-lg text-ink-900 dark:text-white">₹{o.total}</p>
+                         {o.status === 'cancelled' ? <span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-0.5 rounded">Cancelled</span> :
+                          <div className="flex gap-2 justify-end mt-1">
+                            <button onClick={() => editOrder(o)} className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded">Edit</button>
+                            <button onClick={() => cancelOrder(o.id)} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded">Cancel</button>
+                          </div>
+                         }
+                       </div>
+                     </div>
+                     <div className="text-xs text-ink-500 mt-2 border-t border-ink-100 dark:border-ink-800/50 pt-2 flex flex-col gap-0.5">
+                       {(o.order_items||[]).map((oi, idx) => (
+                         <div key={idx} className="flex justify-between">
+                           <span><span className="font-bold">{oi.quantity}x</span> {oi.items?.name} {oi.items?.variant && `(${oi.items.variant})`}</span>
+                           <span>₹{oi.price * oi.quantity}</span>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 ))
+                }
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-5rem)] -m-4 md:-m-6 bg-ink-100 dark:bg-ink-950 relative overflow-hidden">
       
@@ -559,72 +676,7 @@ export default function BillingPage() {
             </button>
           ))}
 
-          {/* Table Selector — Bhat only */}
-          {isBhatBranch && (
-            <div className="mt-4 border-t border-ink-200 dark:border-ink-800 pt-4 pb-2 w-full">
-              <div className="flex items-center gap-2 mb-3 px-1">
-                <Grid3X3 size={14} className="text-ink-400" />
-                <span className="text-[11px] font-black uppercase tracking-widest text-ink-400">Tables</span>
-                {selectedTable && (
-                  <button onClick={clearTable} className="ml-auto text-[10px] font-bold text-red-400 hover:text-red-600 bg-red-50 px-2 py-1 rounded">✕ Clear</button>
-                )}
-              </div>
-              
-              {cafeTables.length === 0 ? (
-                <div className="text-[10px] text-ink-400 px-1 py-2 text-center">No tables active.</div>
-              ) : (
-                <div className="flex justify-between gap-2 px-1">
-                  {/* Left Column (Odd Tables) */}
-                  <div className="flex flex-col gap-2 flex-1">
-                    {cafeTables.filter(t => {
-                      const num = parseInt(t.table_number?.toString().replace(/\D/g, ''))
-                      return !isNaN(num) && num % 2 !== 0
-                    }).map(t => {
-                      const isSelected = selectedTable?.id === t.id
-                      const isOccupied = t.status === 'occupied'
-                      const isAvail = t.status === 'available'
-                      return (
-                        <button key={t.id} onClick={() => loadTableOrder(t)} disabled={loadingTable}
-                          className={`w-full py-2.5 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
-                            isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
-                            isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
-                            isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
-                            'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
-                          }`}>
-                          <span>{t.table_number}</span>
-                          <span className="text-[9px] font-bold opacity-60 capitalize">{t.status}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  
-                  {/* Right Column (Even Tables) */}
-                  <div className="flex flex-col gap-2 flex-1">
-                    {cafeTables.filter(t => {
-                      const num = parseInt(t.table_number?.toString().replace(/\D/g, ''))
-                      return !isNaN(num) && num % 2 === 0
-                    }).map(t => {
-                      const isSelected = selectedTable?.id === t.id
-                      const isOccupied = t.status === 'occupied'
-                      const isAvail = t.status === 'available'
-                      return (
-                        <button key={t.id} onClick={() => loadTableOrder(t)} disabled={loadingTable}
-                          className={`w-full py-2.5 rounded-lg text-xs font-black flex flex-col items-center justify-center gap-0.5 border-2 transition-all ${
-                            isSelected ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300' :
-                            isOccupied ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:border-red-500' :
-                            isAvail    ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500' :
-                            'border-ink-200 dark:border-ink-700 bg-white dark:bg-ink-800 text-ink-500 hover:border-ink-400'
-                          }`}>
-                          <span>{t.table_number}</span>
-                          <span className="text-[9px] font-bold opacity-60 capitalize">{t.status}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Removed internal table selector, now handled in Table Dashboard */}
         </div>
       </div>
 
@@ -634,6 +686,10 @@ export default function BillingPage() {
 
         {/* Top Search Bar (Menu + Customer) */}
         <div className="p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex flex-col md:flex-row items-center gap-3 shadow-sm z-20">
+          <button onClick={() => setPosMode(false)} className="btn-secondary w-full md:w-auto md:px-4 py-2.5 md:mr-2 shrink-0 border-ink-300 hover:bg-ink-100 flex items-center justify-center gap-2">
+            <ArrowLeft size={16}/> Back to Dashboard
+          </button>
+          
           <div className="flex w-full gap-3">
             {/* 1. Menu Search */}
             <div className="flex-1 relative">
@@ -687,15 +743,6 @@ export default function BillingPage() {
               )}
             </div>
           )}
-          </div>
-          
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            {!branchId && (
-              <select className="input text-xs w-24 py-2.5 bg-white dark:bg-ink-900 flex-shrink-0" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}>
-                <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
-              </select>
-            )}
-            <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary whitespace-nowrap text-xs px-3 py-2.5 bg-white dark:bg-ink-900 font-bold flex-1 md:flex-none">Manage Orders</button>
           </div>
         </div>
 

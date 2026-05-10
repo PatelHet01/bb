@@ -1,0 +1,434 @@
+import { useEffect, useState } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuthStore } from '../store/authStore'
+import { Plus, Check, Clock, User, DollarSign, Shield, ShieldAlert, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import toast from 'react-hot-toast'
+
+export default function StaffSalaryPage() {
+  const { branchId, role, user } = useAuthStore()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'salary'
+  
+  const [workers, setWorkers] = useState([])
+  const [records, setRecords] = useState([])
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  
+  const setActiveTab = (tab) => setSearchParams({ tab })
+  const [showWorkerForm, setShowWorkerForm] = useState(false)
+  const [workerForm, setWorkerForm] = useState({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul' })
+  const [showUserForm, setShowUserForm] = useState(false)
+  const [userForm, setUserForm] = useState({ username: '', password: '', role: 'manager', branch_id: branchId || 'gurukul' })
+  const [saving, setSaving] = useState(false)
+  
+  const [shifts, setShifts] = useState([])
+  const todayStr = new Date().toISOString().split('T')[0]
+  const [dayCode, setDayCode] = useState(todayStr.replace(/-/g, '').slice(-4))
+  const [activeMonth, setActiveMonth] = useState(todayStr.slice(0, 7))
+
+  const isSuperAdmin = role === 'super_admin'
+  const isAdmin = role === 'admin' || isSuperAdmin
+
+  useEffect(() => { fetchData() }, [branchId, activeMonth, activeTab])
+
+  async function fetchData() {
+    setLoading(true)
+    try {
+      if (activeTab === 'salary' || activeTab === 'attendance') {
+        let wQ = supabase.from('workers').select('*').order('name')
+        if (branchId) wQ = wQ.eq('branch_id', branchId)
+        const { data: wData } = await wQ
+        setWorkers(wData || [])
+
+        if (activeTab === 'salary') {
+          let rQ = supabase.from('salary_records').select('*').eq('month_year', activeMonth)
+          const { data: rData } = await rQ
+          const workerIds = (wData || []).map(w => w.id)
+          setRecords((rData || []).filter(r => workerIds.includes(r.worker_id)))
+        }
+
+        if (activeTab === 'attendance') {
+          const { data: sData } = await supabase.from('shifts').select('*').gte('clock_in', `${todayStr}T00:00:00Z`)
+          setShifts(sData || [])
+        }
+      }
+
+      if (activeTab === 'access') {
+        let uQ = supabase.from('users').select('*').order('created_at', { ascending: false })
+        if (!isSuperAdmin && branchId) uQ = uQ.eq('branch_id', branchId)
+        const { data: uData } = await uQ
+        setUsers(uData || [])
+      }
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Worker Handlers
+  async function handleAddWorker(e) {
+    e.preventDefault()
+    setSaving(true)
+    const { error } = await supabase.from('workers').insert({
+      name: workerForm.name, 
+      role: workerForm.role, 
+      base_salary: parseFloat(workerForm.base_salary), 
+      branch_id: workerForm.branch_id
+    })
+    setSaving(false)
+    if (error) return toast.error(error.message)
+    toast.success('Worker added')
+    setShowWorkerForm(false)
+    setWorkerForm({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul' })
+    fetchData()
+  }
+
+  // Salary Handlers
+  async function generateMonthlyRecords() {
+    const existingIds = records.map(r => r.worker_id)
+    const newWorkers = workers.filter(w => w.is_active && !existingIds.includes(w.id))
+    if (newWorkers.length === 0) return toast('All records up to date for ' + activeMonth)
+    const inserts = newWorkers.map(w => ({
+      worker_id: w.id, month_year: activeMonth, base_salary: w.base_salary, net_payable: w.base_salary, status: 'unpaid'
+    }))
+    const { error } = await supabase.from('salary_records').insert(inserts)
+    if (error) toast.error(error.message)
+    else { toast.success(`Generated ${inserts.length} salary records`); fetchData() }
+  }
+
+  async function updateAdvance(recordId, newAdvance) {
+    const record = records.find(r => r.id === recordId)
+    if (!record) return
+    const net = record.base_salary - newAdvance
+    const { error } = await supabase.from('salary_records').update({ advance_taken: newAdvance, net_payable: net }).eq('id', recordId)
+    if (error) toast.error(error.message)
+    else fetchData()
+  }
+
+  async function markPaid(recordId) {
+    const { error } = await supabase.from('salary_records').update({ status: 'paid' }).eq('id', recordId)
+    if (error) toast.error(error.message)
+    else fetchData()
+  }
+
+  // Attendance Handlers
+  async function clockIn(workerId) {
+    const { error } = await supabase.from('shifts').insert({
+      worker_id: workerId, branch_id: branchId || 'gurukul', day_code: dayCode, clock_in: new Date().toISOString()
+    })
+    if (error) toast.error(error.message)
+    else { toast.success('Clocked In'); fetchData() }
+  }
+
+  async function clockOut(shiftId) {
+    const { error } = await supabase.from('shifts').update({ clock_out: new Date().toISOString() }).eq('id', shiftId)
+    if (error) toast.error(error.message)
+    else { toast.success('Clocked Out'); fetchData() }
+  }
+
+  // User Access Handlers
+  async function handleAddUser(e) {
+    e.preventDefault()
+    setSaving(true)
+    const usernameClean = userForm.username.toLowerCase()
+    const { error } = await supabase.from('users').insert({
+      username: usernameClean,
+      email: `${usernameClean}-${Date.now()}@bb.local`,
+      password_hash: userForm.password, // In real app, hash this
+      role: userForm.role,
+      branch_id: userForm.branch_id
+    })
+    setSaving(false)
+    if (error) {
+      if (error.code === '23505') return toast.error('Username already taken')
+      return toast.error(error.message)
+    }
+    toast.success('User account created')
+    setShowUserForm(false)
+    setUserForm({ username: '', password: '', role: 'manager', branch_id: branchId || 'gurukul' })
+    fetchData()
+  }
+
+  async function toggleUserStatus(id, currentStatus) {
+    await supabase.from('users').update({ is_active: !currentStatus }).eq('id', id)
+    fetchData()
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6 pb-20 animate-fade-in">
+      {/* Unified Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-ink-900 dark:text-white tracking-tight">Staff & Salary Management</h1>
+          <div className="flex gap-4 mt-3">
+            {[
+              { id: 'salary', label: 'Salary Ledger', icon: DollarSign },
+              { id: 'attendance', label: 'Daily Attendance', icon: Clock },
+              { id: 'access', label: 'System Access', icon: Shield }
+            ].map(tab => (
+              <button 
+                key={tab.id} 
+                onClick={() => setActiveTab(tab.id)} 
+                className={`flex items-center gap-2 text-sm font-bold pb-2 border-b-2 transition-all ${activeTab === tab.id ? 'border-ember text-ember' : 'border-transparent text-ink-400 hover:text-ink-600'}`}
+              >
+                <tab.icon size={16} /> {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        <div className="flex gap-2">
+          {activeTab === 'salary' && (
+            <div className="flex gap-2">
+              <input type="month" className="input py-2" value={activeMonth} onChange={e => setActiveMonth(e.target.value)} />
+              <button className="btn-secondary py-2" onClick={generateMonthlyRecords}>Generate Records</button>
+            </div>
+          )}
+          {activeTab === 'access' && isAdmin && (
+            <button className="btn-primary py-2 px-4" onClick={() => setShowUserForm(true)}><Plus size={16} className="mr-1"/> Add User</button>
+          )}
+          {(activeTab === 'salary' || activeTab === 'attendance') && (
+            <button className="btn-primary py-2 px-4" onClick={() => setShowWorkerForm(true)}><Plus size={16} className="mr-1"/> Add Worker</button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="min-h-[60vh]">
+        {activeTab === 'salary' && (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Workers Sidebar */}
+            <div className="lg:col-span-1 space-y-4">
+              <h3 className="text-xs font-black text-ink-400 uppercase tracking-widest">Active Staff</h3>
+              <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden divide-y divide-ink-100 dark:divide-ink-800">
+                {workers.map(w => (
+                  <div key={w.id} className="p-3 flex justify-between items-center hover:bg-ink-50 dark:hover:bg-ink-800 transition-colors">
+                    <div>
+                      <p className="font-bold text-sm text-ink-900 dark:text-white">{w.name}</p>
+                      <p className="text-[10px] font-bold text-ink-500 uppercase">{w.role} · ₹{w.base_salary}</p>
+                    </div>
+                    {!w.is_active && <span className="badge bg-red-100 text-red-600 text-[9px]">Inactive</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Salary Main Table */}
+            <div className="lg:col-span-3 space-y-4">
+              <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-ink-50 dark:bg-ink-950/50">
+                      <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Worker</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Base Salary</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center w-32">Advance Taken</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Net Payable</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Status</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                    {records.map(r => {
+                      const w = workers.find(x => x.id === r.worker_id)
+                      if (!w) return null
+                      return (
+                        <tr key={r.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
+                          <td className="px-4 py-4">
+                            <p className="font-bold text-sm text-ink-900 dark:text-white">{w.name}</p>
+                            <p className="text-[10px] text-ink-500">{w.role}</p>
+                          </td>
+                          <td className="px-4 py-4 text-right font-bold text-sm">₹{r.base_salary}</td>
+                          <td className="px-4 py-4">
+                            <input 
+                              type="number" 
+                              className="w-full bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold text-center py-1 rounded-lg border border-red-100 dark:border-red-900/50 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                              defaultValue={r.advance_taken}
+                              onBlur={(e) => updateAdvance(r.id, parseFloat(e.target.value) || 0)}
+                              disabled={r.status === 'paid'}
+                            />
+                          </td>
+                          <td className="px-4 py-4 text-right font-black text-emerald-600 dark:text-emerald-400">₹{r.net_payable.toLocaleString()}</td>
+                          <td className="px-4 py-4 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${r.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            {r.status !== 'paid' && (
+                              <button onClick={() => {if(confirm(`Mark ₹${r.net_payable} as PAID to ${w.name}?`)) markPaid(r.id)}} className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95">Pay Now</button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {records.length === 0 && (
+                      <tr><td colSpan="6" className="py-12 text-center text-ink-400 italic text-sm">No records for {activeMonth}. Click 'Generate Records' to start.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'attendance' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-ink-900 to-ink-800 p-6 rounded-2xl border border-ink-700 shadow-xl flex justify-between items-center text-white">
+              <div>
+                <h2 className="text-xl font-black tracking-tight">Daily Attendance Tracking</h2>
+                <p className="text-ink-400 text-xs mt-1 font-semibold uppercase tracking-widest">Date: {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-black text-ember uppercase tracking-widest mb-1">Today's Clock-in Code</p>
+                <div className="text-4xl font-black text-white bg-white/10 px-6 py-2 rounded-xl border border-white/20 letter-spacing-widest">
+                  {dayCode}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-ink-50 dark:bg-ink-950/50">
+                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Worker</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Role</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Clock In</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Clock Out</th>
+                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Status / Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                  {workers.filter(w=>w.is_active).map(w => {
+                    const shift = shifts.find(s => s.worker_id === w.id && !s.clock_out)
+                    const completedShift = shifts.find(s => s.worker_id === w.id && s.clock_out)
+                    return (
+                      <tr key={w.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
+                        <td className="px-4 py-4 font-bold text-sm text-ink-900 dark:text-white">{w.name}</td>
+                        <td className="px-4 py-4 text-xs font-semibold text-ink-500 uppercase">{w.role}</td>
+                        <td className="px-4 py-4 text-center font-mono text-sm">
+                          {shift ? new Date(shift.clock_in).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 
+                           completedShift ? new Date(completedShift.clock_in).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--:--'}
+                        </td>
+                        <td className="px-4 py-4 text-center font-mono text-sm">
+                          {completedShift ? new Date(completedShift.clock_out).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--:--'}
+                        </td>
+                        <td className="px-4 py-4 text-right">
+                          {!shift && !completedShift && (
+                            <button onClick={()=>clockIn(w.id)} className="text-xs font-black text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-100 tracking-wider uppercase">Clock In</button>
+                          )}
+                          {shift && !completedShift && (
+                            <button onClick={()=>clockOut(shift.id)} className="text-xs font-black text-amber-600 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-100 tracking-wider uppercase">Clock Out</button>
+                          )}
+                          {completedShift && <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">Shift Completed</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'access' && (
+          <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-ink-50 dark:bg-ink-950/50">
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Username</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Role</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Branch Scope</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Status</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                {users.map(u => (
+                  <tr key={u.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
+                    <td className="px-4 py-4 font-bold text-sm text-ink-900 dark:text-white">@{u.username}</td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${u.role === 'super_admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>{u.role}</span>
+                    </td>
+                    <td className="px-4 py-4 text-xs font-bold text-ink-500 uppercase">{u.branch_id || 'Global / All'}</td>
+                    <td className="px-4 py-4 text-center">
+                      {u.is_active ? <span className="text-emerald-500 font-bold text-[10px] uppercase">Active</span> : <span className="text-red-500 font-bold text-[10px] uppercase">Disabled</span>}
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      {isAdmin && u.role !== 'super_admin' && (
+                        <button 
+                          onClick={() => toggleUserStatus(u.id, u.is_active)}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all active:scale-95 ${u.is_active ? 'text-red-500 border-red-200 bg-red-50 hover:bg-red-100' : 'text-emerald-500 border-emerald-200 bg-emerald-50 hover:bg-emerald-100'}`}
+                        >
+                          {u.is_active ? 'Disable Access' : 'Enable Access'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Forms Overlay / Modals */}
+      {showWorkerForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <form onSubmit={handleAddWorker} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+              <h3 className="font-bold text-ink-900 dark:text-white">Add New Staff Member</h3>
+              <button type="button" onClick={() => setShowWorkerForm(false)} className="text-ink-400 hover:text-ink-900"><X size={20}/></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div><label className="label">Full Name</label><input required type="text" className="input" placeholder="e.g. Ramesh Kumar" value={workerForm.name} onChange={e=>setWorkerForm({...workerForm, name: e.target.value})} /></div>
+              <div><label className="label">Role</label><input required type="text" className="input" placeholder="e.g. Head Chef" value={workerForm.role} onChange={e=>setWorkerForm({...workerForm, role: e.target.value})} /></div>
+              <div><label className="label">Base Salary (per month)</label><input required type="number" className="input" placeholder="₹" value={workerForm.base_salary} onChange={e=>setWorkerForm({...workerForm, base_salary: e.target.value})} /></div>
+              {isSuperAdmin && (
+                <div><label className="label">Assign to Branch</label>
+                  <select className="input" value={workerForm.branch_id} onChange={e=>setWorkerForm({...workerForm, branch_id: e.target.value})}>
+                    <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
+              <button type="button" onClick={() => setShowWorkerForm(false)} className="btn-secondary flex-1">Cancel</button>
+              <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : 'Add Worker'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showUserForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <form onSubmit={handleAddUser} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+              <h3 className="font-bold text-ink-900 dark:text-white">Create System Login</h3>
+              <button type="button" onClick={() => setShowUserForm(false)} className="text-ink-400 hover:text-ink-900"><X size={20}/></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div><label className="label">Username</label><input required type="text" className="input lowercase" placeholder="e.g. bhat_manager" value={userForm.username} onChange={e=>setUserForm({...userForm, username: e.target.value.replace(/\s+/g,'_')})} /></div>
+              <div><label className="label">Temporary Password</label><input required type="text" className="input" placeholder="Set password" value={userForm.password} onChange={e=>setUserForm({...userForm, password: e.target.value})} /></div>
+              <div><label className="label">System Role</label>
+                <select className="input" value={userForm.role} onChange={e=>setUserForm({...userForm, role: e.target.value})} disabled={!isSuperAdmin}>
+                  <option value="manager">Manager</option>{isSuperAdmin && <option value="admin">Admin</option>}
+                </select>
+              </div>
+              {isSuperAdmin && (
+                <div><label className="label">Login Branch Access</label>
+                  <select className="input" value={userForm.branch_id} onChange={e=>setUserForm({...userForm, branch_id: e.target.value})}>
+                    <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
+              <button type="button" onClick={() => setShowUserForm(false)} className="btn-secondary flex-1">Cancel</button>
+              <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : 'Create Login'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}

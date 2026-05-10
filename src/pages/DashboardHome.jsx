@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X, UtensilsCrossed } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
 
 export default function DashboardHome() {
   const { role, branchId, branchName } = useAuthStore()
+  const navigate = useNavigate()
   const [stats, setStats] = useState({ revenue: 0, cashRev: 0, onlineRev: 0, orders: 0, customers: 0, outKhata: 0 })
   const [lowStockItems, setLowStockItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -16,6 +17,10 @@ export default function DashboardHome() {
   const [activeModal, setActiveModal] = useState(null) // 'revenue', 'khata', 'orders', 'customers'
   const [khataList, setKhataList] = useState([])
   const [recentCustomers, setRecentCustomers] = useState([])
+
+  // Active Tables (Bhat only)
+  const isBhatBranch = branchId === 'bhat' || (!branchId && role === 'super_admin')
+  const [activeTables, setActiveTables] = useState([])
 
   useEffect(() => {
     async function fetchStats() {
@@ -72,9 +77,10 @@ export default function DashboardHome() {
         const { data: recCust } = await rCQ
         setRecentCustomers(recCust || [])
 
-        // Calculate Cash/Online
+        // Calculate Cash/Online — ONLY from non-cancelled orders
+        const activeOrders = (ordersWithPayments || []).filter(o => o.status !== 'cancelled')
         let cashRev = 0; let onlineRev = 0;
-        (ordersWithPayments || []).forEach(o => {
+        activeOrders.forEach(o => {
           (o.order_payments || []).forEach(p => {
             if (p.mode === 'CASH') cashRev += Number(p.amount);
             if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD', 'GPAY', 'PHONEPE', 'ONLINE'].includes(p.mode)) onlineRev += Number(p.amount);
@@ -82,14 +88,36 @@ export default function DashboardHome() {
         })
 
         setStats({
-          revenue: ordersWithPayments?.reduce((s, o) => s + (o.total || 0), 0) || 0,
+          revenue: activeOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
           cashRev, onlineRev,
-          orders: ordersWithPayments?.length || 0,
+          orders: activeOrders.length,
           customers: custCount || 0,
           outKhata: outKhataTotal
         })
         setRecentOrders(ordersWithPayments || [])
         setTodayOrders(ordersWithPayments || [])
+
+        // Active occupied tables (bhat only)
+        if (branchId === 'bhat' || !branchId) {
+          const { data: tables } = await supabase
+            .from('cafe_tables')
+            .select('id, table_number, status, current_order_id')
+            .eq('branch_id', 'bhat')
+            .eq('status', 'occupied')
+          if (tables && tables.length > 0) {
+            const enriched = await Promise.all(tables.map(async t => {
+              if (!t.current_order_id) return { ...t, itemCount: 0, amount: 0 }
+              const { data: oi } = await supabase.from('order_items')
+                .select('quantity, price').eq('order_id', t.current_order_id)
+              const itemCount = (oi || []).reduce((s, i) => s + i.quantity, 0)
+              const amount = (oi || []).reduce((s, i) => s + i.quantity * i.price, 0)
+              return { ...t, itemCount, amount }
+            }))
+            setActiveTables(enriched)
+          } else {
+            setActiveTables([])
+          }
+        }
       } catch (e) {
         console.error(e)
       } finally {
@@ -103,6 +131,7 @@ export default function DashboardHome() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_payments' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'khata_ledger' }, fetchStats)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cafe_tables' }, fetchStats)
       .subscribe()
 
     return () => supabase.removeChannel(channel)
@@ -149,6 +178,54 @@ export default function DashboardHome() {
           ))
         }
       </div>
+
+      {/* Active Tables Widget — Bhat branch only */}
+      {(branchId === 'bhat' || role === 'super_admin') && activeTables.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-ink-100 dark:border-ink-800 bg-amber-50/50 dark:bg-amber-900/10">
+            <h2 className="font-semibold text-amber-700 dark:text-amber-400 text-sm flex items-center gap-2">
+              <UtensilsCrossed size={16} /> Active Tables — Bhat ({activeTables.length} occupied)
+            </h2>
+            <Link to="/admin/billing" className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 font-bold">Go to Billing →</Link>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50 dark:bg-ink-800/50">
+                <tr>
+                  {['Table', 'Items', 'Pending Amount', 'Action'].map(h => (
+                    <th key={h} className="tbl-head">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                {activeTables.map(t => (
+                  <tr key={t.id} className="tbl-row hover:bg-amber-50/30 dark:hover:bg-amber-900/10 cursor-pointer"
+                    onClick={() => navigate(`/admin/billing?table=${t.table_number}`)}>
+                    <td className="tbl-cell">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center justify-center font-black text-sm">{t.table_number}</div>
+                        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      </div>
+                    </td>
+                    <td className="tbl-cell">
+                      <span className="font-bold text-ink-900 dark:text-white">{t.itemCount}</span>
+                      <span className="text-ink-500 text-xs ml-1">item{t.itemCount !== 1 ? 's' : ''}</span>
+                    </td>
+                    <td className="tbl-cell font-black text-amber-600 dark:text-amber-400 text-base">
+                      ₹{t.amount.toLocaleString('en-IN')}
+                    </td>
+                    <td className="tbl-cell">
+                      <button className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                        Bill →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent orders */}

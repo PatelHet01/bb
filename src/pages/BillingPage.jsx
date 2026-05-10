@@ -50,6 +50,13 @@ export default function BillingPage() {
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
   const totalPaid = payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
 
+  // Cash denomination helper state (UI only, never stored)
+  const [cashGiven, setCashGiven] = useState(0)
+  const DENOMINATIONS = [10, 20, 50, 100, 200, 500, 2000]
+  const cashChange = cashGiven - total
+  const hasCashPayment = payments.some(p => p.mode === 'CASH')
+  const isSingleCash = payments.length === 1 && payments[0].mode === 'CASH'
+
   // Determine available tabs
   const availableTabs = useMemo(() => {
     const branch = branchId || selectedBranch
@@ -363,6 +370,18 @@ export default function BillingPage() {
       for (const c of cart) {
         await supabase.rpc('decrement_stock', { p_item_id: c.id, p_amount: c.quantity })
         
+        // Dynamic Recipe Ingredient Deduction
+        const { data: ingredients } = await supabase.from('item_ingredients')
+          .select('ingredient_item_id, quantity_per_unit').eq('item_id', c.id)
+        
+        if (ingredients && ingredients.length > 0) {
+          for (const ing of ingredients) {
+            const totalDeduction = ing.quantity_per_unit * c.quantity
+            await supabase.rpc('decrement_stock', { p_item_id: ing.ingredient_item_id, p_amount: totalDeduction })
+          }
+        }
+
+        // Hardcoded fallback for BB Cafe disposables if not configured in recipe system
         if (c.category === 'BB Cafe') {
           cafeDishCount += c.quantity;
           if (c.name.toLowerCase().includes('maggi')) {
@@ -442,6 +461,7 @@ export default function BillingPage() {
       // RESET POS (Blanking)
       setCart([]); setCustomer(null); setCustomerSearch(''); setOrderType('Dine-in'); setShowAddCustomer(false); setNewCustName('');
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
+      setCashGiven(0)
       setCartExpanded(false)
       const wasEditing = editingOrderId
       setEditingOrderId(null)
@@ -864,6 +884,44 @@ export default function BillingPage() {
                   {payments.length > 1 && <button onClick={() => removePayment(i)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><X size={16}/></button>}
                 </div>
               ))}
+              {/* Cash Denomination Helper - UI only */}
+              {isSingleCash && total > 0 && (
+                <div className="bg-emerald-50 dark:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">Cash Helper</span>
+                    {cashGiven > 0 && (
+                      <button onClick={() => setCashGiven(0)} className="text-[9px] text-emerald-600 hover:text-emerald-800 font-bold">Reset</button>
+                    )}
+                  </div>
+                  {/* Denomination Buttons */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {DENOMINATIONS.map(d => (
+                      <button key={d} onClick={() => setCashGiven(g => g + d)}
+                        className="px-2 py-1 bg-white dark:bg-ink-800 border border-emerald-200 dark:border-emerald-700 rounded-lg text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors active:scale-95">
+                        {`+₹${d}`}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Running total */}
+                  <div className="flex justify-between items-center pt-1 border-t border-emerald-200 dark:border-emerald-800">
+                    <div className="text-xs">
+                      <span className="text-ink-500">Given: </span>
+                      <span className="font-black text-ink-900 dark:text-white">₹{cashGiven.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="text-xs">
+                      {cashGiven >= total ? (
+                        <span className="font-black text-emerald-600 dark:text-emerald-400">
+                          Return: ₹{cashChange.toLocaleString('en-IN')}
+                        </span>
+                      ) : (
+                        <span className="text-red-500 font-bold">
+                          Short: ₹{Math.abs(cashChange).toLocaleString('en-IN')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
               </div>
             </div>
           )}

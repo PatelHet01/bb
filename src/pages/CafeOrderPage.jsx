@@ -85,16 +85,26 @@ export default function CafeOrderPage() {
 
     let customer = custLookup
     if (!customer) {
-      // Create new customer
-      const { data: newCust, error } = await supabase.from('customers').insert({
-        name: custForm.name.trim(),
-        mobile_number: mobile,
-        email: custForm.email.trim() || null,
-        branch_id: tableInfo.branch_id,
-        registration_type: 'self',
-      }).select().single()
-      if (error) return alert('Could not save details: ' + error.message)
-      customer = newCust
+      // Upsert: if mobile exists, update name; otherwise create
+      const { data: existing } = await supabase.from('customers')
+        .select('*').eq('mobile_number', mobile).maybeSingle()
+      if (existing) {
+        // Update name if changed
+        if (existing.name !== custForm.name.trim()) {
+          await supabase.from('customers').update({ name: custForm.name.trim() }).eq('id', existing.id)
+        }
+        customer = { ...existing, name: custForm.name.trim() }
+      } else {
+        const { data: newCust, error } = await supabase.from('customers').insert({
+          name: custForm.name.trim(),
+          mobile_number: mobile,
+          email: custForm.email.trim() || null,
+          branch_id: tableInfo.branch_id,
+          registration_type: 'self',
+        }).select().single()
+        if (error) return alert('Could not save details: ' + error.message)
+        customer = newCust
+      }
     }
     setCustConfirmed(customer)
     setShowCustomerForm(false)
@@ -129,6 +139,7 @@ export default function CafeOrderPage() {
 
   function handleCheckout() {
     setCartOpen(false)
+    // Always require customer details — no anonymous orders
     setShowCustomerForm(true)
   }
 
@@ -204,10 +215,8 @@ export default function CafeOrderPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <div>
             <h2 style={{ color: 'white', fontWeight: 900, fontSize: '1.2rem' }}>Your Details</h2>
-            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', marginTop: '2px' }}>Quick save for rewards & order history</p>
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', marginTop: '2px' }}>Required to place your order</p>
           </div>
-          <button onClick={() => { setShowCustomerForm(false); placeOrder(null) }}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '1.5rem' }}>×</button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -253,10 +262,7 @@ export default function CafeOrderPage() {
             {custLookup ? `Place Order as ${custLookup.name}` : 'Save & Place Order'}
           </button>
 
-          <button onClick={() => { setShowCustomerForm(false); placeOrder(null) }}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}>
-            Skip, place order anonymously
-          </button>
+          {/* No skip button — customer details are mandatory */}
         </div>
       </motion.div>
     </div>

@@ -28,20 +28,21 @@ export default function LoginPage() {
     const u = username.trim().toLowerCase()
     setLoading(true)
     
-    const record = HARDCODED_USERS[u]
-    if (record && record.password === password) {
-      setAuth({ username: u, id: `hardcoded-${u}` }, record.role, record.branchId, record.branchName)
-      toast.success(`Signed in as ${u}`)
+    // DB check first (allows overriding hardcoded passwords if they changed it)
+    const { data } = await supabase.from('users').select('*').eq('username', u).eq('is_active', true).single()
+    if (data && data.password_hash === password) {
+      setAuth({ username: data.username, id: data.id }, data.role, data.branch_id, data.branch_id ? data.branch_id.toUpperCase() : 'All Branches')
+      toast.success(`Signed in as ${data.username}`)
       navigate('/admin/dashboard', { replace: true })
       setLoading(false)
       return
     }
 
-    // DB check for Staff/Managers created via StaffPage
-    const { data } = await supabase.from('users').select('*').eq('username', u).eq('is_active', true).single()
-    if (data && data.password_hash === password) {
-      setAuth({ username: data.username, id: data.id }, data.role, data.branch_id, data.branch_id ? data.branch_id.toUpperCase() : 'All Branches')
-      toast.success(`Signed in as ${data.username}`)
+    // Fallback to hardcoded defaults only if DB record doesn't exist
+    const record = HARDCODED_USERS[u]
+    if (record && record.password === password && !data) {
+      setAuth({ username: u, id: `hardcoded-${u}` }, record.role, record.branchId, record.branchName)
+      toast.success(`Signed in as ${u}`)
       navigate('/admin/dashboard', { replace: true })
       setLoading(false)
       return

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { Utensils, Check, Clock, Trash2, ArrowLeft } from 'lucide-react'
 import toast from 'react-hot-toast'
+import OrderNotificationOverlay from '../components/shared/OrderNotificationOverlay'
 
 export default function KDSPage() {
   const { branchId } = useAuthStore()
@@ -150,6 +151,7 @@ export default function KDSPage() {
           ))}
         </div>
       )}
+      <OrderNotificationOverlay />
     </div>
   )
 }

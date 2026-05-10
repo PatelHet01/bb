@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Search, X, ArrowDownCircle, ArrowUpCircle, UserCircle, Edit2, ShoppingBag } from 'lucide-react'
+import { Plus, Search, X, ArrowDownCircle, ArrowUpCircle, UserCircle, Edit2, ShoppingBag, Download } from 'lucide-react'
 
 export default function CustomersPage() {
   const { branchId, user, role } = useAuthStore()
@@ -26,6 +26,33 @@ export default function CustomersPage() {
   const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '' })
 
   const isAdmin = role === 'admin' || role === 'super_admin'
+
+  function exportCSV() {
+    const rows = [['Name','Username','Mobile','DOB','Branch','Registration Type','Khata Balance','Advance Balance','GHODA Coins','Total Orders','Registration Date']]
+    filtered.forEach(c => {
+      rows.push([
+        c.name,
+        c.username || '',
+        c.mobile_number,
+        c.dob || '',
+        c.branch_id || 'Global',
+        c.registration_type || 'admin',
+        c.khataBalance || 0,
+        c.advanceBalance || 0,
+        c.ghoda_coins || 0,
+        c.totalPurchases || 0,
+        new Date(c.created_at).toLocaleDateString('en-IN')
+      ])
+    })
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `customers_export_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+    toast.success(`Exported ${filtered.length} customers`)
+  }
 
   async function fetchCustomers() {
     // Nested query to get balances on the list
@@ -233,9 +260,14 @@ export default function CustomersPage() {
               <h1 className="text-xl font-black text-ink-900 dark:text-white tracking-tight">Customers</h1>
               <p className="text-sm font-semibold text-ink-500 mt-0.5">{customers.length} total users</p>
             </div>
-            <button className="btn-primary shadow-md px-4 py-2" onClick={() => setShowForm(!showForm)}>
-              <Plus size={16} /> New Customer
-            </button>
+            <div className="flex gap-2">
+              <button className="btn-secondary px-3 py-2" onClick={exportCSV} title="Export filtered customers as CSV">
+                <Download size={15} /> Export CSV
+              </button>
+              <button className="btn-primary shadow-md px-4 py-2" onClick={() => setShowForm(!showForm)}>
+                <Plus size={16} /> New Customer
+              </button>
+            </div>
           </div>
 
           <div className="relative">

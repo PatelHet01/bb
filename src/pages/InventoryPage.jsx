@@ -5,17 +5,18 @@ import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import { Plus, Search, AlertTriangle, ToggleLeft, ToggleRight, Edit2, Check, X, Trash2, Archive, RefreshCw, LayoutGrid, Download, Upload } from 'lucide-react'
 import { BRANCH_CATEGORY_MAP, CATEGORY_ICONS, CATEGORY_SUBCATEGORIES } from '../lib/branchConfig'
+import MenuPage from './MenuPage'
 
 const UNITS = ['piece','gram','ml','kg','litre','pack','session']
 
 export default function InventoryPage() {
   const { branchId, role } = useAuthStore()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
-  const [mainTab, setMainTab] = useState('Active') // Active, Archived, Disposables
+  const [mainTab, setMainTab] = useState(searchParams.get('tab') || 'Active') // Active, Archived, Disposables, menu
   const [lowStockFilter, setLowStockFilter] = useState(searchParams.get('filter') === 'low_stock')
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
@@ -27,6 +28,11 @@ export default function InventoryPage() {
   const [editingRow, setEditingRow] = useState(null)
   const [editForm, setEditForm] = useState({})
 
+  // Ingredient Linking (Recipe System)
+  const [editingIngredients, setEditingIngredients] = useState(null) // item.id being edited
+  const [itemIngredients, setItemIngredients] = useState({}) // { [item_id]: [{ingredient_item_id, quantity_per_unit, id}] }
+  const [newIngredientRow, setNewIngredientRow] = useState({ ingredient_item_id: '', quantity_per_unit: 1 })
+
   // Quick Stock Editing
   const [editingStockId, setEditingStockId] = useState(null)
   const [editingStockVal, setEditingStockVal] = useState('')
@@ -35,8 +41,23 @@ export default function InventoryPage() {
   const [bulkMode, setBulkMode] = useState(false)
   const [bulkStocks, setBulkStocks] = useState({})
 
+  const [dbCategories, setDbCategories] = useState([])
+  const [showCatForm, setShowCatForm] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+
   const activeBranch = branchId || 'gurukul'
-  const branchCats = BRANCH_CATEGORY_MAP[activeBranch] || Object.values(BRANCH_CATEGORY_MAP).flat().filter((v,i,a)=>a.indexOf(v)===i)
+  const branchCats = Array.from(new Set([
+    ...(BRANCH_CATEGORY_MAP[activeBranch] || Object.values(BRANCH_CATEGORY_MAP).flat()),
+    ...dbCategories.map(c => c.name)
+  ]))
+  
+  const getSubcategories = (cat) => {
+    const conf = CATEGORY_SUBCATEGORIES[cat]
+    if (conf && conf.length) return conf
+    const dbSubs = dbCategories.find(c => c.name === cat)?.subcategories
+    return (Array.isArray(dbSubs) && dbSubs.length) ? dbSubs : ['General']
+  }
+
   const isManager = role === 'manager'
   const isAdmin = role === 'admin' || role === 'super_admin'
   const canDefineItems = isAdmin || role === 'super_admin' // Only admins can create/delete/archive
@@ -50,8 +71,18 @@ export default function InventoryPage() {
     setLoading(false)
   }
 
+  async function fetchCategories() {
+    let q = supabase.from('categories').select('*')
+    if (branchId && branchId !== 'All Branches') {
+      q = q.or(`branch_id.eq.${branchId},is_global.eq.true`)
+    }
+    const { data } = await q
+    if (data) setDbCategories(data)
+  }
+
   useEffect(() => { 
     fetchItems() 
+    fetchCategories()
     
     // Realtime Sync
     const chan = supabase.channel('items_changes')
@@ -152,6 +183,18 @@ export default function InventoryPage() {
   function startEdit(item) {
     setEditingRow(item.id)
     setEditForm({ ...item })
+    // Fetch ingredients for this item
+    fetchItemIngredients(item.id)
+  }
+  async function fetchItemIngredients(itemId) {
+    const { data } = await supabase.from('item_ingredients')
+      .select('*')
+      .eq('item_id', itemId)
+    const mapped = (data || []).map(d => ({
+      ...d,
+      ingredient_item: items.find(i => i.id === d.ingredient_item_id) || { name: 'Unknown' }
+    }))
+    setItemIngredients(prev => ({ ...prev, [itemId]: mapped }))
   }
   async function saveInlineEdit() {
     if (!editForm.name || !editForm.category) return
@@ -160,6 +203,37 @@ export default function InventoryPage() {
     setItems(p => p.map(i => i.id === id ? { ...i, ...updates } : i))
     setEditingRow(null)
     toast.success('Saved')
+  }
+
+  async function addIngredient(itemId) {
+    if (!newIngredientRow.ingredient_item_id) return toast.error('Select an ingredient')
+    if (!newIngredientRow.quantity_per_unit || newIngredientRow.quantity_per_unit <= 0) return toast.error('Enter valid quantity')
+    const { data, error } = await supabase.from('item_ingredients').insert({
+      item_id: itemId,
+      ingredient_item_id: newIngredientRow.ingredient_item_id,
+      quantity_per_unit: parseFloat(newIngredientRow.quantity_per_unit),
+      branch_id: branchId || 'bhat'
+    }).select('*').single()
+    if (error) return toast.error(error.message)
+    const newLinkedIng = {
+      ...data,
+      ingredient_item: items.find(i => i.id === data.ingredient_item_id) || { name: 'Unknown' }
+    }
+    setItemIngredients(prev => ({
+      ...prev,
+      [itemId]: [...(prev[itemId] || []), newLinkedIng]
+    }))
+    setNewIngredientRow({ ingredient_item_id: '', search: '', quantity_per_unit: 1 })
+    toast.success('Ingredient linked')
+  }
+
+  async function removeIngredient(itemId, ingId) {
+    await supabase.from('item_ingredients').delete().eq('id', ingId)
+    setItemIngredients(prev => ({
+      ...prev,
+      [itemId]: (prev[itemId] || []).filter(i => i.id !== ingId)
+    }))
+    toast.success('Ingredient removed')
   }
 
   // --- Actions ---
@@ -342,30 +416,71 @@ export default function InventoryPage() {
             </label>
           )}
           {canDefineItems && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap sm:flex-nowrap">
               <button onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Paan' })) }} className="btn-primary flex-1 sm:flex-none">
                 <Plus size={16} /> Add Item
               </button>
-              <button onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Inventory', subcategory: 'Disposables', price: 0 })) }} className="btn-secondary flex-1 sm:flex-none">
+              <button onClick={() => { setShowForm(!showForm); setForm(p => ({ ...p, category: 'Inventory', subcategory: 'Disposables', price: 0 })) }} className="btn-secondary flex-1 sm:flex-none whitespace-nowrap">
                 <Plus size={16} /> Add Disposable
+              </button>
+              <button onClick={() => setShowCatForm(!showCatForm)} className="btn-secondary flex-1 sm:flex-none whitespace-nowrap">
+                <LayoutGrid size={16} /> Add Category
               </button>
             </div>
           )}
         </div>
       </div>
 
+      {showCatForm && (
+        <div className="card p-5 animate-slide-up border-2 border-amber-500/20 shadow-xl bg-amber-50/10 dark:bg-amber-900/10">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="font-bold text-zinc-900 dark:text-white text-lg flex items-center gap-2"><LayoutGrid className="text-amber-500"/> New Category</h2>
+            <button onClick={() => setShowCatForm(false)} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
+          </div>
+          <form onSubmit={async (e) => {
+            e.preventDefault()
+            if(!newCatName.trim()) return
+            const { error } = await supabase.from('categories').insert({
+              name: newCatName.trim(),
+              branch_id: branchId === 'All Branches' ? null : branchId,
+              is_global: branchId === 'All Branches'
+            })
+            if(error) return toast.error(error.message)
+            toast.success('Category Added')
+            setNewCatName('')
+            setShowCatForm(false)
+            fetchCategories()
+          }} className="flex gap-4 items-end">
+            <div className="flex-1">
+              <label className="label">Category Name *</label>
+              <input className="input w-full" value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="e.g. Raw Materials" required autoFocus/>
+            </div>
+            <button type="submit" className="btn-primary">Save Category</button>
+          </form>
+        </div>
+      )}
+
       {/* Main Tabs */}
-      <div className="flex border-b border-zinc-200 dark:border-zinc-800 gap-6">
-        {['Active', 'Archived', 'Disposables'].map(tab => (
-          <button key={tab} onClick={() => setMainTab(tab)}
-            className={`pb-3 text-sm font-bold border-b-2 transition-colors ${mainTab === tab ? 'border-ember text-ember' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'}`}>
-            {tab}
-          </button>
-        ))}
+      <div className="flex border-b border-zinc-200 dark:border-zinc-800 gap-6 overflow-x-auto no-scrollbar">
+        {['Active', 'Archived', 'Disposables', 'BB Cafe Menu'].map(tab => {
+          // 'menu' param maps to 'BB Cafe Menu' tab
+          const isActive = mainTab === tab || (tab === 'BB Cafe Menu' && mainTab === 'menu');
+          return (
+            <button key={tab} onClick={() => setMainTab(tab === 'BB Cafe Menu' ? 'menu' : tab)}
+              className={`pb-3 text-sm font-bold border-b-2 whitespace-nowrap transition-colors ${isActive ? 'border-ember text-ember' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'}`}>
+              {tab}
+            </button>
+          )
+        })}
       </div>
 
-      {/* Add form */}
-      {showForm && canDefineItems && (
+      {mainTab === 'menu' && (
+        <div className="mt-6">
+          <MenuPage isEmbedded={true} />
+        </div>
+      )}
+
+      {mainTab !== 'menu' && showForm && canDefineItems && (
         <div className="card p-5 animate-slide-up border-2 border-ember/20 shadow-xl">
           <div className="flex justify-between items-center mb-4">
             <h2 className="font-bold text-zinc-900 dark:text-white text-lg">New {form.category === 'Inventory' ? 'Disposable' : 'Item'}</h2>
@@ -382,27 +497,28 @@ export default function InventoryPage() {
                 <input className="input w-full" value={form.variant} onChange={e => setForm(p => ({ ...p, variant: e.target.value }))} placeholder="e.g. Regular" />
               </div>
               
+              <div>
+                <label className="label">Category *</label>
+                <select className="input w-full" value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value, subcategory: getSubcategories(e.target.value)[0] }))} required>
+                  <option value="">Select…</option>
+                  {Array.from(new Set([...branchCats, 'Inventory'])).map(c => (
+                    <option key={c} value={c}>{(CATEGORY_ICONS[c] || dbCategories.find(d=>d.name===c)?.icon || '📁')} {c}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Subcategory *</label>
+                <select className="input w-full" value={form.subcategory} onChange={e => setForm(p => ({ ...p, subcategory: e.target.value }))} required>
+                  <option value="">Select…</option>
+                  {getSubcategories(form.category).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
               {form.category !== 'Inventory' && (
-                <>
-                  <div>
-                    <label className="label">Category *</label>
-                    <select className="input w-full" value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value, subcategory: CATEGORY_SUBCATEGORIES[e.target.value]?.[0] || '' }))} required>
-                      <option value="">Select…</option>
-                      {(BRANCH_CATEGORY_MAP[form.branch_id] || branchCats).map(c => <option key={c} value={c}>{CATEGORY_ICONS[c]} {c}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label">Subcategory *</label>
-                    <select className="input w-full" value={form.subcategory} onChange={e => setForm(p => ({ ...p, subcategory: e.target.value }))} required>
-                      <option value="">Select…</option>
-                      {(CATEGORY_SUBCATEGORIES[form.category] || []).map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label">Selling Price (₹) *</label>
-                    <input className="input w-full font-bold text-emerald-600" type="number" min="0" step="0.5" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} placeholder="0" required />
-                  </div>
-                </>
+                <div>
+                  <label className="label">Selling Price (₹) *</label>
+                  <input className="input w-full font-bold text-emerald-600" type="number" min="0" step="0.5" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} placeholder="0" required />
+                </div>
               )}
 
               {isAdmin && (
@@ -452,7 +568,7 @@ export default function InventoryPage() {
               <button key={cat}
                 className={`btn-sm rounded-lg border text-xs font-semibold transition-all ${filterCat === cat ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white' : 'btn-secondary'}`}
                 onClick={() => setFilterCat(cat)}>
-                {cat ? `${CATEGORY_ICONS[cat] || ''} ${cat}` : 'All Categories'}
+                {cat ? `${CATEGORY_ICONS[cat] || dbCategories.find(d=>d.name===cat)?.icon || '📁'} ${cat}` : 'All Categories'}
               </button>
             ))}
           </div>
@@ -498,11 +614,11 @@ export default function InventoryPage() {
                           <div className="flex-1 min-w-[200px]">
                             <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1 block">Cat & Sub</label>
                             <div className="flex gap-2">
-                              <select className="input flex-1 text-sm py-1.5" value={editForm.category} onChange={e=>setEditForm({...editForm, category:e.target.value, subcategory:CATEGORY_SUBCATEGORIES[e.target.value]?.[0]||''})}>
+                              <select className="input flex-1 text-sm py-1.5" value={editForm.category} onChange={e=>setEditForm({...editForm, category:e.target.value, subcategory:getSubcategories(e.target.value)[0]})}>
                                 {mainTab === 'Disposables' ? <option value="Inventory">Inventory</option> : branchCats.map(c=><option key={c}>{c}</option>)}
                               </select>
                               <select className="input flex-1 text-sm py-1.5" value={editForm.subcategory || ''} onChange={e=>setEditForm({...editForm, subcategory:e.target.value})}>
-                                {(CATEGORY_SUBCATEGORIES[editForm.category]||[]).map(s=><option key={s}>{s}</option>)}
+                                {getSubcategories(editForm.category).map(s=><option key={s}>{s}</option>)}
                               </select>
                             </div>
                           </div>
@@ -521,6 +637,48 @@ export default function InventoryPage() {
                             <button onClick={()=>setEditingRow(null)} className="p-2 bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600"><X size={16}/></button>
                           </div>
                         </div>
+                        {isAdmin && editForm.category !== 'Inventory' && (
+                          <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-[10px] uppercase font-bold text-zinc-500">Recipe Ingredients (deducted per sale)</span>
+                              <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-bold">AUTO-DEDUCT</span>
+                            </div>
+                            <div className="space-y-1 mb-3">
+                              {(itemIngredients[item.id] || []).map(ing => (
+                                <div key={ing.id} className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2 rounded-lg border border-indigo-100 dark:border-indigo-800/30">
+                                  <span className="flex-1 text-xs font-semibold">{ing.ingredient_item?.name || '?'}</span>
+                                  <span className="text-xs text-zinc-500">{ing.quantity_per_unit} unit(s)</span>
+                                  <button onClick={() => removeIngredient(item.id, ing.id)} className="text-red-400 hover:text-red-600"><X size={12}/></button>
+                                </div>
+                              ))}
+                              {(itemIngredients[item.id] || []).length === 0 && (
+                                <p className="text-[10px] text-zinc-400 italic">No ingredients linked — stock deduction disabled for this item</p>
+                              )}
+                            </div>
+                            <div className="flex gap-2 items-center">
+                              <input 
+                                list={`ingredient-options-${item.id}`} 
+                                className="input text-xs flex-1" 
+                                placeholder="Search & link any item…"
+                                value={newIngredientRow.search ?? ''}
+                                onChange={e => {
+                                  const val = e.target.value
+                                  setNewIngredientRow(p => ({...p, search: val}))
+                                  const selected = items.find(i => `[${i.category}] ${i.name} ${i.variant ? `(${i.variant})` : ''}`.trim() === val.trim())
+                                  setNewIngredientRow(p => ({...p, ingredient_item_id: selected ? selected.id : ''}))
+                                }}
+                              />
+                              <datalist id={`ingredient-options-${item.id}`}>
+                                {items.filter(i => i.id !== item.id).map(i => (
+                                  <option key={i.id} value={`[${i.category}] ${i.name} ${i.variant ? `(${i.variant})` : ''}`.trim()} />
+                                ))}
+                              </datalist>
+                              <input type="number" min="0" step="0.01" className="input text-xs w-20" value={newIngredientRow.quantity_per_unit}
+                                onChange={e => setNewIngredientRow(p => ({...p, quantity_per_unit: e.target.value}))} placeholder="Qty" />
+                              <button onClick={() => addIngredient(item.id)} className="px-3 py-1.5 text-xs font-bold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">Link</button>
+                            </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )

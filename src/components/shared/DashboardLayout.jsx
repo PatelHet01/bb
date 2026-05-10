@@ -3,26 +3,51 @@ import { useAuthStore } from '../../store/authStore'
 import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
-  BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee
+  BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee, Shield,
+  ClipboardList, Truck, ArrowLeftRight
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { supabase } from '../../lib/supabase'
+import OrderNotificationOverlay from './OrderNotificationOverlay'
 
-const NAV = [
-  { to: '/admin/dashboard', label: 'Dashboard',   icon: LayoutDashboard, roles: ['super_admin','admin','developer','manager'] },
-  { to: '/admin/billing',   label: 'Billing / POS',icon: ShoppingCart,    roles: ['super_admin','admin','manager'] },
-  { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'] },
-  { to: '/admin/tables',    label: 'Tables & QR',  icon: QrCode,          roles: ['super_admin','admin','manager'] },
-  { to: '/admin/menu',      label: 'BB Cafe Menu', icon: Coffee,          roles: ['super_admin','admin','manager'] },
-  { to: '/admin/customers', label: 'Customers',    icon: Users,           roles: ['super_admin','admin'] },
-  { to: '/admin/salary',    label: 'Salary',       icon: Users,           roles: ['super_admin','admin'] },
-  { to: '/admin/rewards',   label: 'Rewards (GHODA)', icon: Gift,      roles: ['super_admin','admin'] },
-  { to: '/admin/analytics', label: 'Analytics',    icon: BarChart2, roles: ['super_admin','admin'] },
-  { to: '/kitchen',         label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'] },
-  { to: '/admin/branches',  label: 'Branches',     icon: GitBranch, roles: ['super_admin'] },
-  { to: '/admin/staff',     label: 'Staff',        icon: Users,           roles: ['super_admin','admin'] },
-  { to: '/admin/announcements', label: 'Announcements', icon: Megaphone,    roles: ['super_admin','admin','manager'] },
-  { to: '/admin/expenses',  label: 'Expenses',     icon: Receipt,    roles: ['super_admin','admin'] },
-  { to: '/admin/settings',  label: 'Settings',     icon: Settings, roles: ['super_admin','admin'] },
+const NAV_GROUPS = [
+  {
+    title: null,
+    items: [
+      { to: '/admin/dashboard', label: 'Dashboard',   icon: LayoutDashboard, roles: ['super_admin','admin','developer','manager'], feature: 'dashboard' },
+      { to: '/admin/billing',   label: 'Billing / POS',icon: ShoppingCart,    roles: ['super_admin','admin','manager'], feature: 'billing' }
+    ]
+  },
+  {
+    title: 'OPERATIONS',
+    items: [
+      { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'], feature: 'inventory' },
+      { to: '/admin/orders',    label: 'Orders',        icon: ClipboardList,   roles: ['super_admin','admin'], feature: 'orders' },
+      { to: '/kitchen',         label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'], feature: 'kitchen' }
+    ]
+  },
+  {
+    title: 'PEOPLE',
+    items: [
+      { to: '/admin/customers', label: 'Customers',    icon: Users,           roles: ['super_admin','admin'], feature: 'customers' },
+      { to: '/admin/hr',        label: 'HR & Operations', icon: Users,        roles: ['super_admin','admin'], feature: 'salary' },
+      { to: '/admin/vendors',   label: 'Vendors',      icon: Truck,           roles: ['super_admin','admin'], feature: 'vendors' }
+    ]
+  },
+  {
+    title: 'FINANCE',
+    items: [
+      { to: '/admin/expenses',  label: 'Expenses',     icon: Receipt,         roles: ['super_admin','admin'], feature: 'expenses' },
+      { to: '/admin/analytics', label: 'Analytics',    icon: BarChart2,       roles: ['super_admin','admin'], feature: 'analytics' }
+    ]
+  },
+  {
+    title: 'SYSTEM',
+    items: [
+      { to: '/admin/settings',  label: 'Settings',     icon: Settings,        roles: ['super_admin','admin'], feature: 'settings' },
+      { to: '/admin/branches',  label: 'Branches',     icon: GitBranch,       roles: ['super_admin'], feature: 'branches' }
+    ]
+  }
 ]
 
 const ROLE_LABEL = {
@@ -33,16 +58,61 @@ const ROLE_LABEL = {
 }
 
 export default function DashboardLayout() {
-  const { user, role, branchName, darkMode, toggleDark, logout } = useAuthStore()
+  const { user, role, branchName, branchId, darkMode, toggleDark, logout } = useAuthStore()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [permissions, setPermissions] = useState(null)
+
+  useEffect(() => {
+    // Fetch feature permissions
+    async function getPerms() {
+      const { data } = await supabase.from('system_settings').select('*').eq('key', 'role_permissions').single()
+      if (data) setPermissions(data.value)
+    }
+    getPerms()
+  }, [])
 
   function handleLogout() {
     logout()
     navigate('/admin', { replace: true })
   }
 
-  const visibleNav = NAV.filter(n => n.roles.includes(role))
+  const renderNavGroups = () => {
+    return NAV_GROUPS.map((group, idx) => {
+      const groupItems = group.items.filter(n => {
+        if (role === 'super_admin' || role === 'developer') return true
+        if (!n.roles.includes(role)) return false
+        if (!n.feature) return true
+        if (permissions && permissions[role]) return permissions[role].includes(n.feature)
+        return true
+      })
+
+      if (groupItems.length === 0) return null
+
+      return (
+        <div key={idx} className={idx > 0 ? 'mt-4' : ''}>
+          {group.title && (
+            <p className="px-3 text-[9px] font-bold text-dash-muted dark:text-dash-mutedDark uppercase tracking-widest mb-2">
+              — {group.title} —
+            </p>
+          )}
+          <div className="space-y-0.5">
+            {groupItems.map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <Icon size={15} strokeWidth={2} />
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        </div>
+      )
+    })
+  }
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
@@ -60,19 +130,8 @@ export default function DashboardLayout() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        <p className="px-3 text-[9px] font-bold text-dash-muted dark:text-dash-mutedDark uppercase tracking-widest mb-2">Navigation</p>
-        {visibleNav.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-            onClick={() => setSidebarOpen(false)}
-          >
-            <Icon size={15} strokeWidth={2} />
-            {label}
-          </NavLink>
-        ))}
+      <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        {renderNavGroups()}
       </nav>
 
       {/* User footer */}
@@ -151,6 +210,8 @@ export default function DashboardLayout() {
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
           <Outlet />
         </main>
+
+        <OrderNotificationOverlay />
       </div>
     </div>
   )

@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Search, X, ArrowDownCircle, ArrowUpCircle, UserCircle, Edit2, ShoppingBag, Download } from 'lucide-react'
+import { Plus, Search, X, ArrowDownCircle, ArrowUpCircle, UserCircle, Edit2, Trash2, ShoppingBag, Download } from 'lucide-react'
 
 export default function CustomersPage() {
   const { branchId, user, role } = useAuthStore()
@@ -160,6 +160,13 @@ export default function CustomersPage() {
     setEditingId(c.id)
     setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function deleteCustomer(id, name) {
+    if (!confirm(`Permanently delete customer "${name}"? This will remove all their khata and order links from this view.`)) return
+    const { error } = await supabase.from('customers').delete().eq('id', id)
+    if (error) toast.error('Could not delete: ' + error.message)
+    else { toast.success('Customer deleted'); fetchCustomers(); }
   }
 
   async function viewCustomer(c) {
@@ -342,6 +349,9 @@ export default function CustomersPage() {
                 <div className="flex items-center gap-2 grow justify-end px-2">
                   <button onClick={(e) => startEdit(c, e)} className="p-2 text-ink-400 hover:text-ember hover:bg-ember/10 rounded-lg transition-all">
                     <Edit2 size={16} />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteCustomer(c.id, c.name); }} className="p-2 text-ink-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
+                    <Trash2 size={16} />
                   </button>
                 </div>
 

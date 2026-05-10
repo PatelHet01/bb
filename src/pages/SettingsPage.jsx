@@ -38,7 +38,7 @@ export default function SettingsPage() {
   const [hoursSaving, setHoursSaving] = useState(false)
   
   const activeTab = searchParams.get('tab') || 'permissions'
-  const isSuperAdmin = role === 'super_admin'
+  const isSuperAdmin = role === 'super_admin' || role === 'admin'
 
   useEffect(() => {
     fetchPermissions()

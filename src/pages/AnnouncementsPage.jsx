@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { Plus, Megaphone, Trash2, Globe } from 'lucide-react'
+import { Plus, Megaphone, Trash2, Globe, Edit2, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function AnnouncementsPage() {
@@ -9,6 +9,7 @@ export default function AnnouncementsPage() {
   const [announcements, setAnnouncements] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState({ title: '', message: '', type: 'info', branch_scope: '' })
 
   const isSuperAdmin = role === 'super_admin'
@@ -25,16 +26,27 @@ export default function AnnouncementsPage() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    const { error } = await supabase.from('announcements').insert({
+    const payload = {
       title: form.title,
       message: form.message,
       type: form.type,
       branch_scope: isSuperAdmin ? (form.branch_scope || null) : branchId,
       created_by: user.id
-    })
+    }
+    
+    let error;
+    if (editingId) {
+      const res = await supabase.from('announcements').update(payload).eq('id', editingId)
+      error = res.error
+    } else {
+      const res = await supabase.from('announcements').insert(payload)
+      error = res.error
+    }
+    
     if (error) return toast.error(error.message)
-    toast.success('Announcement broadcasted')
+    toast.success(editingId ? 'Announcement updated' : 'Announcement broadcasted')
     setShowForm(false)
+    setEditingId(null)
     setForm({ title: '', message: '', type: 'info', branch_scope: '' })
     fetchAnnouncements()
   }
@@ -59,14 +71,18 @@ export default function AnnouncementsPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-dash-text dark:text-dash-textDark">Announcements</h1>
         {(isSuperAdmin || role === 'admin') && (
-          <button className="btn-primary btn-sm" onClick={() => setShowForm(!showForm)}>
+          <button className="btn-primary btn-sm" onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ title: '', message: '', type: 'info', branch_scope: '' }); }}>
             <Plus size={16} /> New Broadcast
           </button>
         )}
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="card p-5 space-y-4 bg-dash-bg dark:bg-zinc-900 border-dash-border dark:border-dash-borderDark">
+        <form onSubmit={handleSubmit} className="card p-5 space-y-4 bg-white dark:bg-zinc-900 border-2 border-ember/20 shadow-xl">
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="font-bold text-ink-900 dark:text-white">{editingId ? 'Edit Announcement' : 'New Broadcast'}</h2>
+            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="text-ink-400 hover:text-red-500"><XCircle size={18}/></button>
+          </div>
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1">
               <span className="label">Title</span>
@@ -96,7 +112,10 @@ export default function AnnouncementsPage() {
             <span className="label">Message</span>
             <textarea required className="input min-h-[100px]" value={form.message} onChange={e=>setForm({...form, message: e.target.value})} placeholder="Write the announcement details here..."></textarea>
           </div>
-          <button type="submit" className="btn-primary">Broadcast Now</button>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="btn-secondary">Cancel</button>
+            <button type="submit" className="btn-primary px-8">{editingId ? 'Update Broadcast' : 'Broadcast Now'}</button>
+          </div>
         </form>
       )}
 
@@ -115,9 +134,14 @@ export default function AnnouncementsPage() {
                  </span>
                </div>
                {(isSuperAdmin || role === 'admin') && (
-                 <button className="text-dash-muted hover:text-red-500 transition-colors" onClick={() => handleDelete(ann.id)}>
-                   <Trash2 size={14} />
-                 </button>
+                 <div className="flex gap-1">
+                   <button className="text-dash-muted hover:text-ember transition-colors" onClick={() => { setEditingId(ann.id); setForm({ ...ann }); setShowForm(true); }}>
+                     <Edit2 size={14} />
+                   </button>
+                   <button className="text-dash-muted hover:text-red-500 transition-colors" onClick={() => handleDelete(ann.id)}>
+                     <Trash2 size={14} />
+                   </button>
+                 </div>
                )}
              </div>
              <h3 className="font-bold text-lg text-dash-text dark:text-dash-textDark">{ann.title}</h3>

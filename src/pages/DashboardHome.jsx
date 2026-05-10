@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X, UtensilsCrossed } from 'lucide-react'
+import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X, UtensilsCrossed, GitBranch } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 
 export default function DashboardHome() {
@@ -12,6 +12,7 @@ export default function DashboardHome() {
   const [loading, setLoading] = useState(true)
   const [recentOrders, setRecentOrders] = useState([])
   const [todayOrders, setTodayOrders] = useState([])
+  const [recentTransfers, setRecentTransfers] = useState([])
   
   // Modal states
   const [activeModal, setActiveModal] = useState(null) // 'revenue', 'khata', 'orders', 'customers'
@@ -96,6 +97,15 @@ export default function DashboardHome() {
         })
         setRecentOrders(ordersWithPayments || [])
         setTodayOrders(ordersWithPayments || [])
+
+        // Fetch Recent Transfers for Super Admin
+        if (role === 'super_admin') {
+          const { data: transfers } = await supabase.from('branch_transfers')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(5)
+          setRecentTransfers(transfers || [])
+        }
 
         // Active occupied tables (bhat only)
         if (branchId === 'bhat' || !branchId) {
@@ -326,6 +336,54 @@ export default function DashboardHome() {
             )}
           </div>
         </div>
+
+        {/* Recent Branch Transfers (Super Admin only) */}
+        {role === 'super_admin' && (
+          <div className="card flex flex-col h-full overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-ink-100 dark:border-ink-800 bg-indigo-50/50 dark:bg-indigo-900/10">
+              <h2 className="font-semibold text-indigo-600 dark:text-indigo-400 text-sm flex items-center gap-2">
+                <GitBranch size={16} /> Recent Branch Transfers
+              </h2>
+              <Link to="/admin/settings?tab=transfers" className="text-xs text-indigo-500 hover:text-indigo-700 font-bold transition-colors">
+                View All
+              </Link>
+            </div>
+            <div className="flex-1 overflow-y-auto no-scrollbar max-h-[400px]">
+              {loading ? (
+                <div className="p-5 space-y-3">{Array(3).fill(0).map((_, i) => <div key={i} className="skeleton h-8" />)}</div>
+              ) : recentTransfers.length === 0 ? (
+                <div className="p-8 text-center flex flex-col items-center justify-center h-full">
+                  <p className="text-sm font-bold text-ink-700 dark:text-ink-300">No transfers yet</p>
+                  <p className="text-[10px] text-ink-400 mt-1">Inter-branch movements will appear here</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-ink-100 dark:divide-ink-800">
+                  {recentTransfers.map(t => (
+                    <div key={t.id} className="p-4 hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="text-sm font-bold text-ink-900 dark:text-white truncate max-w-[150px]">{t.item_name}</p>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                          t.status === 'confirmed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+                        }`}>{t.status}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px]">
+                        <div className="flex items-center gap-1 text-ink-500">
+                          <span className="font-bold text-ink-700 dark:text-ink-300 capitalize">{t.from_branch_id}</span>
+                          <ArrowRight size={8} />
+                          <span className="font-bold text-ink-700 dark:text-ink-300 capitalize">{t.to_branch_id}</span>
+                        </div>
+                        <p className="font-black text-ink-900 dark:text-white">Qty: {t.quantity}</p>
+                      </div>
+                      <div className="mt-1 text-right">
+                        <p className="text-[10px] font-bold text-emerald-600">₹{Number(t.total_value).toLocaleString('en-IN')}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modals */}

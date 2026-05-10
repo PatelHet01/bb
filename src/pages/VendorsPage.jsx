@@ -109,21 +109,41 @@ export default function VendorsPage() {
     if (!ledgerForm.amount || parseFloat(ledgerForm.amount) <= 0) return toast.error('Enter valid amount')
     setSaving(true)
     try {
-      const { data, error } = await supabase.from('vendor_ledger').insert({
+      const payload = {
         vendor_id: selectedVendor.id,
         branch_id: branchId || selectedVendor.branch_id,
         type: ledgerForm.type,
         amount: parseFloat(ledgerForm.amount),
         reference: ledgerForm.reference || null,
         created_by: user.id
-      }).select().single()
-      if (error) throw error
-      setLedger(prev => [data, ...prev])
+      }
+      
+      if (ledgerForm.id) {
+        const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', ledgerForm.id).select().single()
+        if (error) throw error
+        setLedger(prev => prev.map(l => l.id === ledgerForm.id ? data : l))
+        toast.success('Entry updated')
+      } else {
+        const { data, error } = await supabase.from('vendor_ledger').insert(payload).select().single()
+        if (error) throw error
+        setLedger(prev => [data, ...prev])
+        toast.success('Entry added')
+      }
+      
       setShowLedgerForm(false)
       setLedgerForm({ type: 'PURCHASE', amount: '', reference: '' })
-      toast.success('Entry added')
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
+  }
+
+  async function deleteLedgerEntry(id) {
+    if(!confirm('Delete this ledger entry?')) return
+    const { error } = await supabase.from('vendor_ledger').delete().eq('id', id)
+    if(error) toast.error(error.message)
+    else {
+      toast.success('Entry deleted')
+      setLedger(prev => prev.filter(l => l.id !== id))
+    }
   }
 
   // Compute vendor balance: PURCHASE = amount owed to vendor (debit), PAYMENT = paid
@@ -312,7 +332,7 @@ export default function VendorsPage() {
               ledger.length === 0
                 ? <p className="text-center py-10 text-ink-400 text-sm">No ledger entries yet</p>
                 : ledger.map(l => (
-                  <div key={l.id} className="bg-white dark:bg-ink-900 p-3 rounded-xl border border-ink-200 dark:border-ink-800 flex items-center justify-between gap-3">
+                  <div key={l.id} className="group bg-white dark:bg-ink-900 p-3 rounded-xl border border-ink-200 dark:border-ink-800 flex items-center justify-between gap-3 transition-all hover:border-ink-300 dark:hover:border-ink-700">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
@@ -320,12 +340,18 @@ export default function VendorsPage() {
                           l.type === 'PAYMENT' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' :
                           'bg-ink-100 text-ink-600'
                         }`}>{l.type}</span>
-                        {l.reference && <span className="text-xs text-ink-500">{l.reference}</span>}
+                        {l.reference && <span className="text-xs text-ink-500 font-medium">{l.reference}</span>}
                       </div>
-                      <div className="text-[10px] text-ink-400 mt-1">{new Date(l.created_at).toLocaleString('en-IN')}</div>
+                      <div className="text-[10px] text-ink-400 mt-1 font-bold">{new Date(l.created_at).toLocaleString('en-IN')}</div>
                     </div>
-                    <div className={`font-black text-base ${l.type === 'PURCHASE' ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {l.type === 'PURCHASE' ? '+' : '-'}₹{Number(l.amount).toLocaleString('en-IN')}
+                    <div className="flex items-center gap-3">
+                      <div className={`font-black text-base tabular-nums ${l.type === 'PURCHASE' ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {l.type === 'PURCHASE' ? '+' : '-'}₹{Number(l.amount).toLocaleString('en-IN')}
+                      </div>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button onClick={() => { setLedgerForm({ ...l }); setShowLedgerForm(true); }} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
+                        <button onClick={() => deleteLedgerEntry(l.id)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={12}/></button>
+                      </div>
                     </div>
                   </div>
                 ))

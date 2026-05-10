@@ -43,6 +43,7 @@ export default function InventoryPage() {
 
   const [dbCategories, setDbCategories] = useState([])
   const [showCatForm, setShowCatForm] = useState(false)
+  const [editingCategory, setEditingCategory] = useState(null)
   const [newCatName, setNewCatName] = useState('')
 
   const activeBranch = branchId || 'gurukul'
@@ -434,20 +435,29 @@ export default function InventoryPage() {
       {showCatForm && (
         <div className="card p-5 animate-slide-up border-2 border-amber-500/20 shadow-xl bg-amber-50/10 dark:bg-amber-900/10">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="font-bold text-zinc-900 dark:text-white text-lg flex items-center gap-2"><LayoutGrid className="text-amber-500"/> New Category</h2>
-            <button onClick={() => setShowCatForm(false)} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
+            <h2 className="font-bold text-zinc-900 dark:text-white text-lg flex items-center gap-2"><LayoutGrid className="text-amber-500"/> {editingCategory ? 'Edit Category' : 'New Category'}</h2>
+            <button onClick={() => { setShowCatForm(false); setEditingCategory(null); setNewCatName(''); }} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
           </div>
           <form onSubmit={async (e) => {
             e.preventDefault()
             if(!newCatName.trim()) return
-            const { error } = await supabase.from('categories').insert({
+            const payload = {
               name: newCatName.trim(),
               branch_id: branchId === 'All Branches' ? null : branchId,
               is_global: branchId === 'All Branches'
-            })
+            }
+            let error;
+            if (editingCategory) {
+              const res = await supabase.from('categories').update(payload).eq('id', editingCategory.id)
+              error = res.error
+            } else {
+              const res = await supabase.from('categories').insert(payload)
+              error = res.error
+            }
             if(error) return toast.error(error.message)
-            toast.success('Category Added')
+            toast.success(editingCategory ? 'Category Updated' : 'Category Added')
             setNewCatName('')
+            setEditingCategory(null)
             setShowCatForm(false)
             fetchCategories()
           }} className="flex gap-4 items-end">
@@ -455,8 +465,29 @@ export default function InventoryPage() {
               <label className="label">Category Name *</label>
               <input className="input w-full" value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="e.g. Raw Materials" required autoFocus/>
             </div>
-            <button type="submit" className="btn-primary">Save Category</button>
+            <button type="submit" className="btn-primary">{editingCategory ? 'Update' : 'Save'} Category</button>
           </form>
+          
+          <div className="mt-6">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Existing Custom Categories</p>
+            <div className="flex flex-wrap gap-2">
+              {dbCategories.map(c => (
+                <div key={c.id} className="group relative flex items-center gap-2 bg-white dark:bg-zinc-800 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                  <span className="text-xs font-bold">{c.name}</span>
+                  <div className="flex gap-1">
+                    <button onClick={() => { setEditingCategory(c); setNewCatName(c.name); setShowCatForm(true); }} className="p-1 text-zinc-400 hover:text-ember"><Edit2 size={12}/></button>
+                    <button onClick={async () => {
+                      if(!confirm(`Delete category "${c.name}"?`)) return
+                      const { error } = await supabase.from('categories').delete().eq('id', c.id)
+                      if(error) toast.error(error.message)
+                      else { toast.success('Category removed'); fetchCategories(); }
+                    }} className="p-1 text-zinc-400 hover:text-red-500"><Trash2 size={12}/></button>
+                  </div>
+                </div>
+              ))}
+              {dbCategories.length === 0 && <p className="text-[10px] text-zinc-400 italic">No custom categories defined</p>}
+            </div>
+          </div>
         </div>
       )}
 

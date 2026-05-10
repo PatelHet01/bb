@@ -99,5 +99,19 @@ ALTER TABLE expenses ADD COLUMN IF NOT EXISTS vendor_id UUID REFERENCES vendors(
 -- (Run in Supabase dashboard realtime settings or via ALTER PUBLICATION)
 -- ALTER PUBLICATION supabase_realtime ADD TABLE categories, vendors, branch_transfers;
 
--- 9. RELOAD POSTGREST
+-- 10. STAFF TRANSACTIONS TABLE (Feature: Staff Ledger)
+CREATE TABLE IF NOT EXISTS staff_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  worker_id UUID REFERENCES workers(id) ON DELETE CASCADE,
+  branch_id TEXT REFERENCES branches(id),
+  type TEXT NOT NULL,  -- 'SALARY', 'ADVANCE', 'BONUS', 'DEDUCTION'
+  amount NUMERIC(10,2) NOT NULL,
+  payment_mode TEXT DEFAULT 'CASH', -- 'CASH', 'UPI'
+  notes TEXT,
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE staff_transactions DISABLE ROW LEVEL SECURITY;
+
+-- 11. RELOAD POSTGREST
 NOTIFY pgrst, 'reload schema';

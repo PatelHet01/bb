@@ -76,7 +76,8 @@ export default function VendorsPage() {
       } else {
         const { data, error } = await supabase.from('vendors').insert({
           branch_id: branchId || null,
-          name: form.name, contact: form.contact, category: form.category, notes: form.notes
+          name: form.name, contact: form.contact, category: form.category, notes: form.notes,
+          is_active: true
         }).select().single()
         if (error) throw error
         setVendors(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
@@ -91,14 +92,24 @@ export default function VendorsPage() {
 
   async function handleDelete(v) {
     if (!window.confirm(`Delete vendor "${v.name}"? This cannot be undone.`)) return
-    await supabase.from('vendors').update({ is_active: false }).eq('id', v.id)
-    setVendors(prev => prev.filter(vv => vv.id !== v.id))
-    if (selectedVendor?.id === v.id) setSelectedVendor(null)
-    toast.success('Vendor removed')
+    try {
+      if (!v.id) throw new Error("Vendor ID is missing! Schema might be corrupt.")
+      const { error } = await supabase.from('vendors').update({ is_active: false }).eq('id', v.id)
+      if (error) throw error
+      setVendors(prev => prev.filter(vv => vv.id !== v.id))
+      if (selectedVendor?.id === v.id) setSelectedVendor(null)
+      toast.success('Vendor removed')
+    } catch (e) {
+      toast.error('Failed to delete: ' + e.message)
+    }
   }
 
   function startEdit(v, e) {
     e?.stopPropagation()
+    if (!v.id) {
+      toast.error("Error: Vendor ID is missing. Cannot edit.")
+      return
+    }
     setForm({ name: v.name, contact: v.contact || '', category: v.category || 'General', notes: v.notes || '' })
     setEditingId(v.id)
     setShowVendorForm(true)
@@ -114,8 +125,7 @@ export default function VendorsPage() {
         branch_id: branchId || selectedVendor.branch_id,
         type: ledgerForm.type,
         amount: parseFloat(ledgerForm.amount),
-        reference: ledgerForm.reference || null,
-        created_by: user.id
+        reference: ledgerForm.reference || null
       }
       
       if (ledgerForm.id) {

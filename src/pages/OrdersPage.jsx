@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Search, Filter, ArrowUpDown, Edit2, X, ArrowLeft, Download } from 'lucide-react'
+import { Search, Filter, ArrowUpDown, Edit2, X, ArrowLeft, Download, Plus, Minus, Trash2 } from 'lucide-react'
 
 const PAYMENT_FILTERS = ['All', 'CASH', 'UPI', 'ONLINE', 'KHATA', 'ADVANCE', 'Cancelled']
 const SORT_OPTIONS = ['Newest', 'Oldest', 'Highest Amount', 'Lowest Amount']
@@ -27,10 +27,22 @@ export default function OrdersPage() {
   const [dateTo, setDateTo] = useState('')
   const [cancellingId, setCancellingId] = useState(null)
   const [editingOrder, setEditingOrder] = useState(null)
+  const [allItems, setAllItems] = useState([])
+  const [itemSearch, setItemSearch] = useState('')
 
   const isSuperAdmin = role === 'super_admin'
 
-  useEffect(() => { fetchOrders() }, [branchId])
+  useEffect(() => { 
+    fetchOrders()
+    fetchAllItems()
+  }, [branchId])
+
+  async function fetchAllItems() {
+    let q = supabase.from('items').select('id, name, variant, price').eq('is_active', true).eq('is_archived', false)
+    if (branchId) q = q.eq('branch_id', branchId)
+    const { data } = await q
+    setAllItems(data || [])
+  }
 
   async function fetchOrders() {
     setLoading(true)
@@ -40,7 +52,7 @@ export default function OrdersPage() {
         id, order_number, created_at, total, subtotal, discount, status, table_number, order_type,
         branch_id,
         customers(id, name, mobile_number),
-        order_items(id, quantity, price, total, items(name, variant)),
+        order_items(id, item_id, quantity, price, total, items(name, variant)),
         order_payments(id, mode, amount)
       `)
       .order('created_at', { ascending: false })
@@ -69,8 +81,140 @@ export default function OrdersPage() {
   }
 
   function handleEditNav(order) {
-    // Navigate to billing page with order context
-    navigate(`/admin/billing?editOrder=${order.id}`)
+    setEditingOrder({
+      ...order,
+      newStatus: order.status,
+      newPaymentMode: (order.order_payments && order.order_payments.length > 0) ? order.order_payments[0].mode : 'CASH',
+      editingItems: order.order_items.map(oi => ({
+        id: oi.id, // existing order_item id
+        item_id: oi.item_id,
+        name: oi.items?.name,
+        variant: oi.items?.variant,
+        price: oi.price,
+        quantity: oi.quantity,
+        original_quantity: oi.quantity // to track stock diffs
+      }))
+    })
+    setItemSearch('')
+  }
+
+  function addEditItem(item) {
+    setEditingOrder(prev => {
+      const existing = prev.editingItems.find(i => i.item_id === item.id)
+      if (existing) {
+        return { ...prev, editingItems: prev.editingItems.map(i => i.item_id === item.id ? { ...i, quantity: i.quantity + 1 } : i) }
+      }
+      return {
+        ...prev,
+        editingItems: [...prev.editingItems, {
+          id: null, // new item
+          item_id: item.id,
+          name: item.name,
+          variant: item.variant,
+          price: item.price,
+          quantity: 1,
+          original_quantity: 0
+        }]
+      }
+    })
+    setItemSearch('')
+  }
+
+  function updateEditItemQty(itemId, delta) {
+    setEditingOrder(prev => ({
+      ...prev,
+      editingItems: prev.editingItems.map(i => {
+        if (i.item_id === itemId) {
+          const newQ = i.quantity + delta
+          return { ...i, quantity: newQ > 0 ? newQ : 1 }
+        }
+        return i
+      })
+    }))
+  }
+
+  function removeEditItem(itemId) {
+    setEditingOrder(prev => ({
+      ...prev,
+      editingItems: prev.editingItems.filter(i => i.item_id !== itemId)
+    }))
+  }
+
+  async function saveEditedOrder(e) {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      if (editingOrder.newStatus === 'cancelled' && editingOrder.status !== 'cancelled') {
+        return handleCancel(editingOrder)
+      }
+
+      // Calculate new totals
+      const newSubtotal = editingOrder.editingItems.reduce((sum, i) => sum + (i.price * i.quantity), 0)
+      const newTotal = newSubtotal - (editingOrder.discount || 0) // simplify tax for quick edit if needed, assuming total approx subtotal here
+      
+      // Update order details
+      await supabase.from('orders').update({ 
+        status: editingOrder.newStatus,
+        subtotal: newSubtotal,
+        total: newTotal
+      }).eq('id', editingOrder.id)
+      
+      // Update payments
+      if (editingOrder.order_payments && editingOrder.order_payments.length > 0) {
+        await supabase.from('order_payments')
+          .update({ mode: editingOrder.newPaymentMode, amount: newTotal })
+          .eq('id', editingOrder.order_payments[0].id)
+      } else if (editingOrder.newPaymentMode) {
+        await supabase.from('order_payments').insert({
+           order_id: editingOrder.id,
+           mode: editingOrder.newPaymentMode,
+           amount: newTotal
+        })
+      }
+
+      // Handle Items & Stock
+      // 1. Process removals and decrements (restore stock)
+      for (const orig of editingOrder.order_items) {
+        const curr = editingOrder.editingItems.find(i => i.item_id === orig.item_id)
+        if (!curr) {
+          // Item completely removed
+          await supabase.from('order_items').delete().eq('id', orig.id)
+          await supabase.rpc('decrement_stock', { p_item_id: orig.item_id, p_amount: -orig.quantity })
+        } else if (curr.quantity < orig.quantity) {
+          // Quantity decreased
+          const diff = orig.quantity - curr.quantity
+          await supabase.from('order_items').update({ quantity: curr.quantity, total: curr.price * curr.quantity }).eq('id', orig.id)
+          await supabase.rpc('decrement_stock', { p_item_id: orig.item_id, p_amount: -diff })
+        }
+      }
+
+      // 2. Process additions and increments (deduct stock)
+      for (const curr of editingOrder.editingItems) {
+        if (!curr.id) {
+          // Brand new item added
+          await supabase.from('order_items').insert({
+            order_id: editingOrder.id,
+            item_id: curr.item_id,
+            quantity: curr.quantity,
+            price: curr.price,
+            total: curr.price * curr.quantity
+          })
+          await supabase.rpc('decrement_stock', { p_item_id: curr.item_id, p_amount: curr.quantity })
+        } else if (curr.quantity > curr.original_quantity) {
+          // Quantity increased
+          const diff = curr.quantity - curr.original_quantity
+          await supabase.from('order_items').update({ quantity: curr.quantity, total: curr.price * curr.quantity }).eq('id', curr.id)
+          await supabase.rpc('decrement_stock', { p_item_id: curr.item_id, p_amount: diff })
+        }
+      }
+
+      toast.success('Order updated successfully')
+      setEditingOrder(null)
+      fetchOrders()
+    } catch (err) {
+      toast.error('Failed to update order')
+      setLoading(false)
+    }
   }
 
   function exportCSV() {
@@ -336,6 +480,125 @@ export default function OrdersPage() {
             <span className="text-ink-500">Cancelled:</span>{' '}
             <span className="font-bold text-red-500">{cancelledCount}</span>
           </div>
+        </div>
+      )}
+
+      {/* Quick Edit Modal */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <form onSubmit={saveEditedOrder} className="bg-white dark:bg-ink-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-slide-up max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+              <div>
+                <h3 className="font-bold text-ink-900 dark:text-white">Edit Order</h3>
+                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest mt-0.5">
+                  {editingOrder.order_number || '#' + editingOrder.id.slice(0, 8).toUpperCase()}
+                </p>
+              </div>
+              <button type="button" onClick={() => setEditingOrder(null)} className="text-ink-400 hover:text-ink-900"><X size={20}/></button>
+            </div>
+            
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Order Status</label>
+                  <select 
+                    className="input font-semibold"
+                    value={editingOrder.newStatus}
+                    onChange={e => setEditingOrder({...editingOrder, newStatus: e.target.value})}
+                  >
+                    <option value="new">New</option>
+                    <option value="preparing">Preparing</option>
+                    <option value="ready">Ready</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="label">Payment Mode</label>
+                  <select 
+                    className="input font-semibold"
+                    value={editingOrder.newPaymentMode}
+                    onChange={e => setEditingOrder({...editingOrder, newPaymentMode: e.target.value})}
+                  >
+                    <option value="CASH">Cash</option>
+                    <option value="UPI">UPI</option>
+                    <option value="ONLINE">Online</option>
+                    <option value="KHATA">Khata</option>
+                    <option value="ADVANCE">Advance</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="pt-2 border-t border-ink-100 dark:border-ink-800">
+                <label className="label mb-2 flex justify-between items-end">
+                  <span>Order Items</span>
+                  <span className="text-emerald-600 font-bold">Total: ₹{(editingOrder.editingItems.reduce((s,i) => s + (i.price*i.quantity),0) - (editingOrder.discount||0)).toLocaleString()}</span>
+                </label>
+                
+                {/* Search Add Item */}
+                <div className="relative mb-3">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+                  <input
+                    type="text"
+                    className="input pl-9 text-sm"
+                    placeholder="Search to add item..."
+                    value={itemSearch}
+                    onChange={e => setItemSearch(e.target.value)}
+                  />
+                  {itemSearch.trim() && (
+                    <div className="absolute z-10 top-full mt-1 w-full bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-xl shadow-xl max-h-48 overflow-y-auto py-1">
+                      {allItems.filter(i => (i.name+' '+i.variant).toLowerCase().includes(itemSearch.toLowerCase())).slice(0, 10).map(item => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => addEditItem(item)}
+                          className="w-full text-left px-4 py-2 hover:bg-ink-50 dark:hover:bg-ink-800 flex justify-between items-center group"
+                        >
+                          <div>
+                            <p className="text-sm font-bold text-ink-900 dark:text-white">{item.name}</p>
+                            {item.variant && <p className="text-[10px] text-ink-500">{item.variant}</p>}
+                          </div>
+                          <span className="text-xs font-bold text-emerald-600 group-hover:scale-110 transition-transform">₹{item.price} <Plus size={12} className="inline"/></span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Items List */}
+                <div className="space-y-2">
+                  {editingOrder.editingItems.map(item => (
+                    <div key={item.item_id} className="flex items-center justify-between p-2 bg-ink-50 dark:bg-ink-950/50 rounded-xl border border-ink-100 dark:border-ink-800">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-ink-900 dark:text-white truncate">{item.name}</p>
+                        <p className="text-[10px] text-ink-500">₹{item.price} {item.variant ? `• ${item.variant}` : ''}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center bg-white dark:bg-ink-900 rounded-lg border border-ink-200 dark:border-ink-700 shadow-sm overflow-hidden">
+                          <button type="button" onClick={() => updateEditItemQty(item.item_id, -1)} className="px-2 py-1.5 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-600"><Minus size={12}/></button>
+                          <span className="w-8 text-center text-xs font-bold">{item.quantity}</span>
+                          <button type="button" onClick={() => updateEditItemQty(item.item_id, 1)} className="px-2 py-1.5 hover:bg-ink-50 dark:hover:bg-ink-800 text-ink-600"><Plus size={12}/></button>
+                        </div>
+                        <button type="button" onClick={() => removeEditItem(item.item_id)} className="p-1.5 text-ink-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                          <Trash2 size={14}/>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {editingOrder.editingItems.length === 0 && (
+                    <p className="text-xs text-center py-4 text-ink-500 italic border border-dashed border-ink-200 rounded-xl">No items in order.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 bg-ink-50 dark:bg-ink-950/50 flex gap-3 border-t border-ink-100 dark:border-ink-800">
+              <button type="button" onClick={() => setEditingOrder(null)} className="btn-secondary flex-1">Cancel</button>
+              <button type="submit" className="btn-primary flex-1" disabled={loading || editingOrder.editingItems.length === 0}>
+                {loading ? 'Saving...' : 'Save All Changes'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

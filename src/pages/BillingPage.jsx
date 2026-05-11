@@ -53,7 +53,7 @@ export default function BillingPage() {
 
   // Cash denomination helper state (UI only, never stored)
   const [cashGiven, setCashGiven] = useState(0)
-  const DENOMINATIONS = [10, 20, 50, 100, 200, 500, 2000]
+  const DENOMINATIONS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 2000]
   const cashChange = cashGiven - total
   const hasCashPayment = payments.some(p => p.mode === 'CASH')
   const isSingleCash = payments.length === 1 && payments[0].mode === 'CASH'

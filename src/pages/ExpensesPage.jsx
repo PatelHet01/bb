@@ -31,7 +31,8 @@ export default function ExpensesPage() {
       amount: parseFloat(form.amount),
       description: form.description,
       expense_date: form.expense_date,
-      logged_by: user.id
+      logged_by: String(user.id).startsWith('hardcoded') ? null : user.id,
+      recorded_by: user.username
     }
     
     let error;

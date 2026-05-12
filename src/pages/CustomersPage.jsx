@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Search, X, ArrowDownCircle, ArrowUpCircle, UserCircle, Edit2, Trash2, ShoppingBag, Download } from 'lucide-react'
+import { Plus, Search, X, UserCircle, Edit2, Trash2, ShoppingBag, Download } from 'lucide-react'
+import { getLedgerEntryStyle } from '../utils/ledger'
 
 export default function CustomersPage() {
   const { branchId, user, role } = useAuthStore()
@@ -24,6 +25,7 @@ export default function CustomersPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAdvanceModal, setShowAdvanceModal] = useState(false)
   const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '' })
+  const [editingLedgerEntry, setEditingLedgerEntry] = useState(null)
 
   const isAdmin = role === 'admin' || role === 'super_admin'
 
@@ -78,7 +80,17 @@ export default function CustomersPage() {
           c.orders.sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
           lastVisit = c.orders[0].created_at
         }
-        return { ...c, khataBalance: khata, advanceBalance: adv, totalPurchases: c.orders?.length || 0, lastVisit }
+        
+        const net = khata - adv
+        let finalKhata = 0
+        let finalAdvance = 0
+        if (net > 0) {
+          finalKhata = net
+        } else if (net < 0) {
+          finalAdvance = Math.abs(net)
+        }
+        
+        return { ...c, khataBalance: finalKhata, advanceBalance: finalAdvance, totalPurchases: c.orders?.length || 0, lastVisit }
       })
       setCustomers(enriched)
     }
@@ -190,20 +202,47 @@ export default function CustomersPage() {
     e.preventDefault()
     if (!txForm.amount || txForm.amount <= 0) { toast.error('Enter valid amount'); return }
     setSaving(true)
+    
+    const X = parseFloat(txForm.amount)
+    const currentKhata = selected.khataBalance || 0
+    
     try {
-      await supabase.from('khata_ledger').insert({
-        customer_id: selected.id,
-        branch_id: selected.branch_id || branchId || 'gurukul',
-        type: 'PAYMENT',
-        amount: parseFloat(txForm.amount),
-        reason: txForm.reason || `Payment via ${txForm.mode}`,
-        recorded_by: user.username
-      })
+      if (X <= currentKhata) {
+        await supabase.from('khata_ledger').insert({
+          customer_id: selected.id,
+          branch_id: selected.branch_id || branchId || 'gurukul',
+          type: 'PAYMENT',
+          amount: X,
+          reason: txForm.reason || `Payment via ${txForm.mode}`,
+          recorded_by: user.username
+        })
+      } else {
+        if (currentKhata > 0) {
+          await supabase.from('khata_ledger').insert({
+            customer_id: selected.id,
+            branch_id: selected.branch_id || branchId || 'gurukul',
+            type: 'PAYMENT',
+            amount: currentKhata,
+            reason: txForm.reason || `Payment (Khata Clear) via ${txForm.mode}`,
+            recorded_by: user.username
+          })
+        }
+        const surplus = X - currentKhata
+        await supabase.from('advance_ledger').insert({
+          customer_id: selected.id,
+          branch_id: selected.branch_id || branchId || 'gurukul',
+          type: 'TOPUP',
+          amount: surplus,
+          reason: txForm.reason || `Advance (Surplus) via ${txForm.mode}`,
+          recorded_by: user.username
+        })
+      }
+
       toast.success('Payment recorded')
       setShowPaymentModal(false)
       setTxForm({ amount: '', mode: 'CASH', reason: '' })
       viewCustomer(selected) 
-      fetchCustomers() // Refresh balances in list
+      fetchCustomers()
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
   }
@@ -212,15 +251,42 @@ export default function CustomersPage() {
     e.preventDefault()
     if (!txForm.amount || txForm.amount <= 0) { toast.error('Enter valid amount'); return }
     setSaving(true)
+    
+    const X = parseFloat(txForm.amount)
+    const currentKhata = selected.khataBalance || 0
+    
     try {
-      await supabase.from('advance_ledger').insert({
-        customer_id: selected.id,
-        branch_id: selected.branch_id || branchId || 'gurukul',
-        type: 'TOPUP',
-        amount: parseFloat(txForm.amount),
-        reason: txForm.reason || `Advance via ${txForm.mode}`,
-        recorded_by: user.username
-      })
+      if (X <= currentKhata) {
+        await supabase.from('khata_ledger').insert({
+          customer_id: selected.id,
+          branch_id: selected.branch_id || branchId || 'gurukul',
+          type: 'PAYMENT',
+          amount: X,
+          reason: txForm.reason || `Advance applied to Khata via ${txForm.mode}`,
+          recorded_by: user.username
+        })
+      } else {
+        if (currentKhata > 0) {
+          await supabase.from('khata_ledger').insert({
+            customer_id: selected.id,
+            branch_id: selected.branch_id || branchId || 'gurukul',
+            type: 'PAYMENT',
+            amount: currentKhata,
+            reason: txForm.reason || `Advance applied to Khata Clear via ${txForm.mode}`,
+            recorded_by: user.username
+          })
+        }
+        const surplus = X - currentKhata
+        await supabase.from('advance_ledger').insert({
+          customer_id: selected.id,
+          branch_id: selected.branch_id || branchId || 'gurukul',
+          type: 'TOPUP',
+          amount: surplus,
+          reason: txForm.reason || `Advance via ${txForm.mode}`,
+          recorded_by: user.username
+        })
+      }
+
       toast.success('Advance added')
       setShowAdvanceModal(false)
       setTxForm({ amount: '', mode: 'CASH', reason: '' })
@@ -228,6 +294,42 @@ export default function CustomersPage() {
       fetchCustomers()
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
+  }
+
+  function openEditLedger(entry, table) {
+    setEditingLedgerEntry({ ...entry, table })
+  }
+
+  async function handleUpdateLedger(e) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      const { table, id, amount, type, reason, created_at } = editingLedgerEntry
+      const { error } = await supabase.from(table).update({
+        amount: parseFloat(amount),
+        type,
+        reason,
+        created_at
+      }).eq('id', id)
+      
+      if (error) throw error
+      toast.success('Transaction updated')
+      setEditingLedgerEntry(null)
+      viewCustomer(selected)
+      fetchCustomers()
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function handleDeleteLedger(entry, table) {
+    if (!confirm('Delete this ledger transaction? This will affect the customer balance.')) return
+    try {
+      const { error } = await supabase.from(table).delete().eq('id', entry.id)
+      if (error) throw error
+      toast.success('Transaction deleted')
+      viewCustomer(selected)
+      fetchCustomers()
+    } catch (err) { toast.error(err.message) }
   }
 
   const filtered = customers.filter(c =>
@@ -433,38 +535,54 @@ export default function CustomersPage() {
             {activeTab === 'khata' && (
               khataLedger.length === 0 ? <p className="text-sm font-semibold text-ink-400 text-center py-10">No Khata History</p> :
               <div className="space-y-2">
-                {khataLedger.map(l => (
-                  <div key={l.id} className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800 flex gap-4">
-                    <div className={`mt-1 ${l.type === 'CREDIT' ? 'text-red-500' : 'text-emerald-500'}`}>{l.type === 'CREDIT' ? <ArrowUpCircle size={24}/> : <ArrowDownCircle size={24}/>}</div>
-                    <div className="flex-1">
-                      <div className="flex justify-between items-start">
-                        <p className="font-bold text-sm">{l.type === 'CREDIT' ? 'Credit Used' : 'Payment Received'}</p>
-                        <p className={`font-black text-base tabular-nums ${l.type === 'CREDIT' ? 'text-red-500' : 'text-emerald-500'}`}>{l.type === 'CREDIT' ? '+' : '-'}₹{l.amount}</p>
+                {khataLedger.map(l => {
+                  const style = getLedgerEntryStyle(l.type, 'customer_khata')
+                  return (
+                    <div key={l.id} className="group bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800 flex gap-4 transition-all hover:border-ink-300 dark:hover:border-ink-700">
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <p className={`font-bold text-sm ${style.color}`}>{style.label}</p>
+                          <div className="flex items-center gap-3">
+                            <p className={`font-black text-base tabular-nums ${style.color}`}>{style.prefix}₹{l.amount}</p>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => openEditLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
+                              <button onClick={() => handleDeleteLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-ink-500 mt-1">{l.reason}</p>
+                        <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()} {l.recorded_by && `· by ${l.recorded_by}`}</p>
                       </div>
-                      <p className="text-xs text-ink-500 mt-1">{l.reason}</p>
-                      <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()}</p>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
             {activeTab === 'advance' && (
               advanceLedger.length === 0 ? <p className="text-sm font-semibold text-ink-400 text-center py-10">No Advance History</p> :
               <div className="space-y-2">
-                {advanceLedger.map(l => (
-                  <div key={l.id} className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800 flex gap-4">
-                    <div className={`mt-1 ${l.type === 'TOPUP' ? 'text-emerald-500' : 'text-red-500'}`}>{l.type === 'TOPUP' ? <ArrowUpCircle size={24}/> : <ArrowDownCircle size={24}/>}</div>
-                    <div className="flex-1">
-                      <div className="flex justify-between items-start">
-                        <p className="font-bold text-sm">{l.type === 'TOPUP' ? 'Advance Added' : 'Used for Bill'}</p>
-                        <p className={`font-black text-base tabular-nums ${l.type === 'TOPUP' ? 'text-emerald-500' : 'text-red-500'}`}>{l.type === 'TOPUP' ? '+' : '-'}₹{l.amount}</p>
+                {advanceLedger.map(l => {
+                  const style = getLedgerEntryStyle(l.type, 'customer_advance')
+                  return (
+                    <div key={l.id} className="group bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800 flex gap-4 transition-all hover:border-ink-300 dark:hover:border-ink-700">
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <p className={`font-bold text-sm ${style.color}`}>{style.label}</p>
+                          <div className="flex items-center gap-3">
+                            <p className={`font-black text-base tabular-nums ${style.color}`}>{style.prefix}₹{l.amount}</p>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={() => openEditLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
+                              <button onClick={() => handleDeleteLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-ink-500 mt-1">{l.reason}</p>
+                        <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()} {l.recorded_by && `· by ${l.recorded_by}`}</p>
                       </div>
-                      <p className="text-xs text-ink-500 mt-1">{l.reason}</p>
-                      <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()}</p>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
@@ -548,6 +666,42 @@ export default function CustomersPage() {
           <label className="label">Note / Reference ID</label>
           <input className="input w-full" value={txForm.reason} onChange={e => setTxForm({...txForm, reason: e.target.value})} placeholder="Optional" />
         </div>
+      </Modal>
+
+      <Modal title="Edit Ledger Transaction" show={!!editingLedgerEntry} onClose={() => setEditingLedgerEntry(null)} onSubmit={handleUpdateLedger}>
+        {editingLedgerEntry && (
+          <>
+            <div>
+              <label className="label">Amount (₹) *</label>
+              <input className="input w-full font-black text-lg" type="number" step="0.01" min="0" required value={editingLedgerEntry.amount} onChange={e => setEditingLedgerEntry({...editingLedgerEntry, amount: e.target.value})} autoFocus />
+            </div>
+            <div>
+              <label className="label">Type</label>
+              <select className="input w-full" value={editingLedgerEntry.type} onChange={e => setEditingLedgerEntry({...editingLedgerEntry, type: e.target.value})}>
+                {editingLedgerEntry.table === 'khata_ledger' ? (
+                  <>
+                    <option value="CREDIT">Khata (Owe)</option>
+                    <option value="PAYMENT">Payment (Clear)</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="TOPUP">Topup (Add Advance)</option>
+                    <option value="DEDUCTION">Deduction (Used Advance)</option>
+                    <option value="REFUND">Refund</option>
+                  </>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="label">Note / Reason</label>
+              <input className="input w-full" value={editingLedgerEntry.reason || ''} onChange={e => setEditingLedgerEntry({...editingLedgerEntry, reason: e.target.value})} />
+            </div>
+            <div>
+              <label className="label">Date</label>
+              <input className="input w-full" type="datetime-local" value={new Date(new Date(editingLedgerEntry.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={e => setEditingLedgerEntry({...editingLedgerEntry, created_at: new Date(e.target.value).toISOString()})} />
+            </div>
+          </>
+        )}
       </Modal>
 
     </div>

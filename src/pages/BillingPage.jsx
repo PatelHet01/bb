@@ -307,7 +307,30 @@ export default function BillingPage() {
   }
 
   async function handleBill(overridePayments = null) {
-    const finalPayments = overridePayments || payments
+    let finalPayments = overridePayments || payments
+    
+    // Auto-convert KHATA to ADVANCE if customer has advance balance
+    if (customer && custBalances.advance > 0) {
+      let remainingAdv = custBalances.advance
+      let adjusted = []
+      for (const p of finalPayments) {
+        if (p.mode === 'KHATA' && remainingAdv > 0) {
+          const amt = parseFloat(p.amount)
+          if (amt <= remainingAdv) {
+            adjusted.push({ ...p, mode: 'ADVANCE' })
+            remainingAdv -= amt
+          } else {
+            adjusted.push({ ...p, mode: 'ADVANCE', amount: remainingAdv })
+            adjusted.push({ ...p, amount: amt - remainingAdv })
+            remainingAdv = 0
+          }
+        } else {
+          adjusted.push(p)
+        }
+      }
+      finalPayments = adjusted
+    }
+
     const finalTotalPaid = finalPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
     
     if (cart.length === 0) { toast.error('Cart is empty'); return }

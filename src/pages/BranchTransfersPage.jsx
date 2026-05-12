@@ -95,7 +95,8 @@ export default function BranchTransfersPage() {
         category: 'Internal Transfer Out',
         description: `Transfer to ${branchName(t.to_branch_id)}: ${t.quantity}x ${t.item_name}`,
         amount: totalVal,
-        logged_by: user.id
+        created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
+        recorded_by: user.username
       })
     }
   }
@@ -118,7 +119,8 @@ export default function BranchTransfersPage() {
         quantity: parseFloat(form.quantity),
         unit_value: parseFloat(form.unit_value) || 0,
         notes: form.notes || null,
-        created_by: user.id,
+        created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
+        recorded_by: user.username,
         status: form.status
       }
 

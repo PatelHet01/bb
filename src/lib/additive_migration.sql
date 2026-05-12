@@ -115,3 +115,25 @@ ALTER TABLE staff_transactions DISABLE ROW LEVEL SECURITY;
 
 -- 11. RELOAD POSTGREST
 NOTIFY pgrst, 'reload schema';
+
+-- 12. Fix UUID logged_by/created_by fields crashing with hardcoded users
+ALTER TABLE salary_records ALTER COLUMN logged_by DROP NOT NULL;
+ALTER TABLE shifts ALTER COLUMN logged_by DROP NOT NULL;
+ALTER TABLE expenses ALTER COLUMN logged_by DROP NOT NULL;
+ALTER TABLE announcements ALTER COLUMN created_by DROP NOT NULL;
+ALTER TABLE staff_transactions ALTER COLUMN created_by DROP NOT NULL;
+ALTER TABLE vendor_ledger ALTER COLUMN created_by DROP NOT NULL;
+
+-- 13. Phase out UUID logged_by for TEXT recorded_by
+ALTER TABLE salary_records ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+ALTER TABLE staff_transactions ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+ALTER TABLE vendor_ledger ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+
+-- 14. Fix vendor_ledger missing branch_id (Wait, it is already added in step 4 above, but just in case)
+ALTER TABLE vendor_ledger ADD COLUMN IF NOT EXISTS branch_id TEXT REFERENCES branches(id);
+
+NOTIFY pgrst, 'reload schema';
+ALTER TABLE branch_transfers ADD COLUMN IF NOT EXISTS recorded_by TEXT;

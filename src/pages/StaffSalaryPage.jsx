@@ -233,7 +233,8 @@ export default function StaffSalaryPage() {
         amount: parseFloat(txForm.amount),
         payment_mode: txForm.payment_mode,
         notes: txForm.notes,
-        created_by: user.id,
+        created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
+        recorded_by: user.username,
         created_at: txForm.date ? `${txForm.date}T${new Date().toISOString().split('T')[1]}` : new Date().toISOString()
       }
 

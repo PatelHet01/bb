@@ -66,12 +66,12 @@ export default function VendorsPage() {
     setSaving(true)
     try {
       if (editingId) {
-        const { error } = await supabase.from('vendors').update({
+        const { data, error } = await supabase.from('vendors').update({
           name: form.name, contact: form.contact, category: form.category, notes: form.notes
-        }).eq('id', editingId)
+        }).eq('id', editingId).select().single()
         if (error) throw error
-        setVendors(prev => prev.map(v => v.id === editingId ? { ...v, ...form } : v))
-        if (selectedVendor?.id === editingId) setSelectedVendor(sv => ({ ...sv, ...form }))
+        setVendors(prev => prev.map(v => v.id === editingId ? { ...v, ...data } : v))
+        if (selectedVendor?.id === editingId) setSelectedVendor(sv => ({ ...sv, ...data }))
         toast.success('Vendor updated')
       } else {
         const { data, error } = await supabase.from('vendors').insert({
@@ -94,7 +94,7 @@ export default function VendorsPage() {
     if (!window.confirm(`Delete vendor "${v.name}"? This cannot be undone.`)) return
     try {
       if (!v.id) throw new Error("Vendor ID is missing! Schema might be corrupt.")
-      const { error } = await supabase.from('vendors').update({ is_active: false }).eq('id', v.id)
+      const { data, error } = await supabase.from('vendors').update({ is_active: false }).eq('id', v.id).select().single()
       if (error) throw error
       setVendors(prev => prev.filter(vv => vv.id !== v.id))
       if (selectedVendor?.id === v.id) setSelectedVendor(null)
@@ -125,7 +125,9 @@ export default function VendorsPage() {
         branch_id: branchId || selectedVendor.branch_id,
         type: ledgerForm.type,
         amount: parseFloat(ledgerForm.amount),
-        reference: ledgerForm.reference || null
+        reference: ledgerForm.reference || null,
+        created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
+        recorded_by: user.username
       }
       
       if (ledgerForm.id) {

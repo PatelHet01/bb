@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useCustomerStore } from '../store/customerStore'
 import { motion } from 'framer-motion'
-import { LogOut, Coins, ArrowUpCircle, ArrowDownCircle, Star, Gamepad2 } from 'lucide-react'
+import { LogOut, ArrowUpCircle, ArrowDownCircle, Gamepad2 } from 'lucide-react'
+import { getLedgerEntryStyle } from '../utils/ledger'
 
 const S = {
   page: { background: '#000', minHeight: '100vh', fontFamily: 'Inter, sans-serif', color: 'white' },
@@ -41,8 +42,14 @@ export default function MyBethakDashboard() {
     fetch()
   }, [customer])
 
-  const khataBalance = khataLedger.reduce((s, l) => l.type === 'CREDIT' ? s + Number(l.amount) : s - Number(l.amount), 0)
-  const advBalance = advLedger.reduce((s, l) => l.type === 'TOPUP' ? s + Number(l.amount) : s - Number(l.amount), 0)
+  const rawKhata = khataLedger.reduce((s, l) => l.type === 'CREDIT' ? s + Number(l.amount) : s - Number(l.amount), 0)
+  const rawAdv = advLedger.reduce((s, l) => l.type === 'TOPUP' ? s + Number(l.amount) : s - Number(l.amount), 0)
+  
+  const net = rawKhata - rawAdv
+  let finalKhata = 0
+  let finalAdv = 0
+  if (net > 0) finalKhata = net
+  else if (net < 0) finalAdv = Math.abs(net)
 
   if (!customer) return null
 
@@ -83,8 +90,8 @@ export default function MyBethakDashboard() {
         {/* Balance Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
           {[
-            { label: 'Your Devaa (you owe)', value: `₹${khataBalance.toLocaleString('en-IN')}`, color: khataBalance > 0 ? '#ef4444' : 'white', note: khataBalance > 0 ? 'Outstanding khata' : 'All clear' },
-            { label: 'Advance Balance', value: `₹${advBalance.toLocaleString('en-IN')}`, color: '#22c55e', note: 'Pre-paid balance' },
+            { label: 'Your Devaa (you owe)', value: `₹${finalKhata.toLocaleString('en-IN')}`, color: finalKhata > 0 ? '#ef4444' : 'white', note: finalKhata > 0 ? 'Outstanding khata' : 'All clear' },
+            { label: 'Advance Balance', value: `₹${finalAdv.toLocaleString('en-IN')}`, color: '#22c55e', note: 'Pre-paid balance' },
           ].map((b, i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
               style={{ ...S.card, marginBottom: 0 }}>
@@ -161,12 +168,6 @@ export default function MyBethakDashboard() {
 function LedgerList({ entries, type }) {
   if (entries.length === 0) return <EmptyState text={`No ${type} history yet.`} />
 
-  const isCredit = (l) => type === 'khata' ? l.type === 'CREDIT' : l.type === 'TOPUP'
-  const label = (l) => {
-    if (type === 'khata') return l.type === 'CREDIT' ? 'Goods taken on credit' : l.type === 'PAYMENT' ? 'Payment made' : 'Adjustment'
-    return l.type === 'TOPUP' ? 'Advance added' : l.type === 'DEDUCTION' ? 'Used for purchase' : 'Refunded'
-  }
-
   // Running balance
   let bal = 0
   const withBal = [...entries].reverse().map(l => {
@@ -177,26 +178,37 @@ function LedgerList({ entries, type }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      {withBal.map(l => (
-        <div key={l.id} style={{ border: '1px solid rgba(255,255,255,0.07)', padding: '0.9rem 1rem', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-          <div style={{ color: isCredit(l) ? '#ef4444' : '#22c55e', marginTop: '2px', flexShrink: 0 }}>
-            {isCredit(l) ? <ArrowUpCircle size={16} /> : <ArrowDownCircle size={16} />}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <p style={{ fontSize: '0.85rem', fontWeight: 700 }}>{label(l)}</p>
-              <p style={{ fontWeight: 900, fontSize: '0.95rem', color: isCredit(l) ? '#ef4444' : '#22c55e' }}>
-                {isCredit(l) ? '+' : '-'}₹{l.amount}
-              </p>
+      {withBal.map(l => {
+        const style = getLedgerEntryStyle(l.type, type === 'khata' ? 'customer_khata' : 'customer_advance')
+        const colorHex = style.isDebit ? '#22c55e' : '#ef4444'
+        const Icon = style.isDebit ? ArrowDownCircle : ArrowUpCircle
+        
+        // Customer friendly labels
+        let userLabel = style.label
+        if (type === 'khata') userLabel = l.type === 'CREDIT' ? 'You Used Credit' : 'You Paid'
+        else userLabel = l.type === 'TOPUP' ? 'You Added Balance' : 'Used For Bill'
+
+        return (
+          <div key={l.id} style={{ border: '1px solid rgba(255,255,255,0.07)', padding: '0.9rem 1rem', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <div style={{ color: colorHex, marginTop: '2px', flexShrink: 0 }}>
+              <Icon size={16} />
             </div>
-            {l.reason && <p style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.reason}</p>}
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.3rem' }}>
-              <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)' }}>{new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
-              <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Bal: ₹{l.runningBal.toFixed(0)}</p>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <p style={{ fontSize: '0.85rem', fontWeight: 700 }}>{userLabel}</p>
+                <p style={{ fontWeight: 900, fontSize: '0.95rem', color: colorHex }}>
+                  {style.prefix}₹{l.amount}
+                </p>
+              </div>
+              {l.reason && <p style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.reason}</p>}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.3rem' }}>
+                <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)' }}>{new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+                <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Bal: ₹{l.runningBal.toFixed(0)}</p>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

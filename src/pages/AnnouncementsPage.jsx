@@ -31,7 +31,8 @@ export default function AnnouncementsPage() {
       message: form.message,
       type: form.type,
       branch_scope: isSuperAdmin ? (form.branch_scope || null) : branchId,
-      created_by: user.id
+      created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
+      recorded_by: user.username
     }
     
     let error;

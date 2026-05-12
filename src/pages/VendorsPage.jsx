@@ -31,6 +31,7 @@ export default function VendorsPage() {
   // Ledger entry form
   const [showLedgerForm, setShowLedgerForm] = useState(false)
   const [ledgerForm, setLedgerForm] = useState({ type: 'PURCHASE', amount: '', reference: '' })
+  const [editingLedgerId, setEditingLedgerId] = useState(null)
 
   // Items tagged to vendor
   const [vendorItems, setVendorItems] = useState([])
@@ -130,10 +131,10 @@ export default function VendorsPage() {
         recorded_by: user.username
       }
       
-      if (ledgerForm.id) {
-        const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', ledgerForm.id).select().single()
+      if (editingLedgerId) {
+        const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', editingLedgerId).select().single()
         if (error) throw error
-        setLedger(prev => prev.map(l => l.id === ledgerForm.id ? data : l))
+        setLedger(prev => prev.map(l => l.id === editingLedgerId ? data : l))
         toast.success('Entry updated')
       } else {
         const { data, error } = await supabase.from('vendor_ledger').insert(payload).select().single()
@@ -143,6 +144,7 @@ export default function VendorsPage() {
       }
       
       setShowLedgerForm(false)
+      setEditingLedgerId(null)
       setLedgerForm({ type: 'PURCHASE', amount: '', reference: '' })
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
@@ -304,7 +306,7 @@ export default function VendorsPage() {
               </button>
             ))}
             {isAdmin && (
-              <button onClick={() => setShowLedgerForm(!showLedgerForm)} className="ml-auto px-3 py-2 text-xs font-bold text-ember hover:bg-ember/10 rounded-lg transition-colors">
+              <button onClick={() => { setEditingLedgerId(null); setLedgerForm({ type: 'PURCHASE', amount: '', reference: '' }); setShowLedgerForm(!showLedgerForm); }} className="ml-auto px-3 py-2 text-xs font-bold text-ember hover:bg-ember/10 rounded-lg transition-colors">
                 + Entry
               </button>
             )}
@@ -333,7 +335,7 @@ export default function VendorsPage() {
               </div>
               <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => setShowLedgerForm(false)} className="btn-secondary text-xs">Cancel</button>
-                <button type="submit" disabled={saving} className="btn-primary text-xs">{saving ? '…' : 'Add Entry'}</button>
+                <button type="submit" disabled={saving} className="btn-primary text-xs">{saving ? '…' : (editingLedgerId ? 'Update Entry' : 'Add Entry')}</button>
               </div>
             </form>
           )}
@@ -361,7 +363,7 @@ export default function VendorsPage() {
                         {l.type === 'PURCHASE' ? '+' : '-'}₹{Number(l.amount).toLocaleString('en-IN')}
                       </div>
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={() => { setLedgerForm({ ...l }); setShowLedgerForm(true); }} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
+                        <button onClick={() => { setEditingLedgerId(l.id); setLedgerForm({ type: l.type, amount: l.amount, reference: l.reference || '' }); setShowLedgerForm(true); }} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
                         <button onClick={() => deleteLedgerEntry(l.id)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={12}/></button>
                       </div>
                     </div>

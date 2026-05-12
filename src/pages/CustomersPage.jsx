@@ -333,9 +333,9 @@ export default function CustomersPage() {
   }
 
   const filtered = customers.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.username.toLowerCase().includes(search.toLowerCase()) ||
-    c.mobile_number.includes(search)
+    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (c.username || '').toLowerCase().includes(search.toLowerCase()) ||
+    (c.mobile_number || '').includes(search)
   )
 
   const Modal = ({ title, show, onClose, onSubmit, children }) => {

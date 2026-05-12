@@ -132,6 +132,7 @@ export default function VendorsPage() {
       }
       
       if (editingLedgerId) {
+        if (!editingLedgerId) throw new Error("Missing entry ID for update");
         const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', editingLedgerId).select().single()
         if (error) throw error
         setLedger(prev => prev.map(l => l.id === editingLedgerId ? data : l))
@@ -151,7 +152,13 @@ export default function VendorsPage() {
   }
 
   async function deleteLedgerEntry(id) {
+    if (!id || id === 'null') {
+      toast.error(`Cannot delete: Entry ID is missing or invalid (${id})`);
+      return;
+    }
     if(!confirm('Delete this ledger entry?')) return
+    
+    console.log("Deleting id:", id)
     const { error } = await supabase.from('vendor_ledger').delete().eq('id', id)
     if(error) toast.error(error.message)
     else {
@@ -356,7 +363,9 @@ export default function VendorsPage() {
                         }`}>{l.type}</span>
                         {l.reference && <span className="text-xs text-ink-500 font-medium">{l.reference}</span>}
                       </div>
-                      <div className="text-[10px] text-ink-400 mt-1 font-bold">{new Date(l.created_at).toLocaleString('en-IN')}</div>
+                      <div className="text-[10px] text-ink-400 mt-1 font-bold">
+                        {new Date(l.created_at).toLocaleString('en-IN')} | ID: {l.id ? l.id.slice(0,8) : 'MISSING'}
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className={`font-black text-base tabular-nums ${l.type === 'PURCHASE' ? 'text-red-500' : 'text-emerald-500'}`}>

@@ -28,7 +28,7 @@ export default function DashboardHome() {
       try {
         const today = new Date().toISOString().split('T')[0]
 
-        let oQ = supabase.from('orders').select('id, order_number, total, created_at, table_number, order_type, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
+        let oQ = supabase.from('orders').select('id, order_number, total, created_at, status, table_number, order_type, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
         if (branchId) oQ = oQ.eq('branch_id', branchId)
         const { data: orders, error: ordersError } = await oQ.order('created_at', { ascending: false })
         if (ordersError) throw ordersError
@@ -95,8 +95,8 @@ export default function DashboardHome() {
           customers: custCount || 0,
           outKhata: outKhataTotal
         })
-        setRecentOrders(ordersWithPayments || [])
-        setTodayOrders(ordersWithPayments || [])
+        setRecentOrders(activeOrders || [])
+        setTodayOrders(activeOrders || [])
 
         // Fetch Recent Transfers for Super Admin
         if (role === 'super_admin') {

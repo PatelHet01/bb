@@ -5,6 +5,27 @@ import toast from 'react-hot-toast'
 import { Plus, Search, X, UserCircle, Edit2, Trash2, ShoppingBag, Download } from 'lucide-react'
 import { getLedgerEntryStyle } from '../utils/ledger'
 
+const Modal = ({ title, show, onClose, onSubmit, saving, children }) => {
+  if (!show) return null
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-ink-950/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white dark:bg-ink-900 rounded-xl shadow-modal w-full max-w-sm overflow-hidden animate-slide-up">
+        <div className="px-5 py-4 border-b border-ink-200 dark:border-ink-800 flex justify-between items-center">
+          <h3 className="font-bold text-ink-900 dark:text-white">{title}</h3>
+          <button type="button" onClick={onClose} className="text-ink-400 hover:text-ink-700 dark:hover:text-ink-200"><X size={18}/></button>
+        </div>
+        <form onSubmit={onSubmit} className="p-5 space-y-4">
+          {children}
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : 'Confirm'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 export default function CustomersPage() {
   const { branchId, user, role } = useAuthStore()
   const [customers, setCustomers] = useState([])
@@ -24,6 +45,7 @@ export default function CustomersPage() {
   
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showAdvanceModal, setShowAdvanceModal] = useState(false)
+  const [showKhataModal, setShowKhataModal] = useState(false)
   const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '' })
   const [editingLedgerEntry, setEditingLedgerEntry] = useState(null)
 
@@ -198,50 +220,77 @@ export default function CustomersPage() {
     setGhodaHistory(ghodaRes.data || [])
   }
 
+  // --- Live balance derived from already-loaded ledger state (never stale) ---
+  const liveKhataRaw = khataLedger.reduce((s, l) => s + (l.type === 'CREDIT' ? +l.amount : -l.amount), 0)
+  const liveAdvRaw   = advanceLedger.reduce((s, l) => s + (l.type === 'TOPUP' ? +l.amount : -l.amount), 0)
+  const liveNet      = liveKhataRaw - liveAdvRaw
+  const displayKhata = Math.max(0, liveNet)
+  const displayAdv   = Math.max(0, -liveNet)
+
+  async function handleAddKhataCredit(e) {
+    e.preventDefault()
+    const X = parseFloat(txForm.amount)
+    if (!X || X <= 0) { toast.error('Enter valid amount'); return }
+    setSaving(true)
+    try {
+      await supabase.from('khata_ledger').insert({
+        customer_id: selected.id,
+        branch_id: selected.branch_id || branchId || 'gurukul',
+        type: 'CREDIT',
+        amount: X,
+        reason: txForm.reason || 'Manual Khata Credit',
+        recorded_by: user.username
+      })
+      toast.success('Khata credit added')
+      setShowKhataModal(false)
+      setTxForm({ amount: '', mode: 'CASH', reason: '' })
+      viewCustomer(selected)
+      fetchCustomers()
+    } catch (e) { toast.error(e.message) }
+    finally { setSaving(false) }
+  }
+
   async function handleRecordPayment(e) {
     e.preventDefault()
-    if (!txForm.amount || txForm.amount <= 0) { toast.error('Enter valid amount'); return }
-    setSaving(true)
-    
     const X = parseFloat(txForm.amount)
-    const currentKhata = selected.khataBalance || 0
-    
+    if (!X || X <= 0) { toast.error('Enter valid amount'); return }
+
+    // Gate: nothing to clear
+    if (displayKhata === 0) {
+      toast.error('No outstanding Khata to clear. Use "Add Advance" to credit the customer.')
+      return
+    }
+
+    setSaving(true)
     try {
-      if (X <= currentKhata) {
+      const branch = selected.branch_id || branchId || 'gurukul'
+      const note   = txForm.reason || `Payment via ${txForm.mode}`
+
+      if (X <= displayKhata) {
+        // Partial payment — only touches khata_ledger
         await supabase.from('khata_ledger').insert({
-          customer_id: selected.id,
-          branch_id: selected.branch_id || branchId || 'gurukul',
-          type: 'PAYMENT',
-          amount: X,
-          reason: txForm.reason || `Payment via ${txForm.mode}`,
-          recorded_by: user.username
+          customer_id: selected.id, branch_id: branch,
+          type: 'PAYMENT', amount: X, reason: note, recorded_by: user.username
         })
       } else {
-        if (currentKhata > 0) {
-          await supabase.from('khata_ledger').insert({
-            customer_id: selected.id,
-            branch_id: selected.branch_id || branchId || 'gurukul',
-            type: 'PAYMENT',
-            amount: currentKhata,
-            reason: txForm.reason || `Payment (Khata Clear) via ${txForm.mode}`,
-            recorded_by: user.username
-          })
-        }
-        const surplus = X - currentKhata
+        // Overpayment — clear khata, surplus becomes advance
+        await supabase.from('khata_ledger').insert({
+          customer_id: selected.id, branch_id: branch,
+          type: 'PAYMENT', amount: displayKhata,
+          reason: `${note} (Khata Cleared)`, recorded_by: user.username
+        })
+        const surplus = X - displayKhata
         await supabase.from('advance_ledger').insert({
-          customer_id: selected.id,
-          branch_id: selected.branch_id || branchId || 'gurukul',
-          type: 'TOPUP',
-          amount: surplus,
-          reason: txForm.reason || `Advance (Surplus) via ${txForm.mode}`,
-          recorded_by: user.username
+          customer_id: selected.id, branch_id: branch,
+          type: 'TOPUP', amount: surplus,
+          reason: `${note} (Surplus Advance)`, recorded_by: user.username
         })
       }
 
       toast.success('Payment recorded')
       setShowPaymentModal(false)
       setTxForm({ amount: '', mode: 'CASH', reason: '' })
-      viewCustomer(selected) 
+      viewCustomer(selected)
       fetchCustomers()
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
@@ -249,48 +298,25 @@ export default function CustomersPage() {
 
   async function handleAddAdvance(e) {
     e.preventDefault()
-    if (!txForm.amount || txForm.amount <= 0) { toast.error('Enter valid amount'); return }
-    setSaving(true)
-    
     const X = parseFloat(txForm.amount)
-    const currentKhata = selected.khataBalance || 0
-    
+    if (!X || X <= 0) { toast.error('Enter valid amount'); return }
+
+    // Pure advance TOPUP — net balance display handles reconciliation at read-time
+    setSaving(true)
     try {
-      if (X <= currentKhata) {
-        await supabase.from('khata_ledger').insert({
-          customer_id: selected.id,
-          branch_id: selected.branch_id || branchId || 'gurukul',
-          type: 'PAYMENT',
-          amount: X,
-          reason: txForm.reason || `Advance applied to Khata via ${txForm.mode}`,
-          recorded_by: user.username
-        })
-      } else {
-        if (currentKhata > 0) {
-          await supabase.from('khata_ledger').insert({
-            customer_id: selected.id,
-            branch_id: selected.branch_id || branchId || 'gurukul',
-            type: 'PAYMENT',
-            amount: currentKhata,
-            reason: txForm.reason || `Advance applied to Khata Clear via ${txForm.mode}`,
-            recorded_by: user.username
-          })
-        }
-        const surplus = X - currentKhata
-        await supabase.from('advance_ledger').insert({
-          customer_id: selected.id,
-          branch_id: selected.branch_id || branchId || 'gurukul',
-          type: 'TOPUP',
-          amount: surplus,
-          reason: txForm.reason || `Advance via ${txForm.mode}`,
-          recorded_by: user.username
-        })
-      }
+      await supabase.from('advance_ledger').insert({
+        customer_id: selected.id,
+        branch_id: selected.branch_id || branchId || 'gurukul',
+        type: 'TOPUP',
+        amount: X,
+        reason: txForm.reason || `Advance via ${txForm.mode}`,
+        recorded_by: user.username
+      })
 
       toast.success('Advance added')
       setShowAdvanceModal(false)
       setTxForm({ amount: '', mode: 'CASH', reason: '' })
-      viewCustomer(selected) 
+      viewCustomer(selected)
       fetchCustomers()
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
@@ -337,27 +363,6 @@ export default function CustomersPage() {
     (c.username || '').toLowerCase().includes(search.toLowerCase()) ||
     (c.mobile_number || '').includes(search)
   )
-
-  const Modal = ({ title, show, onClose, onSubmit, children }) => {
-    if (!show) return null
-    return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-ink-950/60 backdrop-blur-sm animate-fade-in">
-        <div className="bg-white dark:bg-ink-900 rounded-xl shadow-modal w-full max-w-sm overflow-hidden animate-slide-up">
-          <div className="px-5 py-4 border-b border-ink-200 dark:border-ink-800 flex justify-between items-center">
-            <h3 className="font-bold text-ink-900 dark:text-white">{title}</h3>
-            <button type="button" onClick={onClose} className="text-ink-400 hover:text-ink-700 dark:hover:text-ink-200"><X size={18}/></button>
-          </div>
-          <form onSubmit={onSubmit} className="p-5 space-y-4">
-            {children}
-            <div className="flex gap-2 pt-2">
-              <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-              <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving...' : 'Confirm'}</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="flex flex-col md:flex-row gap-4 h-[calc(100vh-6rem)]">
@@ -510,12 +515,26 @@ export default function CustomersPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
                     <p className="text-[10px] uppercase font-bold text-ink-400 mb-1">Total Khata (Levana)</p>
-                    <p className="text-2xl font-black text-red-500">₹{selected.khataBalance}</p>
-                    <button className="w-full mt-3 py-2 text-xs font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg shadow-sm" onClick={() => setShowPaymentModal(true)}>Record Payment</button>
+                    <p className="text-2xl font-black text-red-500">₹{displayKhata}</p>
+                    <button
+                      className={`w-full mt-3 py-2 text-xs font-bold text-white rounded-lg shadow-sm transition-colors ${
+                        displayKhata > 0 ? 'bg-red-500 hover:bg-red-600' : 'bg-ink-300 dark:bg-ink-700 cursor-not-allowed'
+                      }`}
+                      onClick={() => setShowPaymentModal(true)}
+                      disabled={displayKhata === 0}
+                    >
+                      {displayKhata > 0 ? 'Record Payment' : 'No Khata Pending'}
+                    </button>
+                    <button
+                      className="w-full mt-2 py-2 text-xs font-bold text-red-600 border border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      onClick={() => setShowKhataModal(true)}
+                    >
+                      + Add Khata Credit
+                    </button>
                   </div>
                   <div className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
                     <p className="text-[10px] uppercase font-bold text-ink-400 mb-1">Advance Balance</p>
-                    <p className="text-2xl font-black text-emerald-500">₹{selected.advanceBalance}</p>
+                    <p className="text-2xl font-black text-emerald-500">₹{displayAdv}</p>
                     <button className="w-full mt-3 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-lg shadow-sm" onClick={() => setShowAdvanceModal(true)}>Add Advance</button>
                   </div>
                 </div>
@@ -589,23 +608,47 @@ export default function CustomersPage() {
             {activeTab === 'orders' && (
               ordersHistory.length === 0 ? <p className="text-sm font-semibold text-ink-400 text-center py-10">No Orders History</p> :
               <div className="space-y-2">
-                {ordersHistory.map(o => (
-                  <div key={o.id} className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
-                    <div className="flex justify-between items-center border-b border-ink-100 dark:border-ink-800 pb-2 mb-2">
-                      <p className="font-mono text-xs font-bold text-ink-500">#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
-                      <p className="font-black text-lg text-ink-900 dark:text-white">₹{o.total}</p>
-                    </div>
-                    <div className="flex justify-between items-end text-xs">
-                      <div>
-                        <p className="font-bold text-ink-500 uppercase">{new Date(o.created_at).toLocaleString()}</p>
-                        <p className="mt-1 flex gap-1">
-                          {(o.order_payments || []).map((p,i) => <span key={i} className="bg-ink-100 dark:bg-ink-800 px-1.5 py-0.5 rounded font-bold text-[9px] uppercase">{p.mode}</span>)}
-                        </p>
+                {ordersHistory.map(o => {
+                  const isKhata = (o.order_payments || []).some(p => p.mode === 'KHATA')
+                  const isCancelled = o.status === 'cancelled'
+                  
+                  let cardClass = "bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800"
+                  let borderClass = "border-ink-100 dark:border-ink-800"
+                  let textClass = "text-ink-900 dark:text-white"
+                  let tagClass = "bg-ink-100 dark:bg-ink-800"
+                  
+                  if (isCancelled) {
+                    // default ink theme
+                  } else if (isKhata) {
+                    cardClass = "bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-200 dark:border-red-900/30"
+                    borderClass = "border-red-200 dark:border-red-900/30"
+                    textClass = "text-red-700 dark:text-red-400"
+                    tagClass = "bg-red-200/50 dark:bg-red-900/50 text-red-800 dark:text-red-300"
+                  } else {
+                    cardClass = "bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/30"
+                    borderClass = "border-emerald-200 dark:border-emerald-900/30"
+                    textClass = "text-emerald-700 dark:text-emerald-400"
+                    tagClass = "bg-emerald-200/50 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300"
+                  }
+
+                  return (
+                    <div key={o.id} className={cardClass}>
+                      <div className={`flex justify-between items-center border-b pb-2 mb-2 ${borderClass}`}>
+                        <p className={`font-mono text-xs font-bold ${isKhata ? 'text-red-500/70' : 'text-ink-500'}`}>#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
+                        <p className={`font-black text-lg ${textClass}`}>₹{o.total}</p>
                       </div>
-                      <span className={`font-bold px-2 py-1 rounded uppercase tracking-wider text-[10px] ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{o.status}</span>
+                      <div className="flex justify-between items-end text-xs">
+                        <div>
+                          <p className={`font-bold uppercase ${isKhata ? 'text-red-600/60' : 'text-ink-500'}`}>{new Date(o.created_at).toLocaleString()}</p>
+                          <p className="mt-1 flex gap-1">
+                            {(o.order_payments || []).map((p,i) => <span key={i} className={`${tagClass} px-1.5 py-0.5 rounded font-bold text-[9px] uppercase`}>{p.mode}</span>)}
+                          </p>
+                        </div>
+                        <span className={`font-bold px-2 py-1 rounded uppercase tracking-wider text-[10px] ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{o.status}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
@@ -632,7 +675,7 @@ export default function CustomersPage() {
       )}
 
       {/* Action Modals */}
-      <Modal title="Record Payment (Clear Khata)" show={showPaymentModal} onClose={() => setShowPaymentModal(false)} onSubmit={handleRecordPayment}>
+      <Modal title="Record Payment (Clear Khata)" show={showPaymentModal} onClose={() => setShowPaymentModal(false)} onSubmit={handleRecordPayment} saving={saving}>
         <div>
           <label className="label">Amount Paid (₹) *</label>
           <input className="input w-full font-black text-lg" type="number" min="1" required value={txForm.amount} onChange={e => setTxForm({...txForm, amount: e.target.value})} autoFocus />
@@ -650,7 +693,19 @@ export default function CustomersPage() {
         </div>
       </Modal>
 
-      <Modal title="Add Advance Balance" show={showAdvanceModal} onClose={() => setShowAdvanceModal(false)} onSubmit={handleAddAdvance}>
+      <Modal title="Add Khata Credit (Goods on Credit)" show={showKhataModal} onClose={() => { setShowKhataModal(false); setTxForm({ amount: '', mode: 'CASH', reason: '' }) }} onSubmit={handleAddKhataCredit} saving={saving}>
+        <div>
+          <label className="label">Amount (₹) *</label>
+          <input className="input w-full font-black text-lg" type="number" min="1" required value={txForm.amount} onChange={e => setTxForm({...txForm, amount: e.target.value})} autoFocus />
+        </div>
+        <div>
+          <label className="label">Reason / Item Description</label>
+          <input className="input w-full" value={txForm.reason} onChange={e => setTxForm({...txForm, reason: e.target.value})} placeholder="e.g. Cigarettes on credit" />
+        </div>
+        <p className="text-xs text-red-500 font-semibold">⚠ This adds to what the customer owes you (Khata/Levana).</p>
+      </Modal>
+
+      <Modal title="Add Advance Balance" show={showAdvanceModal} onClose={() => setShowAdvanceModal(false)} onSubmit={handleAddAdvance} saving={saving}>
         <div>
           <label className="label">Advance Amount (₹) *</label>
           <input className="input w-full font-black text-lg" type="number" min="1" required value={txForm.amount} onChange={e => setTxForm({...txForm, amount: e.target.value})} autoFocus />
@@ -668,7 +723,7 @@ export default function CustomersPage() {
         </div>
       </Modal>
 
-      <Modal title="Edit Ledger Transaction" show={!!editingLedgerEntry} onClose={() => setEditingLedgerEntry(null)} onSubmit={handleUpdateLedger}>
+      <Modal title="Edit Ledger Transaction" show={!!editingLedgerEntry} onClose={() => setEditingLedgerEntry(null)} onSubmit={handleUpdateLedger} saving={saving}>
         {editingLedgerEntry && (
           <>
             <div>

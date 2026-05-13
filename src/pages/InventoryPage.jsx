@@ -21,7 +21,7 @@ export default function InventoryPage() {
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, branch_id: branchId || 'gurukul' })
+  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
   const [saving, setSaving] = useState(false)
 
   // Inline Editing
@@ -45,6 +45,7 @@ export default function InventoryPage() {
   const [showCatForm, setShowCatForm] = useState(false)
   const [editingCategory, setEditingCategory] = useState(null)
   const [newCatName, setNewCatName] = useState('')
+  const [newCatSubcategories, setNewCatSubcategories] = useState([])
 
   const activeBranch = branchId || 'gurukul'
   const branchCats = Array.from(new Set([
@@ -107,17 +108,19 @@ export default function InventoryPage() {
         subcategory: form.subcategory,
         variant: form.variant || null,
         unit: form.unit,
-        price: form.price ? parseFloat(form.price) : 0, 
+        price: form.item_type === 'RAW_MATERIAL' ? 0 : (form.price ? parseFloat(form.price) : 0), 
         cost_price: form.cost_price ? parseFloat(form.cost_price) : 0,
         stock_quantity: parseInt(form.stock_quantity) || 0,
         low_stock_threshold: parseInt(form.low_stock_threshold) || 5,
         units_per_box: parseInt(form.units_per_box) || 1,
+        pack_price: form.pack_price ? parseFloat(form.pack_price) : 0,
         branch_id: form.branch_id, 
         is_active: form.is_active,
+        item_type: form.item_type || 'SELLABLE',
         is_archived: false
       })
       toast.success('Item added')
-      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, branch_id: branchId || 'gurukul' })
+      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
       setShowForm(false)
       fetchItems()
     } catch (e) { toast.error(e.message) }
@@ -259,7 +262,8 @@ export default function InventoryPage() {
     return items.filter(i => {
       // Main Tab
       if (mainTab === 'Disposables' && (i.category !== 'Inventory' || i.subcategory !== 'Disposables')) return false
-      if (mainTab === 'Active' && (i.is_archived || i.category === 'Inventory')) return false
+      if (mainTab === 'Raw Materials' && i.item_type !== 'RAW_MATERIAL') return false
+      if (mainTab === 'Active' && (i.is_archived || i.category === 'Inventory' || i.item_type === 'RAW_MATERIAL')) return false
       if (mainTab === 'Archived' && (!i.is_archived || i.category === 'Inventory')) return false
       
       // Category Filter
@@ -442,14 +446,23 @@ export default function InventoryPage() {
           <form onSubmit={async (e) => {
             e.preventDefault()
             if(!newCatName.trim()) return
+            const cleanSubs = newCatSubcategories.map(s => s.trim()).filter(Boolean)
             const payload = {
               name: newCatName.trim(),
-              branch_id: branchId === 'All Branches' ? null : branchId,
-              is_global: branchId === 'All Branches'
+              subcategories: cleanSubs.length ? cleanSubs : ['General'],
+              is_global: branchId === 'All Branches' || !branchId
+            }
+            if (branchId && branchId !== 'All Branches') {
+              payload.branch_id = branchId
+            } else {
+              payload.branch_id = null
             }
             let error;
             if (editingCategory) {
-              const res = await supabase.from('categories').update(payload).eq('id', editingCategory.id)
+              const q = supabase.from('categories').update(payload)
+              if (editingCategory.id) q.eq('id', editingCategory.id)
+              else q.eq('name', editingCategory.name)
+              const res = await q
               error = res.error
             } else {
               const res = await supabase.from('categories').insert(payload)
@@ -458,15 +471,37 @@ export default function InventoryPage() {
             if(error) return toast.error(error.message)
             toast.success(editingCategory ? 'Category Updated' : 'Category Added')
             setNewCatName('')
+            setNewCatSubcategories([])
             setEditingCategory(null)
             setShowCatForm(false)
             fetchCategories()
-          }} className="flex gap-4 items-end">
-            <div className="flex-1">
-              <label className="label">Category Name *</label>
-              <input className="input w-full" value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="e.g. Raw Materials" required autoFocus/>
+          }} className="space-y-4">
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="label">Category Name *</label>
+                <input className="input w-full" value={newCatName} onChange={e=>setNewCatName(e.target.value)} placeholder="e.g. Raw Materials" required autoFocus/>
+              </div>
+              <button type="submit" className="btn-primary shrink-0">{editingCategory ? 'Update' : 'Save'} Category</button>
             </div>
-            <button type="submit" className="btn-primary">{editingCategory ? 'Update' : 'Save'} Category</button>
+            <div>
+              <label className="label mb-2 block">Subcategories</label>
+              <div className="space-y-2">
+                {newCatSubcategories.map((sub, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <input
+                      className="input flex-1 text-sm"
+                      value={sub}
+                      placeholder={`Subcategory ${idx + 1}`}
+                      onChange={e => setNewCatSubcategories(p => p.map((s, i) => i === idx ? e.target.value : s))}
+                    />
+                    <button type="button" onClick={() => setNewCatSubcategories(p => p.filter((_, i) => i !== idx))} className="p-2 text-zinc-400 hover:text-red-500"><X size={14}/></button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => setNewCatSubcategories(p => [...p, ''])} className="text-xs font-bold text-ember hover:underline flex items-center gap-1">
+                  <Plus size={12}/> Add Subcategory
+                </button>
+              </div>
+            </div>
           </form>
           
           <div className="mt-6">
@@ -476,12 +511,16 @@ export default function InventoryPage() {
                 <div key={c.id} className="group relative flex items-center gap-2 bg-white dark:bg-zinc-800 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
                   <span className="text-xs font-bold">{c.name}</span>
                   <div className="flex gap-1">
-                    <button onClick={() => { setEditingCategory(c); setNewCatName(c.name); setShowCatForm(true); }} className="p-1 text-zinc-400 hover:text-ember"><Edit2 size={12}/></button>
+                    <button onClick={() => { setEditingCategory(c); setNewCatName(c.name); setNewCatSubcategories(c.subcategories || []); setShowCatForm(true); }} className="p-1 text-zinc-400 hover:text-ember"><Edit2 size={12}/></button>
                     <button onClick={async () => {
                       if(!confirm(`Delete category "${c.name}"?`)) return
-                      const { error } = await supabase.from('categories').delete().eq('id', c.id)
+                      const q = supabase.from('categories').delete()
+                      if (c.id) q.eq('id', c.id)
+                      else q.eq('name', c.name)
+                      const { error } = await q
                       if(error) toast.error(error.message)
                       else { toast.success('Category removed'); fetchCategories(); }
+
                     }} className="p-1 text-zinc-400 hover:text-red-500"><Trash2 size={12}/></button>
                   </div>
                 </div>
@@ -494,13 +533,12 @@ export default function InventoryPage() {
 
       {/* Main Tabs */}
       <div className="flex border-b border-zinc-200 dark:border-zinc-800 gap-6 overflow-x-auto no-scrollbar">
-        {['Active', 'Archived', 'Disposables', 'BB Cafe Menu'].map(tab => {
-          // 'menu' param maps to 'BB Cafe Menu' tab
+        {['Active', 'Raw Materials', 'Archived', 'Disposables', 'BB Cafe Menu'].map(tab => {
           const isActive = mainTab === tab || (tab === 'BB Cafe Menu' && mainTab === 'menu');
           return (
             <button key={tab} onClick={() => setMainTab(tab === 'BB Cafe Menu' ? 'menu' : tab)}
               className={`pb-3 text-sm font-bold border-b-2 whitespace-nowrap transition-colors ${isActive ? 'border-ember text-ember' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'}`}>
-              {tab}
+              {tab === 'Raw Materials' ? '🧪 Raw Materials' : tab}
             </button>
           )
         })}
@@ -515,7 +553,7 @@ export default function InventoryPage() {
       {mainTab !== 'menu' && showForm && canDefineItems && (
         <div className="card p-5 animate-slide-up border-2 border-ember/20 shadow-xl">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="font-bold text-zinc-900 dark:text-white text-lg">New {form.category === 'Inventory' ? 'Disposable' : 'Item'}</h2>
+            <h2 className="font-bold text-zinc-900 dark:text-white text-lg">New {form.item_type === 'RAW_MATERIAL' ? '🧪 Raw Material' : form.category === 'Inventory' ? 'Disposable' : 'Item'}</h2>
             <button onClick={() => setShowForm(false)} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
           </div>
           <form onSubmit={handleAdd}>
@@ -546,7 +584,14 @@ export default function InventoryPage() {
                 </select>
               </div>
 
-              {form.category !== 'Inventory' && (
+              <div>
+                <label className="label">Item Type *</label>
+                <select className="input w-full" value={form.item_type} onChange={e => setForm(p => ({ ...p, item_type: e.target.value }))}>
+                  <option value="SELLABLE">🛒 Sellable (shown on POS)</option>
+                  <option value="RAW_MATERIAL">🧪 Raw Material (never on POS)</option>
+                </select>
+              </div>
+              {form.item_type !== 'RAW_MATERIAL' && form.category !== 'Inventory' && (
                 <div>
                   <label className="label">Selling Price (₹) *</label>
                   <input className="input w-full font-bold text-emerald-600" type="number" min="0" step="0.5" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} placeholder="0" required />
@@ -579,6 +624,13 @@ export default function InventoryPage() {
                 <input className="input w-full" type="number" min="1" step="1" value={form.units_per_box} onChange={e => setForm(p => ({ ...p, units_per_box: e.target.value }))} title="e.g. 12 means 1 box = 12 cigarettes. Set to 1 for no pack logic." />
                 {parseInt(form.units_per_box) > 1 && <p className="text-[10px] text-amber-600 mt-1">1 box = {form.units_per_box} {form.unit}s</p>}
               </div>
+              {parseInt(form.units_per_box) > 1 && form.item_type !== 'RAW_MATERIAL' && (
+                <div>
+                  <label className="label">Pack/Box Price (₹)</label>
+                  <input className="input w-full font-bold text-indigo-600" type="number" min="0" step="0.5" value={form.pack_price} onChange={e => setForm(p => ({ ...p, pack_price: e.target.value }))} placeholder="Price for 1 full box" />
+                  <p className="text-[10px] text-zinc-400 mt-1">Staff can toggle Single/Pack in cart</p>
+                </div>
+              )}
               <div className="flex items-end">
                 <label className="flex items-center gap-2 cursor-pointer mb-2">
                   <input type="checkbox" className="w-4 h-4 rounded text-ember focus:ring-ember" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
@@ -674,50 +726,114 @@ export default function InventoryPage() {
                             <input type="number" min="1" step="1" className="input w-full text-sm py-1.5" value={editForm.units_per_box || 1} onChange={e=>setEditForm({...editForm, units_per_box:parseInt(e.target.value)||1})}/>
                             {(editForm.units_per_box||1) > 1 && <p className="text-[9px] text-amber-600 mt-0.5">1 box = {editForm.units_per_box} {editForm.unit}s</p>}
                           </div>
+                          {(editForm.units_per_box||1) > 1 && editForm.item_type !== 'RAW_MATERIAL' && (
+                            <div className="w-28">
+                              <label className="text-[10px] uppercase font-bold text-indigo-500 mb-1 block">Pack Price (₹)</label>
+                              <input type="number" min="0" step="0.5" className="input w-full text-sm py-1.5 text-indigo-600 font-bold" value={editForm.pack_price || ''} onChange={e=>setEditForm({...editForm, pack_price:e.target.value})} placeholder="Box price"/>
+                            </div>
+                          )}
                           <div className="flex gap-2 justify-end ml-auto">
                             <button onClick={saveInlineEdit} className="p-2 bg-emerald-500 text-white rounded shadow hover:bg-emerald-600"><Check size={16}/></button>
                             <button onClick={()=>setEditingRow(null)} className="p-2 bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600"><X size={16}/></button>
                           </div>
                         </div>
                         {isAdmin && editForm.category !== 'Inventory' && (
-                          <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="text-[10px] uppercase font-bold text-zinc-500">Recipe Ingredients (deducted per sale)</span>
-                              <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-bold">AUTO-DEDUCT</span>
-                            </div>
-                            <div className="space-y-1 mb-3">
-                              {(itemIngredients[item.id] || []).map(ing => (
-                                <div key={ing.id} className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2 rounded-lg border border-indigo-100 dark:border-indigo-800/30">
-                                  <span className="flex-1 text-xs font-semibold">{ing.ingredient_item?.name || '?'}</span>
-                                  <span className="text-xs text-zinc-500">{ing.quantity_per_unit} unit(s)</span>
-                                  <button onClick={() => removeIngredient(item.id, ing.id)} className="text-red-400 hover:text-red-600"><X size={12}/></button>
+                          <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700 space-y-4">
+                            {/* Dish CP Panel */}
+                            {(() => {
+                              const ings = itemIngredients[item.id] || []
+                              const calcCP = ings.reduce((sum, ing) => {
+                                const ingItem = items.find(i => i.id === ing.ingredient_item_id)
+                                return sum + ((ingItem?.cost_price || 0) * ing.quantity_per_unit)
+                              }, 0)
+                              const sellingPrice = item.price || 0
+                              const margin = sellingPrice > 0 ? ((sellingPrice - calcCP) / sellingPrice * 100).toFixed(1) : null
+                              const isLoss = calcCP > sellingPrice && sellingPrice > 0
+                              return ings.length > 0 ? (
+                                <div className={`rounded-xl p-4 border ${isLoss ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-100 dark:border-emerald-800/30'}`}>
+                                  {isLoss && (
+                                    <div className="flex items-center gap-2 mb-3 text-red-600 dark:text-red-400 font-bold text-xs">
+                                      <span>⚠️</span> Selling at a loss! Calculated CP exceeds selling price.
+                                    </div>
+                                  )}
+                                  <p className="text-[10px] uppercase font-black text-zinc-400 tracking-widest mb-2">Dish Cost Breakdown</p>
+                                  <div className="space-y-1 mb-3">
+                                    {ings.map(ing => {
+                                      const ingItem = items.find(i => i.id === ing.ingredient_item_id)
+                                      const ingCost = (ingItem?.cost_price || 0) * ing.quantity_per_unit
+                                      const isIngLow = ingItem && ingItem.stock_quantity <= (ingItem.low_stock_threshold || 5)
+                                      return (
+                                        <div key={ing.id} className="flex items-center justify-between text-xs">
+                                          <span className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1">
+                                            {isIngLow && <span title="Low Stock" className="w-2 h-2 rounded-full bg-red-500 inline-block"/>}
+                                            {ingItem?.name || '?'}
+                                          </span>
+                                          <span className="text-zinc-500">{ing.quantity_per_unit} {ingItem?.unit || 'unit'}</span>
+                                          <span className="font-bold text-zinc-800 dark:text-zinc-200">₹{ingCost.toFixed(2)}</span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                  <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2 grid grid-cols-3 gap-2 text-xs">
+                                    <div>
+                                      <p className="text-zinc-400 uppercase font-bold text-[9px]">Calc. CP</p>
+                                      <p className="font-black text-zinc-900 dark:text-white">₹{calcCP.toFixed(2)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-zinc-400 uppercase font-bold text-[9px]">Selling Price</p>
+                                      <p className="font-black text-zinc-900 dark:text-white">₹{sellingPrice}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-zinc-400 uppercase font-bold text-[9px]">Margin</p>
+                                      <p className={`font-black ${isLoss ? 'text-red-500' : 'text-emerald-600'}`}>
+                                        {margin !== null ? `${margin}%` : 'N/A'}
+                                      </p>
+                                    </div>
+                                  </div>
                                 </div>
-                              ))}
-                              {(itemIngredients[item.id] || []).length === 0 && (
-                                <p className="text-[10px] text-zinc-400 italic">No ingredients linked — stock deduction disabled for this item</p>
-                              )}
-                            </div>
-                            <div className="flex gap-2 items-center">
-                              <input 
-                                list={`ingredient-options-${item.id}`} 
-                                className="input text-xs flex-1" 
-                                placeholder="Search & link any item…"
-                                value={newIngredientRow.search ?? ''}
-                                onChange={e => {
-                                  const val = e.target.value
-                                  setNewIngredientRow(p => ({...p, search: val}))
-                                  const selected = items.find(i => `[${i.category}] ${i.name} ${i.variant ? `(${i.variant})` : ''}`.trim() === val.trim())
-                                  setNewIngredientRow(p => ({...p, ingredient_item_id: selected ? selected.id : ''}))
-                                }}
-                              />
-                              <datalist id={`ingredient-options-${item.id}`}>
-                                {items.filter(i => i.id !== item.id).map(i => (
-                                  <option key={i.id} value={`[${i.category}] ${i.name} ${i.variant ? `(${i.variant})` : ''}`.trim()} />
+                              ) : null
+                            })()}
+
+                            {/* Recipe Ingredients */}
+                            <div>
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="text-[10px] uppercase font-bold text-zinc-500">Recipe Ingredients (deducted per sale)</span>
+                                <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded font-bold">AUTO-DEDUCT</span>
+                              </div>
+                              <div className="space-y-1 mb-3">
+                                {(itemIngredients[item.id] || []).map(ing => (
+                                  <div key={ing.id} className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2 rounded-lg border border-indigo-100 dark:border-indigo-800/30">
+                                    <span className="flex-1 text-xs font-semibold">{ing.ingredient_item?.name || '?'}</span>
+                                    <span className="text-xs text-zinc-500">{ing.quantity_per_unit} unit(s)</span>
+                                    <button onClick={() => removeIngredient(item.id, ing.id)} className="text-red-400 hover:text-red-600"><X size={12}/></button>
+                                  </div>
                                 ))}
-                              </datalist>
-                              <input type="number" min="0" step="0.01" className="input text-xs w-20" value={newIngredientRow.quantity_per_unit}
-                                onChange={e => setNewIngredientRow(p => ({...p, quantity_per_unit: e.target.value}))} placeholder="Qty" />
-                              <button onClick={() => addIngredient(item.id)} className="px-3 py-1.5 text-xs font-bold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">Link</button>
+                                {(itemIngredients[item.id] || []).length === 0 && (
+                                  <p className="text-[10px] text-zinc-400 italic">No ingredients linked — stock deduction disabled for this item</p>
+                                )}
+                              </div>
+                              <div className="flex gap-2 items-center">
+                                <input 
+                                  list={`ingredient-options-${item.id}`} 
+                                  className="input text-xs flex-1" 
+                                  placeholder="Search & link raw material…"
+                                  value={newIngredientRow.search ?? ''}
+                                  onChange={e => {
+                                    const val = e.target.value
+                                    setNewIngredientRow(p => ({...p, search: val}))
+                                    const selected = items.find(i => `[${i.category}] ${i.name} ${i.variant ? `(${i.variant})` : ''}`.trim() === val.trim())
+                                    setNewIngredientRow(p => ({...p, ingredient_item_id: selected ? selected.id : ''}))
+                                  }}
+                                />
+                                <datalist id={`ingredient-options-${item.id}`}>
+                                  {items.filter(i => i.id !== item.id && i.item_type === 'RAW_MATERIAL').map(i => (
+                                    <option key={i.id} value={`[${i.category}] ${i.name} ${i.variant ? `(${i.variant})` : ''}`.trim()} />
+                                  ))}
+                                </datalist>
+                                <input type="number" min="0" step="0.01" className="input text-xs w-20" value={newIngredientRow.quantity_per_unit}
+                                  onChange={e => setNewIngredientRow(p => ({...p, quantity_per_unit: e.target.value}))} placeholder="Qty" />
+                                <button onClick={() => addIngredient(item.id)} className="px-3 py-1.5 text-xs font-bold bg-indigo-500 text-white rounded-lg hover:bg-indigo-600">Link</button>
+                              </div>
                             </div>
                           </div>
                         )}

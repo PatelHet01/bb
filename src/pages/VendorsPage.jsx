@@ -207,6 +207,32 @@ export default function VendorsPage() {
   function removePOLine(i) { setPOLines(p => p.filter((_, idx) => idx !== i)) }
   function updatePOLine(i, field, val) { setPOLines(p => p.map((l, idx) => idx === i ? { ...l, [field]: val } : l)) }
 
+  // Weighted average CP + Dish cascade
+  async function applyWeightedCostPrice(itemId, purchasedQty, purchaseUnitPrice) {
+    const { data: itm } = await supabase.from('items').select('stock_quantity, cost_price, item_type').eq('id', itemId).single()
+    if (!itm) return
+    const existQty = itm.stock_quantity || 0
+    const existCP = itm.cost_price || 0
+    const newCP = existQty <= 0
+      ? purchaseUnitPrice
+      : ((existQty * existCP) + (purchasedQty * purchaseUnitPrice)) / (existQty + purchasedQty)
+    await supabase.from('items').update({ cost_price: parseFloat(newCP.toFixed(4)) }).eq('id', itemId)
+    // If raw material → cascade CP to all linked dishes
+    if (itm.item_type === 'RAW_MATERIAL') {
+      const { data: links } = await supabase.from('item_ingredients').select('item_id').eq('ingredient_item_id', itemId)
+      for (const link of (links || [])) {
+        const { data: allIngs } = await supabase.from('item_ingredients').select('quantity_per_unit, ingredient_item_id').eq('item_id', link.item_id)
+        if (!allIngs?.length) continue
+        const { data: ingItems } = await supabase.from('items').select('id, cost_price').in('id', allIngs.map(i => i.ingredient_item_id))
+        const dishCP = allIngs.reduce((sum, ing) => {
+          const ingItem = (ingItems || []).find(i => i.id === ing.ingredient_item_id)
+          return sum + ((ingItem?.cost_price || 0) * ing.quantity_per_unit)
+        }, 0)
+        await supabase.from('items').update({ cost_price: parseFloat(dishCP.toFixed(4)) }).eq('id', link.item_id)
+      }
+    }
+  }
+
   async function handleCreatePO(e, receiveNow) {
     e.preventDefault()
     const validLines = poLines.filter(l => l.item_id && parseFloat(l.quantity) > 0)
@@ -236,10 +262,12 @@ export default function VendorsPage() {
 
       if (receiveNow) {
         for (const l of validLines) {
-          const { data: itm } = await supabase.from('items').select('stock_quantity, units_per_box').eq('id', l.item_id).single()
+          const { data: itm } = await supabase.from('items').select('stock_quantity, units_per_box, cost_price').eq('id', l.item_id).single()
           const qBefore = itm?.stock_quantity || 0
           const unitsPerBox = itm?.units_per_box || 1
-          const qChange = parseFloat(l.quantity) * unitsPerBox  // boxes → units
+          const qChange = parseFloat(l.quantity) * unitsPerBox
+          const unitPricePerUnit = (parseFloat(l.unit_price) || 0) / unitsPerBox
+          await applyWeightedCostPrice(l.item_id, qChange, unitPricePerUnit)
           await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: qChange })
           await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
         }
@@ -263,11 +291,13 @@ export default function VendorsPage() {
     if (!window.confirm('Mark this order as received? This will update inventory stock.')) return
     setSaving(true)
     try {
-      const { data: lines } = await supabase.from('vendor_purchase_items').select('*, items(stock_quantity, units_per_box)').eq('purchase_order_id', po.id)
+      const { data: lines } = await supabase.from('vendor_purchase_items').select('*, items(stock_quantity, units_per_box, cost_price)').eq('purchase_order_id', po.id)
       for (const l of (lines || [])) {
         const qBefore = l.items?.stock_quantity || 0
         const unitsPerBox = l.items?.units_per_box || 1
-        const qChange = l.quantity * unitsPerBox  // boxes → units
+        const qChange = l.quantity * unitsPerBox
+        const unitPricePerUnit = (l.unit_price || 0) / unitsPerBox
+        await applyWeightedCostPrice(l.item_id, qChange, unitPricePerUnit)
         await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: qChange })
         await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
       }

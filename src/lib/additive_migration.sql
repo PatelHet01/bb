@@ -209,3 +209,11 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS units_per_box INT DEFAULT 1;
 
 NOTIFY pgrst, 'reload schema';
 
+-- 20. ITEM TYPE FLAG — 'SELLABLE' (default) or 'RAW_MATERIAL'
+ALTER TABLE items ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'SELLABLE';
+
+-- 21. PACK PRICE — admin-set price for selling a whole box/pack
+-- Only applies when units_per_box > 1. Single price uses existing `price` column.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS pack_price NUMERIC(10,2) DEFAULT 0;
+
+NOTIFY pgrst, 'reload schema';

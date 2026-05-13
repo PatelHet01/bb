@@ -17,6 +17,7 @@ export default function BillingPage() {
   const [cart, setCart] = useState([])
   const [cartExpanded, setCartExpanded] = useState(false)
   const [qtyEditor, setQtyEditor] = useState(null)
+  const [packMode, setPackMode] = useState({}) // { [item_id]: true = pack mode }
   
   // Customer
   const [customerSearch, setCustomerSearch] = useState('')
@@ -48,7 +49,10 @@ export default function BillingPage() {
   const [showOrdersModal, setShowOrdersModal] = useState(false)
   const [recentOrders, setRecentOrders] = useState([])
 
-  const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
+  const total = cart.reduce((s, c) => {
+    const isPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+    return s + (isPack ? (c.pack_price || c.price) : c.price) * c.quantity
+  }, 0)
   const totalPaid = payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
 
   // Cash denomination helper state (UI only, never stored)
@@ -86,6 +90,7 @@ export default function BillingPage() {
         .neq('category', 'Inventory')
         .eq('is_active', true)
         .eq('is_archived', false)
+        .neq('item_type', 'RAW_MATERIAL')
       setItems(data || [])
       setLoading(false)
     }
@@ -883,7 +888,10 @@ export default function BillingPage() {
               <p className="font-medium text-sm">Cart is empty</p>
             </div>
           ) : (
-            cart.map(c => (
+            cart.map(c => {
+              const isPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+              const linePrice = isPack ? (c.pack_price || c.price) : c.price
+              return (
               <div key={c.id} className="flex gap-2 items-center bg-white dark:bg-ink-900 p-2.5 rounded-xl border border-ink-200 dark:border-ink-800 shadow-sm">
                 <div className="flex flex-col items-center gap-1 bg-ink-50 dark:bg-ink-800/50 rounded-lg p-1 border border-ink-200 dark:border-ink-700">
                   <button onClick={() => updateQty(c.id, 1)} className="w-7 h-6 flex items-center justify-center hover:bg-ink-200 dark:hover:bg-ink-700 rounded active:scale-95"><Plus size={14} /></button>
@@ -892,13 +900,27 @@ export default function BillingPage() {
                 </div>
                 <div className="flex-1 min-w-0 pl-2">
                   <p className="font-bold text-sm text-ink-900 dark:text-white truncate leading-tight">{c.name}</p>
-                  <p className="text-[10px] font-bold text-ink-500 mt-0.5">{c.variant && `${c.variant} • `}₹{c.price}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-[10px] font-bold text-ink-500">{c.variant && `${c.variant} • `}₹{linePrice}</p>
+                    {(c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0 && (
+                      <div className="flex rounded-md overflow-hidden border border-ink-200 dark:border-ink-700 text-[9px] font-black">
+                        <button
+                          onClick={() => setPackMode(p => ({ ...p, [c.id]: false }))}
+                          className={`px-1.5 py-0.5 transition-colors ${!isPack ? 'bg-ink-900 dark:bg-white text-white dark:text-ink-900' : 'bg-white dark:bg-ink-900 text-ink-500 hover:bg-ink-100'}`}
+                        >Single</button>
+                        <button
+                          onClick={() => setPackMode(p => ({ ...p, [c.id]: true }))}
+                          className={`px-1.5 py-0.5 transition-colors ${isPack ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-ink-900 text-ink-500 hover:bg-ink-100'}`}
+                        >Pack</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="text-right pl-2 pr-1">
-                  <p className="font-black text-base text-ink-900 dark:text-white leading-tight">₹{(c.price * c.quantity).toLocaleString('en-IN')}</p>
+                  <p className="font-black text-base text-ink-900 dark:text-white leading-tight">₹{(linePrice * c.quantity).toLocaleString('en-IN')}</p>
                 </div>
               </div>
-            ))
+            )})
           )}
         </div>
 

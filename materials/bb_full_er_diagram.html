@@ -1,0 +1,320 @@
+
+<style>
+body { margin: 0; padding: 0; }
+#wrap { padding: 12px 0 24px; }
+h2 { font-size: 18px; font-weight: 500; color: var(--color-text-primary); margin: 0 0 4px; }
+p.sub { font-size: 13px; color: var(--color-text-secondary); margin: 0 0 16px; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.litem { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); }
+.dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+#erd { width: 100%; overflow-x: auto; }
+#erd svg { max-width: 100%; height: auto; }
+</style>
+
+<div id="wrap">
+  <h2>BB Cafe — full database schema</h2>
+  <p class="sub">All tables linked by ID · inventory auto-updates on vendor purchase & order completion · recipe deduction per branch</p>
+  <div class="legend">
+    <div class="litem"><div class="dot" style="background:#534AB7"></div>Core / shared</div>
+    <div class="litem"><div class="dot" style="background:#0F6E56"></div>BB Cafe restaurant</div>
+    <div class="litem"><div class="dot" style="background:#993C1D"></div>Inventory / vendor</div>
+    <div class="litem"><div class="dot" style="background:#185FA5"></div>Billing / ledger</div>
+  </div>
+  <div id="erd"></div>
+</div>
+
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"Anthropic Sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '12px',
+    fontFamily: '"Anthropic Sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+    primaryColor: dark ? '#2a2860' : '#EEEDFE',
+    primaryBorderColor: dark ? '#534AB7' : '#534AB7',
+    secondaryColor: dark ? '#063020' : '#E1F5EE',
+    secondaryBorderColor: dark ? '#0F6E56' : '#0F6E56',
+    tertiaryColor: dark ? '#3a1a0a' : '#FAECE7',
+    tertiaryBorderColor: dark ? '#993C1D' : '#993C1D',
+  },
+});
+
+const diagram = `erDiagram
+
+  BRANCHES {
+    int branch_id PK
+    string name
+    string type
+    string address
+    string phone
+    boolean is_active
+  }
+
+  CUSTOMERS {
+    int customer_id PK
+    string name
+    string phone
+    string email
+    decimal credit_limit
+    timestamp created_at
+  }
+
+  STAFF {
+    int staff_id PK
+    int branch_id FK
+    string name
+    string role
+    string phone
+    boolean is_active
+  }
+
+  VENDORS {
+    int vendor_id PK
+    int branch_id FK
+    string name
+    string contact
+    string gstin
+    decimal balance_due
+  }
+
+  CATEGORIES {
+    int category_id PK
+    string name
+    string type
+  }
+
+  MENU_ITEMS {
+    int item_id PK
+    int branch_id FK
+    int category_id FK
+    string name
+    boolean is_veg
+    boolean is_available
+    boolean is_bestseller
+  }
+
+  ITEM_VARIANTS {
+    int variant_id PK
+    int item_id FK
+    string name
+    decimal price
+    string sku
+  }
+
+  ITEM_ADDONS {
+    int addon_id PK
+    int item_id FK
+    string name
+    decimal extra_price
+  }
+
+  TABLES {
+    int table_id PK
+    int branch_id FK
+    string table_number
+    string qr_code
+    int capacity
+    string status
+  }
+
+  ORDERS {
+    int order_id PK
+    int branch_id FK
+    int customer_id FK
+    int table_id FK
+    int staff_id FK
+    string order_type
+    string status
+    decimal subtotal
+    decimal tax
+    decimal discount
+    decimal total
+    timestamp ordered_at
+    timestamp completed_at
+  }
+
+  ORDER_ITEMS {
+    int order_item_id PK
+    int order_id FK
+    int variant_id FK
+    int addon_id FK
+    int quantity
+    decimal unit_price
+    decimal total_price
+    string notes
+  }
+
+  INVENTORY_ITEMS {
+    int inv_item_id PK
+    int branch_id FK
+    int category_id FK
+    string name
+    string unit
+    decimal quantity
+    decimal low_stock_threshold
+    decimal cost_per_unit
+    timestamp updated_at
+  }
+
+  RECIPES {
+    int recipe_id PK
+    int variant_id FK
+    int inv_item_id FK
+    decimal quantity_used
+    string unit
+  }
+
+  VENDOR_PURCHASES {
+    int purchase_id PK
+    int vendor_id FK
+    int branch_id FK
+    int staff_id FK
+    decimal total_amount
+    decimal amount_paid
+    decimal balance
+    string payment_mode
+    timestamp purchased_at
+  }
+
+  PURCHASE_ITEMS {
+    int purchase_item_id PK
+    int purchase_id FK
+    int inv_item_id FK
+    decimal quantity
+    decimal unit_price
+    decimal total_price
+  }
+
+  INVOICES {
+    int invoice_id PK
+    int order_id FK
+    int branch_id FK
+    int customer_id FK
+    string invoice_number
+    decimal amount_due
+    decimal amount_paid
+    string payment_mode
+    string status
+    timestamp issued_at
+  }
+
+  PAYMENTS {
+    int payment_id PK
+    int invoice_id FK
+    int customer_id FK
+    int staff_id FK
+    decimal amount
+    string mode
+    string reference
+    timestamp paid_at
+  }
+
+  CUSTOMER_LEDGER {
+    int ledger_id PK
+    int customer_id FK
+    int branch_id FK
+    int invoice_id FK
+    int payment_id FK
+    string entry_type
+    decimal debit
+    decimal credit
+    decimal running_balance
+    string description
+    timestamp entry_at
+  }
+
+  INVENTORY_LOG {
+    int log_id PK
+    int inv_item_id FK
+    int branch_id FK
+    string action_type
+    decimal qty_before
+    decimal qty_change
+    decimal qty_after
+    string reference_type
+    int reference_id
+    timestamp logged_at
+  }
+
+  BRANCHES ||--o{ STAFF : employs
+  BRANCHES ||--o{ VENDORS : has
+  BRANCHES ||--o{ MENU_ITEMS : offers
+  BRANCHES ||--o{ TABLES : contains
+  BRANCHES ||--o{ ORDERS : receives
+  BRANCHES ||--o{ INVENTORY_ITEMS : stocks
+  BRANCHES ||--o{ VENDOR_PURCHASES : makes
+  BRANCHES ||--o{ INVOICES : issues
+  BRANCHES ||--o{ CUSTOMER_LEDGER : records
+  BRANCHES ||--o{ INVENTORY_LOG : logs
+
+  CUSTOMERS ||--o{ ORDERS : places
+  CUSTOMERS ||--o{ INVOICES : billed
+  CUSTOMERS ||--o{ PAYMENTS : pays
+  CUSTOMERS ||--o{ CUSTOMER_LEDGER : has
+
+  STAFF ||--o{ ORDERS : takes
+  STAFF ||--o{ VENDOR_PURCHASES : authorises
+  STAFF ||--o{ PAYMENTS : processes
+
+  VENDORS ||--o{ VENDOR_PURCHASES : supplies
+
+  CATEGORIES ||--o{ MENU_ITEMS : groups
+  CATEGORIES ||--o{ INVENTORY_ITEMS : groups
+
+  MENU_ITEMS ||--o{ ITEM_VARIANTS : has
+  MENU_ITEMS ||--o{ ITEM_ADDONS : has
+  ITEM_VARIANTS ||--o{ ORDER_ITEMS : ordered_as
+  ITEM_ADDONS ||--o{ ORDER_ITEMS : added_to
+  ITEM_VARIANTS ||--o{ RECIPES : uses
+
+  TABLES ||--o{ ORDERS : seats
+
+  ORDERS ||--o{ ORDER_ITEMS : contains
+  ORDERS ||--o{ INVOICES : generates
+
+  INVENTORY_ITEMS ||--o{ RECIPES : ingredient_in
+  INVENTORY_ITEMS ||--o{ PURCHASE_ITEMS : restocked_by
+  INVENTORY_ITEMS ||--o{ INVENTORY_LOG : tracked_in
+
+  VENDOR_PURCHASES ||--o{ PURCHASE_ITEMS : includes
+
+  INVOICES ||--o{ PAYMENTS : settled_by
+  INVOICES ||--o{ CUSTOMER_LEDGER : entry_in
+
+  PAYMENTS ||--o{ CUSTOMER_LEDGER : entry_in
+`;
+
+const { svg } = await mermaid.render('erd-svg', diagram);
+document.getElementById('erd').innerHTML = svg;
+
+document.querySelectorAll('#erd svg.erDiagram .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+
+document.querySelectorAll('#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>

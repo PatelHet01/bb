@@ -3,12 +3,17 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import {
-  Plus, Search, X, Edit2, Trash2, Truck, Package, ChevronDown, ChevronUp,
-  DollarSign, FileText, ArrowLeft
+  Plus, Search, X, Edit2, Trash2, Package, ShoppingCart, CheckCircle, Clock, Ban
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 
 const VENDOR_CATEGORIES = ['General', 'Grocery', 'Packaging', 'Dairy', 'Beverages', 'Tobacco', 'Cleaning', 'Other']
+
+const STATUS_STYLE = {
+  draft:     { label: 'Draft',     cls: 'bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-400' },
+  ordered:   { label: 'Ordered',   cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  received:  { label: 'Received',  cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+  cancelled: { label: 'Cancelled', cls: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' },
+}
 
 export default function VendorsPage() {
   const { branchId, role, user } = useAuthStore()
@@ -20,21 +25,29 @@ export default function VendorsPage() {
   const [search, setSearch] = useState('')
   const [selectedVendor, setSelectedVendor] = useState(null)
   const [ledger, setLedger] = useState([])
-  const [ledgerTab, setLedgerTab] = useState('ledger') // ledger | items
+  const [ledgerTab, setLedgerTab] = useState('ledger') // ledger | items | orders
 
-  // Forms
+  // Vendor form
   const [showVendorForm, setShowVendorForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState({ name: '', contact: '', category: 'General', notes: '' })
   const [saving, setSaving] = useState(false)
 
-  // Ledger entry form
+  // Manual ledger entry form
   const [showLedgerForm, setShowLedgerForm] = useState(false)
   const [ledgerForm, setLedgerForm] = useState({ type: 'PURCHASE', amount: '', reference: '' })
   const [editingLedgerId, setEditingLedgerId] = useState(null)
 
   // Items tagged to vendor
   const [vendorItems, setVendorItems] = useState([])
+
+  // Purchase Orders
+  const [purchaseOrders, setPurchaseOrders] = useState([])
+  const [allItems, setAllItems] = useState([]) // all inventory items for this branch
+  const [showPOForm, setShowPOForm] = useState(false)
+  const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
+  const [poLines, setPOLines] = useState([{ item_id: '', quantity: '', unit_price: '' }])
+  const [expandedPO, setExpandedPO] = useState(null)
 
   useEffect(() => { fetchVendors() }, [branchId])
 
@@ -50,15 +63,18 @@ export default function VendorsPage() {
   async function viewVendor(v) {
     setSelectedVendor(v)
     setLedgerTab('ledger')
-    // Fetch ledger
-    const { data: lData } = await supabase.from('vendor_ledger')
-      .select('*').eq('vendor_id', v.id).order('created_at', { ascending: false })
-    setLedger(lData || [])
-    // Fetch items linked to vendor
-    const { data: iData } = await supabase.from('item_vendor')
-      .select('*, items(id, name, category, subcategory, stock_quantity, price)')
-      .eq('vendor_id', v.id)
-    setVendorItems((iData || []).map(r => r.items).filter(Boolean))
+    setShowPOForm(false)
+    setExpandedPO(null)
+    const [lRes, iRes, poRes, allRes] = await Promise.all([
+      supabase.from('vendor_ledger').select('*').eq('vendor_id', v.id).order('created_at', { ascending: false }),
+      supabase.from('item_vendor').select('*, items(id, name, category, subcategory, stock_quantity, unit, price)').eq('vendor_id', v.id),
+      supabase.from('vendor_purchase_orders').select('*, vendor_purchase_items(*, items(name, unit))').eq('vendor_id', v.id).order('created_at', { ascending: false }),
+      supabase.from('items').select('id, name, category, unit, stock_quantity').eq('branch_id', v.branch_id || branchId || 'gurukul').eq('is_active', true).order('name'),
+    ])
+    setLedger(lRes.data || [])
+    setVendorItems((iRes.data || []).map(r => r.items).filter(Boolean))
+    setPurchaseOrders(poRes.data || [])
+    setAllItems(allRes.data || [])
   }
 
   async function handleSave(e) {
@@ -165,6 +181,91 @@ export default function VendorsPage() {
       toast.success('Entry deleted')
       setLedger(prev => prev.filter(l => l.id !== id))
     }
+  }
+
+  // ---- Purchase Order Functions ----
+  const poTotal = useMemo(() => poLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0), [poLines])
+
+  function addPOLine() { setPOLines(p => [...p, { item_id: '', quantity: '', unit_price: '' }]) }
+  function removePOLine(i) { setPOLines(p => p.filter((_, idx) => idx !== i)) }
+  function updatePOLine(i, field, val) { setPOLines(p => p.map((l, idx) => idx === i ? { ...l, [field]: val } : l)) }
+
+  async function handleCreatePO(e, receiveNow) {
+    e.preventDefault()
+    const validLines = poLines.filter(l => l.item_id && parseFloat(l.quantity) > 0)
+    if (!validLines.length) { toast.error('Add at least one item'); return }
+    setSaving(true)
+    try {
+      const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+      const amtPaid = parseFloat(poForm.amount_paid) || 0
+      const newStatus = receiveNow ? 'received' : 'draft'
+      const { data: po, error: poErr } = await supabase.from('vendor_purchase_orders').insert({
+        vendor_id: selectedVendor.id,
+        branch_id: selectedVendor.branch_id || branchId || 'gurukul',
+        status: newStatus,
+        total_amount: total,
+        amount_paid: amtPaid,
+        payment_mode: poForm.payment_mode,
+        invoice_ref: poForm.invoice_ref || null,
+        notes: poForm.notes || null,
+        received_at: receiveNow ? new Date().toISOString() : null,
+        recorded_by: user.username,
+      }).select().single()
+      if (poErr) throw poErr
+
+      await supabase.from('vendor_purchase_items').insert(
+        validLines.map(l => ({ purchase_order_id: po.id, item_id: l.item_id, quantity: parseFloat(l.quantity), unit_price: parseFloat(l.unit_price)||0 }))
+      )
+
+      if (receiveNow) {
+        for (const l of validLines) {
+          const { data: itm } = await supabase.from('items').select('stock_quantity').eq('id', l.item_id).single()
+          const qBefore = itm?.stock_quantity || 0
+          const qChange = parseFloat(l.quantity)
+          await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: qChange })
+          await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
+        }
+        // Auto vendor ledger entries
+        await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PURCHASE', amount: total, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+        if (amtPaid > 0) {
+          await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PAYMENT', amount: amtPaid, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+        }
+      }
+
+      toast.success(receiveNow ? 'Purchase received & stock updated!' : 'Draft purchase order saved')
+      setShowPOForm(false)
+      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
+      setPOLines([{ item_id: '', quantity: '', unit_price: '' }])
+      viewVendor(selectedVendor)
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function markAsReceived(po) {
+    if (!window.confirm('Mark this order as received? This will update inventory stock.')) return
+    setSaving(true)
+    try {
+      const { data: lines } = await supabase.from('vendor_purchase_items').select('*, items(stock_quantity)').eq('purchase_order_id', po.id)
+      for (const l of (lines || [])) {
+        const qBefore = l.items?.stock_quantity || 0
+        await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: l.quantity })
+        await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: l.quantity, qty_after: qBefore + l.quantity, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
+      }
+      await supabase.from('vendor_purchase_orders').update({ status: 'received', received_at: new Date().toISOString() }).eq('id', po.id)
+      await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PURCHASE', amount: po.total_amount, reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+      if (po.amount_paid > 0) {
+        await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PAYMENT', amount: po.amount_paid, reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+      }
+      toast.success('Stock updated & ledger entries created!')
+      viewVendor(selectedVendor)
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function cancelPO(po) {
+    if (!window.confirm('Cancel this purchase order?')) return
+    await supabase.from('vendor_purchase_orders').update({ status: 'cancelled' }).eq('id', po.id)
+    viewVendor(selectedVendor)
   }
 
   // Compute vendor balance: PURCHASE = amount owed to vendor (debit), PAYMENT = paid
@@ -306,15 +407,20 @@ export default function VendorsPage() {
 
           {/* Tabs */}
           <div className="flex border-b border-ink-200 dark:border-ink-800 px-2">
-            {['ledger', 'items'].map(tab => (
+            {[['ledger','Ledger'],['orders','Purchases'],['items','Items']].map(([tab, label]) => (
               <button key={tab} onClick={() => setLedgerTab(tab)}
-                className={`px-4 py-3 text-xs font-black uppercase tracking-wider border-b-2 transition-all capitalize ${ledgerTab === tab ? 'border-ember text-ember' : 'border-transparent text-ink-500 hover:text-ink-900 dark:hover:text-white'}`}>
-                {tab === 'ledger' ? 'Vendor Ledger' : 'Sourced Items'}
+                className={`px-4 py-3 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${ledgerTab === tab ? 'border-ember text-ember' : 'border-transparent text-ink-500 hover:text-ink-900 dark:hover:text-white'}`}>
+                {label}
               </button>
             ))}
-            {isAdmin && (
+            {isAdmin && ledgerTab === 'ledger' && (
               <button onClick={() => { setEditingLedgerId(null); setLedgerForm({ type: 'PURCHASE', amount: '', reference: '' }); setShowLedgerForm(!showLedgerForm); }} className="ml-auto px-3 py-2 text-xs font-bold text-ember hover:bg-ember/10 rounded-lg transition-colors">
                 + Entry
+              </button>
+            )}
+            {isAdmin && ledgerTab === 'orders' && (
+              <button onClick={() => { setShowPOForm(p => !p); setPOLines([{ item_id: '', quantity: '', unit_price: '' }]); setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' }) }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
+                + New Purchase
               </button>
             )}
           </div>
@@ -349,6 +455,8 @@ export default function VendorsPage() {
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-ink-50 dark:bg-ink-950">
+
+            {/* LEDGER TAB */}
             {ledgerTab === 'ledger' && (
               ledger.length === 0
                 ? <p className="text-center py-10 text-ink-400 text-sm">No ledger entries yet</p>
@@ -363,9 +471,7 @@ export default function VendorsPage() {
                         }`}>{l.type}</span>
                         {l.reference && <span className="text-xs text-ink-500 font-medium">{l.reference}</span>}
                       </div>
-                      <div className="text-[10px] text-ink-400 mt-1 font-bold">
-                        {new Date(l.created_at).toLocaleString('en-IN')} | ID: {l.id ? l.id.slice(0,8) : 'MISSING'}
-                      </div>
+                      <div className="text-[10px] text-ink-400 mt-1 font-bold">{new Date(l.created_at).toLocaleString('en-IN')}</div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className={`font-black text-base tabular-nums ${l.type === 'PURCHASE' ? 'text-red-500' : 'text-emerald-500'}`}>
@@ -380,6 +486,115 @@ export default function VendorsPage() {
                 ))
             )}
 
+            {/* PURCHASE ORDERS TAB */}
+            {ledgerTab === 'orders' && (
+              <div className="space-y-3">
+                {/* Create PO Form */}
+                {showPOForm && (
+                  <div className="bg-white dark:bg-ink-900 rounded-xl border border-emerald-300 dark:border-emerald-800 p-4 space-y-3 animate-slide-up">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">New Purchase Order</span>
+                      <button onClick={() => setShowPOForm(false)}><X size={14} className="text-ink-400" /></button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="label">Invoice / Bill Ref</label>
+                        <input className="input text-sm" value={poForm.invoice_ref} onChange={e => setPOForm(p => ({...p, invoice_ref: e.target.value}))} placeholder="e.g. INV-001" />
+                      </div>
+                      <div>
+                        <label className="label">Payment Mode</label>
+                        <select className="input text-sm" value={poForm.payment_mode} onChange={e => setPOForm(p => ({...p, payment_mode: e.target.value}))}>
+                          <option value="CREDIT">Credit (Owe Vendor)</option>
+                          <option value="CASH">Cash (Paid Now)</option>
+                          <option value="UPI">UPI (Paid Now)</option>
+                        </select>
+                      </div>
+                      {poForm.payment_mode !== 'CREDIT' && (
+                        <div>
+                          <label className="label">Amount Paid (₹)</label>
+                          <input type="number" min="0" className="input text-sm" value={poForm.amount_paid} onChange={e => setPOForm(p => ({...p, amount_paid: e.target.value}))} placeholder="0" />
+                        </div>
+                      )}
+                    </div>
+                    {/* Line Items */}
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-[1fr_80px_80px_28px] gap-1 text-[10px] font-black text-ink-400 uppercase px-1">
+                        <span>Item</span><span>Qty</span><span>Price/Unit</span><span/>
+                      </div>
+                      {poLines.map((line, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_80px_80px_28px] gap-1 items-center">
+                          <select className="input text-xs" value={line.item_id} onChange={e => updatePOLine(i, 'item_id', e.target.value)}>
+                            <option value="">Select item…</option>
+                            {allItems.map(it => <option key={it.id} value={it.id}>{it.name} ({it.unit}) — stock: {it.stock_quantity}</option>)}
+                          </select>
+                          <input type="number" min="0.001" step="any" className="input text-xs text-center" placeholder="Qty" value={line.quantity} onChange={e => updatePOLine(i, 'quantity', e.target.value)} />
+                          <input type="number" min="0" step="0.01" className="input text-xs text-center" placeholder="₹/unit" value={line.unit_price} onChange={e => updatePOLine(i, 'unit_price', e.target.value)} />
+                          <button onClick={() => removePOLine(i)} className="text-ink-400 hover:text-red-500"><X size={13}/></button>
+                        </div>
+                      ))}
+                      <button onClick={addPOLine} className="text-xs text-emerald-600 font-bold hover:underline">+ Add item</button>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t border-ink-100 dark:border-ink-800">
+                      <span className="font-black text-ink-900 dark:text-white">Total: ₹{poTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={e => handleCreatePO(e, false)} disabled={saving} className="btn-secondary text-xs">{saving ? '…' : 'Save Draft'}</button>
+                        <button type="button" onClick={e => handleCreatePO(e, true)} disabled={saving} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">{saving ? '…' : '✓ Receive Now'}</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* PO List */}
+                {purchaseOrders.length === 0 && !showPOForm && (
+                  <p className="text-center py-10 text-ink-400 text-sm">No purchase orders yet. Click &ldquo;+ New Purchase&rdquo; to begin.</p>
+                )}
+                {purchaseOrders.map(po => {
+                  const st = STATUS_STYLE[po.status] || STATUS_STYLE.draft
+                  const isExpanded = expandedPO === po.id
+                  return (
+                    <div key={po.id} className="bg-white dark:bg-ink-900 rounded-xl border border-ink-200 dark:border-ink-800 overflow-hidden">
+                      <button className="w-full p-3 flex items-center gap-3 text-left hover:bg-ink-50 dark:hover:bg-ink-800" onClick={() => setExpandedPO(isExpanded ? null : po.id)}>
+                        <Package size={15} className="text-ink-400 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                            {po.invoice_ref && <span className="text-xs text-ink-500 font-mono">{po.invoice_ref}</span>}
+                          </div>
+                          <div className="text-[10px] text-ink-400 mt-0.5">{new Date(po.created_at).toLocaleString('en-IN')} · {po.payment_mode}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-black text-ink-900 dark:text-white">₹{Number(po.total_amount).toLocaleString('en-IN')}</div>
+                          {po.amount_paid > 0 && <div className="text-[10px] text-emerald-500">Paid ₹{Number(po.amount_paid).toLocaleString('en-IN')}</div>}
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="px-3 pb-3 space-y-2 border-t border-ink-100 dark:border-ink-800 pt-2">
+                          {(po.vendor_purchase_items || []).map(li => (
+                            <div key={li.id} className="flex justify-between text-xs">
+                              <span className="text-ink-700 dark:text-ink-300">{li.items?.name} <span className="text-ink-400">×{li.quantity} {li.items?.unit}</span></span>
+                              <span className="font-bold tabular-nums">₹{(li.quantity * li.unit_price).toFixed(2)}</span>
+                            </div>
+                          ))}
+                          {isAdmin && (po.status === 'draft' || po.status === 'ordered') && (
+                            <div className="flex gap-2 pt-2">
+                              <button onClick={() => markAsReceived(po)} disabled={saving} className="flex-1 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors">
+                                {saving ? '…' : '✓ Mark Received'}
+                              </button>
+                              <button onClick={() => cancelPO(po)} className="px-3 py-1.5 text-xs font-bold text-red-500 border border-red-200 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">Cancel</button>
+                            </div>
+                          )}
+                          {po.status === 'received' && (
+                            <p className="text-[10px] text-emerald-600 font-bold pt-1">✓ Stock updated {po.received_at ? `· ${new Date(po.received_at).toLocaleDateString('en-IN')}` : ''}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* ITEMS TAB */}
             {ledgerTab === 'items' && (
               vendorItems.length === 0
                 ? <p className="text-center py-10 text-ink-400 text-sm">No items linked to this vendor yet</p>
@@ -387,7 +602,7 @@ export default function VendorsPage() {
                   <div key={item.id} className="bg-white dark:bg-ink-900 p-3 rounded-xl border border-ink-200 dark:border-ink-800 flex justify-between items-center">
                     <div>
                       <div className="font-bold text-sm text-ink-900 dark:text-white">{item.name}</div>
-                      <div className="text-[10px] text-ink-500">{item.category} / {item.subcategory}</div>
+                      <div className="text-[10px] text-ink-500">{item.category} · {item.unit}</div>
                     </div>
                     <div className="text-right">
                       <div className="font-black text-ink-900 dark:text-white">₹{item.price}</div>

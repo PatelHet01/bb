@@ -140,3 +140,60 @@ ALTER TABLE vendor_ledger ADD COLUMN IF NOT EXISTS branch_id TEXT REFERENCES bra
 
 NOTIFY pgrst, 'reload schema';
 ALTER TABLE branch_transfers ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+
+-- 15. VENDOR PURCHASE ORDERS (Vendor → Inventory Auto-Link)
+CREATE TABLE IF NOT EXISTS vendor_purchase_orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendor_id UUID REFERENCES vendors(id) ON DELETE RESTRICT NOT NULL,
+  branch_id TEXT REFERENCES branches(id) NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft', -- 'draft', 'ordered', 'received', 'cancelled'
+  total_amount NUMERIC(10,2) DEFAULT 0,
+  amount_paid  NUMERIC(10,2) DEFAULT 0,
+  payment_mode TEXT DEFAULT 'CREDIT', -- 'CASH', 'UPI', 'CREDIT'
+  invoice_ref  TEXT,
+  notes        TEXT,
+  received_at  TIMESTAMPTZ,
+  recorded_by  TEXT,
+  created_at   TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE vendor_purchase_orders DISABLE ROW LEVEL SECURITY;
+
+-- 16. VENDOR PURCHASE LINE ITEMS
+CREATE TABLE IF NOT EXISTS vendor_purchase_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_order_id UUID REFERENCES vendor_purchase_orders(id) ON DELETE CASCADE NOT NULL,
+  item_id UUID REFERENCES items(id) NOT NULL,
+  quantity NUMERIC(10,3) NOT NULL,
+  unit_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE vendor_purchase_items DISABLE ROW LEVEL SECURITY;
+
+-- 17. INVENTORY AUDIT LOG
+CREATE TABLE IF NOT EXISTS inventory_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id UUID REFERENCES items(id) ON DELETE CASCADE,
+  branch_id TEXT REFERENCES branches(id),
+  action TEXT NOT NULL, -- 'PURCHASE_IN', 'ORDER_OUT', 'MANUAL_ADJUST', 'TRANSFER_IN', 'TRANSFER_OUT'
+  qty_before NUMERIC(10,3),
+  qty_change NUMERIC(10,3),
+  qty_after NUMERIC(10,3),
+  reference_type TEXT, -- 'vendor_purchase_order', 'order', 'manual'
+  reference_id UUID,
+  recorded_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE inventory_log DISABLE ROW LEVEL SECURITY;
+
+-- 18. INCREMENT STOCK RPC (counterpart to decrement_stock)
+CREATE OR REPLACE FUNCTION increment_stock(p_item_id UUID, p_amount NUMERIC)
+RETURNS void AS $$
+BEGIN
+  UPDATE items
+  SET stock_quantity = stock_quantity + p_amount
+  WHERE id = p_item_id;
+END;
+$$ LANGUAGE plpgsql;
+
+NOTIFY pgrst, 'reload schema';
+

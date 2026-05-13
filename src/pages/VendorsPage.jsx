@@ -45,9 +45,15 @@ export default function VendorsPage() {
   const [purchaseOrders, setPurchaseOrders] = useState([])
   const [allItems, setAllItems] = useState([]) // all inventory items for this branch
   const [showPOForm, setShowPOForm] = useState(false)
+  const [editingPO, setEditingPO] = useState(null) // PO being edited (draft only)
   const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
   const [poLines, setPOLines] = useState([{ item_id: '', quantity: '', unit_price: '' }])
   const [expandedPO, setExpandedPO] = useState(null)
+
+  // Link items to vendor
+  const [showLinkItem, setShowLinkItem] = useState(false)
+  const [linkItemId, setLinkItemId] = useState('')
+  const [linkCategoryId, setLinkCategoryId] = useState('')
 
   useEffect(() => { fetchVendors() }, [branchId])
 
@@ -60,21 +66,32 @@ export default function VendorsPage() {
     setLoading(false)
   }
 
+  // Full open — resets tab to ledger
   async function viewVendor(v) {
     setSelectedVendor(v)
     setLedgerTab('ledger')
     setShowPOForm(false)
     setExpandedPO(null)
-    const [lRes, iRes, poRes, allRes] = await Promise.all([
-      supabase.from('vendor_ledger').select('*').eq('vendor_id', v.id).order('created_at', { ascending: false }),
-      supabase.from('item_vendor').select('*, items(id, name, category, subcategory, stock_quantity, unit, price)').eq('vendor_id', v.id),
-      supabase.from('vendor_purchase_orders').select('*, vendor_purchase_items(*, items(name, unit))').eq('vendor_id', v.id).order('created_at', { ascending: false }),
-      supabase.from('items').select('id, name, category, unit, stock_quantity').eq('branch_id', v.branch_id || branchId || 'gurukul').eq('is_active', true).order('name'),
+    await refreshVendorData(v)
+  }
+
+  // Refresh data only — preserves current tab & UI state
+  async function refreshVendorData(v) {
+    const target = v || selectedVendor
+    if (!target) return
+    const [lRes, ivRes, poRes, allRes] = await Promise.all([
+      supabase.from('vendor_ledger').select('*').eq('vendor_id', target.id).order('created_at', { ascending: false }),
+      supabase.from('item_vendor').select('item_id').eq('vendor_id', target.id),
+      supabase.from('vendor_purchase_orders').select('*, vendor_purchase_items(*, items(name, unit, units_per_box))').eq('vendor_id', target.id).order('created_at', { ascending: false }),
+      supabase.from('items').select('id, name, category, unit, stock_quantity, units_per_box, price').eq('branch_id', target.branch_id || branchId || 'gurukul').eq('is_active', true).order('name'),
     ])
     setLedger(lRes.data || [])
-    setVendorItems((iRes.data || []).map(r => r.items).filter(Boolean))
     setPurchaseOrders(poRes.data || [])
-    setAllItems(allRes.data || [])
+    const allItemsList = allRes.data || []
+    setAllItems(allItemsList)
+    // Two-step items fetch: get IDs from item_vendor, then match from allItems
+    const linkedIds = new Set((ivRes.data || []).map(r => r.item_id))
+    setVendorItems(allItemsList.filter(it => linkedIds.has(it.id)))
   }
 
   async function handleSave(e) {
@@ -219,9 +236,10 @@ export default function VendorsPage() {
 
       if (receiveNow) {
         for (const l of validLines) {
-          const { data: itm } = await supabase.from('items').select('stock_quantity').eq('id', l.item_id).single()
+          const { data: itm } = await supabase.from('items').select('stock_quantity, units_per_box').eq('id', l.item_id).single()
           const qBefore = itm?.stock_quantity || 0
-          const qChange = parseFloat(l.quantity)
+          const unitsPerBox = itm?.units_per_box || 1
+          const qChange = parseFloat(l.quantity) * unitsPerBox  // boxes → units
           await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: qChange })
           await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
         }
@@ -236,7 +254,7 @@ export default function VendorsPage() {
       setShowPOForm(false)
       setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
       setPOLines([{ item_id: '', quantity: '', unit_price: '' }])
-      viewVendor(selectedVendor)
+      await refreshVendorData()
     } catch (err) { toast.error(err.message) }
     finally { setSaving(false) }
   }
@@ -245,11 +263,13 @@ export default function VendorsPage() {
     if (!window.confirm('Mark this order as received? This will update inventory stock.')) return
     setSaving(true)
     try {
-      const { data: lines } = await supabase.from('vendor_purchase_items').select('*, items(stock_quantity)').eq('purchase_order_id', po.id)
+      const { data: lines } = await supabase.from('vendor_purchase_items').select('*, items(stock_quantity, units_per_box)').eq('purchase_order_id', po.id)
       for (const l of (lines || [])) {
         const qBefore = l.items?.stock_quantity || 0
-        await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: l.quantity })
-        await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: l.quantity, qty_after: qBefore + l.quantity, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
+        const unitsPerBox = l.items?.units_per_box || 1
+        const qChange = l.quantity * unitsPerBox  // boxes → units
+        await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: qChange })
+        await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
       }
       await supabase.from('vendor_purchase_orders').update({ status: 'received', received_at: new Date().toISOString() }).eq('id', po.id)
       await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PURCHASE', amount: po.total_amount, reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
@@ -257,7 +277,7 @@ export default function VendorsPage() {
         await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PAYMENT', amount: po.amount_paid, reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
       }
       toast.success('Stock updated & ledger entries created!')
-      viewVendor(selectedVendor)
+      await refreshVendorData()
     } catch (err) { toast.error(err.message) }
     finally { setSaving(false) }
   }
@@ -265,7 +285,151 @@ export default function VendorsPage() {
   async function cancelPO(po) {
     if (!window.confirm('Cancel this purchase order?')) return
     await supabase.from('vendor_purchase_orders').update({ status: 'cancelled' }).eq('id', po.id)
-    viewVendor(selectedVendor)
+    await refreshVendorData()
+  }
+
+  async function deletePO(po) {
+    const isReceived = po.status === 'received'
+    const msg = isReceived
+      ? 'Delete this received purchase order? Stock already added will be REVERSED. Are you sure?'
+      : 'Delete this purchase order? This cannot be undone.'
+    if (!window.confirm(msg)) return
+    setSaving(true)
+    try {
+      // If received, reverse the stock increment
+      if (isReceived) {
+        const { data: lines } = await supabase.from('vendor_purchase_items')
+          .select('*, items(stock_quantity, units_per_box)').eq('purchase_order_id', po.id)
+        for (const l of (lines || [])) {
+          const upb = l.items?.units_per_box || 1
+          const qReverse = l.quantity * upb
+          await supabase.rpc('decrement_stock', { p_item_id: l.item_id, p_amount: qReverse })
+          await supabase.from('inventory_log').insert({
+            item_id: l.item_id, branch_id: po.branch_id, action: 'MANUAL_ADJUST',
+            qty_before: l.items?.stock_quantity || 0, qty_change: -qReverse,
+            qty_after: Math.max(0, (l.items?.stock_quantity || 0) - qReverse),
+            reference_type: 'vendor_purchase_order', reference_id: po.id,
+            recorded_by: user.username
+          })
+        }
+        // Remove auto-created ledger entries tied to this PO
+        await supabase.from('vendor_ledger')
+          .delete()
+          .eq('vendor_id', po.vendor_id)
+          .like('reference', `%${po.id.slice(0,8)}%`)
+      }
+      // Delete line items then order
+      await supabase.from('vendor_purchase_items').delete().eq('purchase_order_id', po.id)
+      await supabase.from('vendor_purchase_orders').delete().eq('id', po.id)
+      toast.success(isReceived ? 'Purchase deleted & stock reversed' : 'Purchase deleted')
+      await refreshVendorData()
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  // Create ledger entries for a received PO that somehow missed them
+  async function syncPOLedger(po) {
+    setSaving(true)
+    try {
+      await supabase.from('vendor_ledger').insert({
+        vendor_id: po.vendor_id, branch_id: po.branch_id,
+        type: 'PURCHASE', amount: po.total_amount,
+        reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`,
+        recorded_by: user.username
+      })
+      if (po.amount_paid > 0) {
+        await supabase.from('vendor_ledger').insert({
+          vendor_id: po.vendor_id, branch_id: po.branch_id,
+          type: 'PAYMENT', amount: po.amount_paid,
+          reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`,
+          recorded_by: user.username
+        })
+      }
+      toast.success('Ledger entries created')
+      await refreshVendorData()
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  function startEditPO(po) {
+    setEditingPO(po)
+    setPOForm({ invoice_ref: po.invoice_ref || '', payment_mode: po.payment_mode || 'CREDIT', amount_paid: po.amount_paid || '', notes: po.notes || '' })
+    setPOLines((po.vendor_purchase_items || []).map(li => ({ id: li.id, item_id: li.item_id, quantity: String(li.quantity), unit_price: String(li.unit_price) })))
+    setShowPOForm(true)
+    setExpandedPO(null)
+  }
+
+  async function handleUpdatePO(e) {
+    e.preventDefault()
+    const validLines = poLines.filter(l => l.item_id && parseFloat(l.quantity) > 0)
+    if (!validLines.length) { toast.error('Add at least one item'); return }
+    setSaving(true)
+    try {
+      const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+      await supabase.from('vendor_purchase_orders').update({
+        total_amount: total,
+        amount_paid: parseFloat(poForm.amount_paid) || 0,
+        payment_mode: poForm.payment_mode,
+        invoice_ref: poForm.invoice_ref || null,
+        notes: poForm.notes || null,
+      }).eq('id', editingPO.id)
+      // Replace all line items
+      await supabase.from('vendor_purchase_items').delete().eq('purchase_order_id', editingPO.id)
+      await supabase.from('vendor_purchase_items').insert(
+        validLines.map(l => ({ purchase_order_id: editingPO.id, item_id: l.item_id, quantity: parseFloat(l.quantity), unit_price: parseFloat(l.unit_price)||0 }))
+      )
+      toast.success('Purchase order updated')
+      setShowPOForm(false)
+      setEditingPO(null)
+      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
+      setPOLines([{ item_id: '', quantity: '', unit_price: '' }])
+      await refreshVendorData()
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function linkCategoryToVendor() {
+    if (!linkCategoryId) { toast.error('Select a category'); return }
+    const unlinkedInCat = allItems.filter(it => it.category === linkCategoryId && !vendorItems.find(v => v.id === it.id))
+    if (!unlinkedInCat.length) { toast('All items in this category are already linked'); return }
+    setSaving(true)
+    try {
+      const rows = unlinkedInCat.map(it => ({
+        item_id: it.id,
+        vendor_id: selectedVendor.id,
+        branch_id: selectedVendor.branch_id || branchId || 'gurukul'
+      }))
+      const { error } = await supabase.from('item_vendor').insert(rows)
+      if (error) throw error
+      toast.success(`${unlinkedInCat.length} item${unlinkedInCat.length > 1 ? 's' : ''} in "${linkCategoryId}" linked`)
+      setLinkCategoryId('')
+      await refreshVendorData()
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function linkItemToVendor() {
+    if (!linkItemId) { toast.error('Select an item'); return }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('item_vendor').insert({
+        item_id: linkItemId,
+        vendor_id: selectedVendor.id,
+        branch_id: selectedVendor.branch_id || branchId || 'gurukul'
+      })
+      if (error) throw error
+      toast.success('Item linked to vendor')
+      setLinkItemId('')
+      await refreshVendorData()  // preserve Items tab
+    } catch (err) { toast.error(err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function unlinkItemFromVendor(itemId) {
+    if (!window.confirm('Unlink this item from vendor?')) return
+    const { error } = await supabase.from('item_vendor').delete().eq('item_id', itemId).eq('vendor_id', selectedVendor.id)
+    if (error) toast.error(error.message)
+    else { toast.success('Item unlinked'); await refreshVendorData() }
   }
 
   // Compute vendor balance: PURCHASE = amount owed to vendor (debit), PAYMENT = paid
@@ -493,8 +657,10 @@ export default function VendorsPage() {
                 {showPOForm && (
                   <div className="bg-white dark:bg-ink-900 rounded-xl border border-emerald-300 dark:border-emerald-800 p-4 space-y-3 animate-slide-up">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">New Purchase Order</span>
-                      <button onClick={() => setShowPOForm(false)}><X size={14} className="text-ink-400" /></button>
+                      <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">
+                        {editingPO ? `Edit Purchase Order · ${editingPO.invoice_ref || editingPO.id.slice(0,8)}` : 'New Purchase Order'}
+                      </span>
+                      <button onClick={() => { setShowPOForm(false); setEditingPO(null) }}><X size={14} className="text-ink-400" /></button>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -525,10 +691,23 @@ export default function VendorsPage() {
                         <div key={i} className="grid grid-cols-[1fr_80px_80px_28px] gap-1 items-center">
                           <select className="input text-xs" value={line.item_id} onChange={e => updatePOLine(i, 'item_id', e.target.value)}>
                             <option value="">Select item…</option>
-                            {allItems.map(it => <option key={it.id} value={it.id}>{it.name} ({it.unit}) — stock: {it.stock_quantity}</option>)}
+                            {allItems.map(it => {
+                              const upb = it.units_per_box || 1
+                              return <option key={it.id} value={it.id}>{it.name} ({upb > 1 ? `box of ${upb}` : it.unit}) — stock: {it.stock_quantity} {it.unit}s</option>
+                            })}
                           </select>
-                          <input type="number" min="0.001" step="any" className="input text-xs text-center" placeholder="Qty" value={line.quantity} onChange={e => updatePOLine(i, 'quantity', e.target.value)} />
-                          <input type="number" min="0" step="0.01" className="input text-xs text-center" placeholder="₹/unit" value={line.unit_price} onChange={e => updatePOLine(i, 'unit_price', e.target.value)} />
+                          {(() => {
+                            const selItem = allItems.find(it => it.id === line.item_id)
+                            const upb = selItem?.units_per_box || 1
+                            const boxes = parseFloat(line.quantity) || 0
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                <input type="number" min="0.001" step="any" className="input text-xs text-center" placeholder={upb > 1 ? 'Boxes' : 'Qty'} value={line.quantity} onChange={e => updatePOLine(i, 'quantity', e.target.value)} />
+                                {upb > 1 && boxes > 0 && <span className="text-[9px] text-amber-600 text-center font-bold">{boxes}×{upb}={boxes*upb} {selItem.unit}s</span>}
+                              </div>
+                            )
+                          })()}
+                          <input type="number" min="0" step="0.01" className="input text-xs text-center" placeholder={(() => { const s = allItems.find(it => it.id === line.item_id); return s?.units_per_box > 1 ? '₹/box' : '₹/unit' })()} value={line.unit_price} onChange={e => updatePOLine(i, 'unit_price', e.target.value)} />
                           <button onClick={() => removePOLine(i)} className="text-ink-400 hover:text-red-500"><X size={13}/></button>
                         </div>
                       ))}
@@ -537,8 +716,14 @@ export default function VendorsPage() {
                     <div className="flex justify-between items-center pt-2 border-t border-ink-100 dark:border-ink-800">
                       <span className="font-black text-ink-900 dark:text-white">Total: ₹{poTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                       <div className="flex gap-2">
-                        <button type="button" onClick={e => handleCreatePO(e, false)} disabled={saving} className="btn-secondary text-xs">{saving ? '…' : 'Save Draft'}</button>
-                        <button type="button" onClick={e => handleCreatePO(e, true)} disabled={saving} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">{saving ? '…' : '✓ Receive Now'}</button>
+                        {editingPO ? (
+                          <button type="button" onClick={handleUpdatePO} disabled={saving} className="btn-primary text-xs">{saving ? '…' : 'Update Order'}</button>
+                        ) : (
+                          <>
+                            <button type="button" onClick={e => handleCreatePO(e, false)} disabled={saving} className="btn-secondary text-xs">{saving ? '…' : 'Save Draft'}</button>
+                            <button type="button" onClick={e => handleCreatePO(e, true)} disabled={saving} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">{saving ? '…' : '✓ Receive Now'}</button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -569,23 +754,58 @@ export default function VendorsPage() {
                       </button>
                       {isExpanded && (
                         <div className="px-3 pb-3 space-y-2 border-t border-ink-100 dark:border-ink-800 pt-2">
-                          {(po.vendor_purchase_items || []).map(li => (
-                            <div key={li.id} className="flex justify-between text-xs">
-                              <span className="text-ink-700 dark:text-ink-300">{li.items?.name} <span className="text-ink-400">×{li.quantity} {li.items?.unit}</span></span>
-                              <span className="font-bold tabular-nums">₹{(li.quantity * li.unit_price).toFixed(2)}</span>
-                            </div>
-                          ))}
-                          {isAdmin && (po.status === 'draft' || po.status === 'ordered') && (
-                            <div className="flex gap-2 pt-2">
-                              <button onClick={() => markAsReceived(po)} disabled={saving} className="flex-1 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors">
-                                {saving ? '…' : '✓ Mark Received'}
-                              </button>
-                              <button onClick={() => cancelPO(po)} className="px-3 py-1.5 text-xs font-bold text-red-500 border border-red-200 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">Cancel</button>
+                          {(po.vendor_purchase_items || []).map(li => {
+                            const upb = li.items?.units_per_box || 1
+                            const totalUnits = li.quantity * upb
+                            return (
+                              <div key={li.id} className="flex justify-between text-xs">
+                                <span className="text-ink-700 dark:text-ink-300">
+                                  {li.items?.name}
+                                  {upb > 1
+                                    ? <span className="text-ink-400"> ×{li.quantity} box{li.quantity !== 1 ? 'es' : ''} <span className="text-amber-600">= {totalUnits} {li.items?.unit}s</span></span>
+                                    : <span className="text-ink-400"> ×{li.quantity} {li.items?.unit}</span>
+                                  }
+                                </span>
+                                <span className="font-bold tabular-nums">₹{(li.quantity * li.unit_price).toFixed(2)}</span>
+                              </div>
+                            )
+                          })}
+                          {isAdmin && (
+                            <div className="flex gap-2 pt-2 flex-wrap">
+                              {/* Edit — always allowed; received orders warn about stock */}
+                              <button onClick={() => startEditPO(po)} className="px-3 py-1.5 text-xs font-bold text-amber-600 border border-amber-200 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"><Edit2 size={12} className="inline mr-1"/>Edit</button>
+
+                              {/* Mark Received — only for draft/ordered */}
+                              {(po.status === 'draft' || po.status === 'ordered') && (
+                                <button onClick={() => markAsReceived(po)} disabled={saving} className="flex-1 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors">
+                                  {saving ? '…' : '✓ Mark Received'}
+                                </button>
+                              )}
+
+                              {/* Cancel — draft/ordered only */}
+                              {(po.status === 'draft' || po.status === 'ordered') && (
+                                <button onClick={() => cancelPO(po)} className="px-3 py-1.5 text-xs font-bold text-red-500 border border-red-200 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">Cancel</button>
+                              )}
+
+                              {/* Delete — all statuses */}
+                              <button onClick={() => deletePO(po)} disabled={saving} className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-lg transition-colors"><Trash2 size={12} className="inline mr-1"/>Delete</button>
                             </div>
                           )}
-                          {po.status === 'received' && (
-                            <p className="text-[10px] text-emerald-600 font-bold pt-1">✓ Stock updated {po.received_at ? `· ${new Date(po.received_at).toLocaleDateString('en-IN')}` : ''}</p>
-                          )}
+                          {po.status === 'received' && (() => {
+                            // Check if this PO already has ledger entries
+                            const poRef = po.invoice_ref || `PO ${po.id.slice(0,8)}`
+                            const hasLedger = ledger.some(l => l.reference && l.reference.includes(poRef.split(' ').pop()))
+                            return (
+                              <div className="flex items-center justify-between pt-1">
+                                <p className="text-[10px] text-emerald-600 font-bold">✓ Stock updated {po.received_at ? `· ${new Date(po.received_at).toLocaleDateString('en-IN')}` : ''}</p>
+                                {!hasLedger && isAdmin && (
+                                  <button onClick={() => syncPOLedger(po)} disabled={saving} className="text-[10px] font-bold text-blue-600 hover:underline px-2 py-0.5 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200">
+                                    {saving ? '…' : '↑ Sync to Ledger'}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </div>
                       )}
                     </div>
@@ -596,20 +816,96 @@ export default function VendorsPage() {
 
             {/* ITEMS TAB */}
             {ledgerTab === 'items' && (
-              vendorItems.length === 0
-                ? <p className="text-center py-10 text-ink-400 text-sm">No items linked to this vendor yet</p>
-                : vendorItems.map(item => (
-                  <div key={item.id} className="bg-white dark:bg-ink-900 p-3 rounded-xl border border-ink-200 dark:border-ink-800 flex justify-between items-center">
+              <div className="space-y-3">
+                {isAdmin && (
+                  <div className="bg-white dark:bg-ink-900 rounded-xl border border-ink-200 dark:border-ink-800 p-3 space-y-3">
+                    <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Link items to this vendor</p>
+
+                    {/* Link by Category */}
                     <div>
-                      <div className="font-bold text-sm text-ink-900 dark:text-white">{item.name}</div>
-                      <div className="text-[10px] text-ink-500">{item.category} · {item.unit}</div>
+                      <p className="text-[10px] text-ink-500 mb-1.5">By Category <span className="text-amber-600">(links all items in category at once)</span></p>
+                      <div className="flex gap-2">
+                        <select className="input text-xs flex-1" value={linkCategoryId} onChange={e => setLinkCategoryId(e.target.value)}>
+                          <option value="">Select category…</option>
+                          {[...new Set(allItems.map(it => it.category))].sort().map(cat => {
+                            const total = allItems.filter(it => it.category === cat).length
+                            const linked = vendorItems.filter(it => it.category === cat).length
+                            return <option key={cat} value={cat}>{cat} ({linked}/{total} linked)</option>
+                          })}
+                        </select>
+                        <button onClick={linkCategoryToVendor} disabled={saving || !linkCategoryId} className="px-4 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-lg disabled:opacity-50 transition-colors">{saving ? '…' : 'Link All'}</button>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <div className="font-black text-ink-900 dark:text-white">₹{item.price}</div>
-                      <div className="text-[10px] text-ink-400">Stock: {item.stock_quantity}</div>
+
+                    {/* Link single item */}
+                    <div>
+                      <p className="text-[10px] text-ink-500 mb-1.5">By Item</p>
+                      <div className="flex gap-2">
+                        <select className="input text-xs flex-1" value={linkItemId} onChange={e => setLinkItemId(e.target.value)}>
+                          <option value="">Select item to link…</option>
+                          {allItems.filter(it => !vendorItems.find(v => v.id === it.id)).map(it => (
+                            <option key={it.id} value={it.id}>{it.name} ({it.unit}) — stock: {it.stock_quantity}</option>
+                          ))}
+                        </select>
+                        <button onClick={linkItemToVendor} disabled={saving || !linkItemId} className="btn-primary text-xs px-4 disabled:opacity-50">{saving ? '…' : '+ Link'}</button>
+                      </div>
                     </div>
                   </div>
-                ))
+                )}
+                {vendorItems.length === 0
+                  ? <p className="text-center py-8 text-ink-400 text-sm">No items linked yet. Use the selectors above to link items.</p>
+                  : (() => {
+                    // Group by category
+                    const groups = {}
+                    vendorItems.forEach(it => {
+                      if (!groups[it.category]) groups[it.category] = []
+                      groups[it.category].push(it)
+                    })
+                    return Object.entries(groups).map(([cat, items]) => (
+                      <div key={cat} className="space-y-1.5">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest">{cat} <span className="text-ink-300">· {items.length}</span></span>
+                          {isAdmin && (
+                            <button onClick={async () => {
+                              if (!window.confirm(`Unlink all ${items.length} items in "${cat}" from this vendor?`)) return
+                              setSaving(true)
+                              try {
+                                await supabase.from('item_vendor').delete()
+                                  .in('item_id', items.map(i => i.id))
+                                  .eq('vendor_id', selectedVendor.id)
+                                toast.success(`${items.length} items unlinked`)
+                                await refreshVendorData()
+                              } catch(e) { toast.error(e.message) }
+                              finally { setSaving(false) }
+                            }} className="text-[10px] font-bold text-red-400 hover:text-red-600 hover:underline">
+                              Unlink all
+                            </button>
+                          )}
+                        </div>
+                        {items.map(item => (
+                          <div key={item.id} className="group bg-white dark:bg-ink-900 p-3 rounded-xl border border-ink-200 dark:border-ink-800 flex justify-between items-center">
+                            <div>
+                              <div className="font-bold text-sm text-ink-900 dark:text-white">{item.name}</div>
+                              <div className="text-[10px] text-ink-500">{item.unit}{item.units_per_box > 1 ? ` · box of ${item.units_per_box}` : ''}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <div className="font-black text-ink-900 dark:text-white">₹{item.price}</div>
+                                <div className="text-[10px] text-ink-400">Stock: {item.stock_quantity}</div>
+                              </div>
+                              {isAdmin && (
+                                <button onClick={() => unlinkItemFromVendor(item.id)} className="opacity-0 group-hover:opacity-100 p-1.5 text-ink-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all">
+                                  <Trash2 size={13}/>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                  })()
+                }
+              </div>
             )}
           </div>
         </div>

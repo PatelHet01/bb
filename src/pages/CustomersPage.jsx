@@ -436,8 +436,8 @@ export default function CustomersPage() {
                 ${selected?.id === c.id ? 'border-ember bg-ember-50/50 dark:bg-ink-800' : 'border-transparent hover:bg-ink-50 dark:hover:bg-ink-800 hover:border-ink-200 dark:hover:border-ink-700'}`}>
                 
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-ink-100 dark:bg-ink-800 text-ink-600 dark:text-ink-400 flex items-center justify-center font-bold text-lg uppercase shrink-0">
-                    {c.name[0]}
+                  <div className="w-10 h-10 rounded-full bg-ink-100 dark:bg-ink-800 text-ink-600 dark:text-ink-400 flex items-center justify-center font-bold text-lg uppercase shrink-0 overflow-hidden">
+                    {c.avatar_url ? <img src={c.avatar_url} alt={c.name} className="w-full h-full object-cover" /> : c.name[0]}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -487,7 +487,9 @@ export default function CustomersPage() {
           <div className="p-5 border-b border-ink-200 dark:border-ink-800 bg-ink-900 text-white relative">
             <button onClick={() => setSelected(null)} className="absolute top-4 right-4 p-2 bg-ink-800 hover:bg-red-500 text-white rounded-full transition-colors"><X size={16}/></button>
             <div className="flex gap-4 items-center">
-              <div className="w-16 h-16 rounded-2xl bg-white text-ink-900 flex items-center justify-center font-black text-3xl uppercase">{selected.name[0]}</div>
+              <div className="w-16 h-16 rounded-2xl bg-white text-ink-900 flex items-center justify-center font-black text-3xl uppercase overflow-hidden">
+                {selected.avatar_url ? <img src={selected.avatar_url} alt={selected.name} className="w-full h-full object-cover" /> : selected.name[0]}
+              </div>
               <div>
                 <h2 className="font-black text-2xl leading-none">{selected.name}</h2>
                 <div className="flex items-center gap-3 mt-2">

@@ -21,7 +21,7 @@ export default function InventoryPage() {
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, is_active: true, branch_id: branchId || 'gurukul' })
+  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, branch_id: branchId || 'gurukul' })
   const [saving, setSaving] = useState(false)
 
   // Inline Editing
@@ -111,12 +111,13 @@ export default function InventoryPage() {
         cost_price: form.cost_price ? parseFloat(form.cost_price) : 0,
         stock_quantity: parseInt(form.stock_quantity) || 0,
         low_stock_threshold: parseInt(form.low_stock_threshold) || 5,
+        units_per_box: parseInt(form.units_per_box) || 1,
         branch_id: form.branch_id, 
         is_active: form.is_active,
         is_archived: false
       })
       toast.success('Item added')
-      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, is_active: true, branch_id: branchId || 'gurukul' })
+      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, branch_id: branchId || 'gurukul' })
       setShowForm(false)
       fetchItems()
     } catch (e) { toast.error(e.message) }
@@ -573,6 +574,11 @@ export default function InventoryPage() {
                   {UNITS.map(u => <option key={u}>{u}</option>)}
                 </select>
               </div>
+              <div>
+                <label className="label">Units per Box/Pack</label>
+                <input className="input w-full" type="number" min="1" step="1" value={form.units_per_box} onChange={e => setForm(p => ({ ...p, units_per_box: e.target.value }))} title="e.g. 12 means 1 box = 12 cigarettes. Set to 1 for no pack logic." />
+                {parseInt(form.units_per_box) > 1 && <p className="text-[10px] text-amber-600 mt-1">1 box = {form.units_per_box} {form.unit}s</p>}
+              </div>
               <div className="flex items-end">
                 <label className="flex items-center gap-2 cursor-pointer mb-2">
                   <input type="checkbox" className="w-4 h-4 rounded text-ember focus:ring-ember" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
@@ -663,6 +669,11 @@ export default function InventoryPage() {
                               <input type="number" className="input w-full text-sm py-1.5" value={editForm.cost_price || ''} onChange={e=>setEditForm({...editForm, cost_price:e.target.value})}/>
                             </div>
                           )}
+                          <div className="w-28">
+                            <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1 block">Units/Box <span className="normal-case text-zinc-400">(1=no pack)</span></label>
+                            <input type="number" min="1" step="1" className="input w-full text-sm py-1.5" value={editForm.units_per_box || 1} onChange={e=>setEditForm({...editForm, units_per_box:parseInt(e.target.value)||1})}/>
+                            {(editForm.units_per_box||1) > 1 && <p className="text-[9px] text-amber-600 mt-0.5">1 box = {editForm.units_per_box} {editForm.unit}s</p>}
+                          </div>
                           <div className="flex gap-2 justify-end ml-auto">
                             <button onClick={saveInlineEdit} className="p-2 bg-emerald-500 text-white rounded shadow hover:bg-emerald-600"><Check size={16}/></button>
                             <button onClick={()=>setEditingRow(null)} className="p-2 bg-zinc-200 dark:bg-zinc-700 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600"><X size={16}/></button>

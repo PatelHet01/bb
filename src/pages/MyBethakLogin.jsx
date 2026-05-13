@@ -31,18 +31,15 @@ export default function MyBethakLogin() {
     if (mobile.length !== 10) { toast.error('Enter a valid 10-digit number'); return }
     setLoading(true)
     try {
-      // Check if customer exists
       const { data: existing } = await supabase.from('customers').select('*').eq('mobile_number', mobile).single()
       if (existing) {
-        setMode('login')
+        setCustomer(existing)
+        toast.success(`Welcome back, ${existing.name}!`)
+        navigate('/my-bethak/dashboard')
       } else {
         setMode('signup')
+        setStep('signup_form')
       }
-      // Generate mock OTP (in prod this would be SMS)
-      const code = String(Math.floor(100000 + Math.random() * 900000))
-      setGeneratedOtp(code)
-      toast.success(`OTP: ${code}`, { duration: 30000, icon: '🔑' }) // Show OTP for demo
-      setStep('otp')
     } catch (e) {
       toast.error('Something went wrong')
     } finally {
@@ -50,33 +47,24 @@ export default function MyBethakLogin() {
     }
   }
 
-  async function handleOtpSubmit(e) {
+  async function handleSignupSubmit(e) {
     e.preventDefault()
-    if (otp !== generatedOtp) { toast.error('Invalid OTP'); return }
     setLoading(true)
     try {
-      if (mode === 'login') {
-        const { data: cust } = await supabase.from('customers').select('*').eq('mobile_number', mobile).single()
-        setCustomer(cust)
-        toast.success(`Welcome back, ${cust.name}!`)
-        navigate('/my-bethak/dashboard')
-      } else {
-        // Signup
-        if (!signupForm.name || !signupForm.username || !signupForm.dob) { toast.error('Fill all fields'); return }
-        const { data: newCust, error } = await supabase.from('customers').insert({
-          name: signupForm.name,
-          username: signupForm.username.toLowerCase(),
-          mobile_number: mobile,
-          dob: signupForm.dob,
-          ghoda_coins: 0,
-          branch_id: null,
-          registration_type: 'self'
-        }).select().single()
-        if (error) throw error
-        setCustomer(newCust)
-        toast.success('Welcome to Bombay Bethak!')
-        navigate('/my-bethak/dashboard')
-      }
+      if (!signupForm.name || !signupForm.username || !signupForm.dob) { toast.error('Fill all fields'); return }
+      const { data: newCust, error } = await supabase.from('customers').insert({
+        name: signupForm.name,
+        username: signupForm.username.toLowerCase(),
+        mobile_number: mobile,
+        dob: signupForm.dob,
+        ghoda_coins: 0,
+        branch_id: null,
+        registration_type: 'self'
+      }).select().single()
+      if (error) throw error
+      setCustomer(newCust)
+      toast.success('Welcome to Bombay Bethak!')
+      navigate('/my-bethak/dashboard')
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -115,13 +103,13 @@ export default function MyBethakLogin() {
           </motion.div>
         )}
 
-        {step === 'otp' && (
-          <motion.div key="otp" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={STYLES.card}>
+        {step === 'signup_form' && (
+          <motion.div key="signup_form" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={STYLES.card}>
             <button onClick={() => setStep('mobile')} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1.5rem', fontSize: '0.8rem', padding: 0 }}>
               <ArrowLeft size={14} /> Back
             </button>
 
-            {mode === 'signup' && (
+            <form onSubmit={handleSignupSubmit}>
               <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
                 <p style={{ fontSize: '0.65rem', letterSpacing: '0.3em', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', marginBottom: '1rem' }}>Create Your Profile</p>
                 <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -135,6 +123,7 @@ export default function MyBethakLogin() {
                       <input
                         style={{ ...STYLES.input, fontSize: '0.9rem' }}
                         type={f.type} placeholder={f.ph} value={signupForm[f.key]}
+                        required
                         onChange={e => setSignupForm(p => ({ ...p, [f.key]: e.target.value }))}
                         onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
                         onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
@@ -143,28 +132,9 @@ export default function MyBethakLogin() {
                   ))}
                 </div>
               </div>
-            )}
 
-            <p style={{ fontFamily: 'Georgia, serif', fontSize: '1.2rem', color: 'white', marginBottom: '0.5rem', fontWeight: 700 }}>
-              {mode === 'login' ? 'Welcome back.' : 'One last step.'}
-            </p>
-            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.35)', marginBottom: '1.5rem' }}>
-              OTP sent to +91 {mobile}
-            </p>
-
-            <form onSubmit={handleOtpSubmit}>
-              <label style={STYLES.label}>6-Digit OTP</label>
-              <input
-                style={{ ...STYLES.input, fontSize: '2rem', letterSpacing: '0.4em', textAlign: 'center', fontWeight: 900 }}
-                type="text" maxLength={6} value={otp} required
-                onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
-                placeholder="000000"
-                onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
-                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
-                autoFocus
-              />
               <button type="submit" style={{ ...STYLES.btn, marginTop: '1.5rem' }} disabled={loading}>
-                {loading ? 'Verifying...' : mode === 'login' ? 'Enter My Bethak' : 'Join Bombay Bethak'}
+                {loading ? 'Creating...' : 'Join Bombay Bethak'}
               </button>
             </form>
           </motion.div>

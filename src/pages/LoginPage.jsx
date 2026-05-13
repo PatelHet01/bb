@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import { ArrowRight, Eye, EyeOff } from 'lucide-react'
+import BBLogo from '../components/shared/BBLogo'
 
 const HARDCODED_USERS = {
   superadmin: { password: 'Bethak@SuperAdmin#2025', role: 'super_admin', branchId: null,     branchName: 'All Branches' },
@@ -57,9 +58,7 @@ export default function LoginPage() {
       {/* Left — brand panel */}
       <div className="hidden lg:flex flex-col justify-between w-[420px] flex-shrink-0 p-12 border-r border-zinc-800">
         <div>
-          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center mb-8">
-            <span className="text-lg">🪑</span>
-          </div>
+          <BBLogo size={100} animate className="mb-8" />
           <h1 className="text-4xl font-bold text-white leading-tight mb-4">
             Bombay<br />Bethak
           </h1>
@@ -85,8 +84,8 @@ export default function LoginPage() {
         <div className="w-full max-w-sm animate-slide-up">
           {/* Mobile brand */}
           <div className="lg:hidden text-center mb-8">
-            <span className="text-4xl">🪑</span>
-            <h1 className="text-2xl font-bold text-white mt-2">Bombay Bethak</h1>
+            <BBLogo size={100} animate className="mx-auto" />
+            <h1 className="text-2xl font-bold text-white mt-4">Bombay Bethak</h1>
           </div>
 
           <div className="mb-8">

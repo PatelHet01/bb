@@ -9,28 +9,28 @@ export default function StaffSalaryPage() {
   const { branchId, role, user } = useAuthStore()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'salary'
-  
+
   const [workers, setWorkers] = useState([])
   const [records, setRecords] = useState([])
   const [transactions, setTransactions] = useState([])
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
-  
+
   const setActiveTab = (tab) => setSearchParams({ tab })
   const [showWorkerForm, setShowWorkerForm] = useState(false)
   const [editingWorker, setEditingWorker] = useState(null)
   const [workerForm, setWorkerForm] = useState({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true })
-  
+
   const [showUserForm, setShowUserForm] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [userForm, setUserForm] = useState({ username: '', password: '', role: 'manager', branch_id: branchId || 'gurukul' })
-  
+
   const [showTxForm, setShowTxForm] = useState(false)
   const [txForm, setTxForm] = useState({ worker_id: '', type: 'ADVANCE', amount: '', payment_mode: 'CASH', notes: '', date: new Date().toISOString().split('T')[0] })
-  
+
   const [txFilters, setTxFilters] = useState({ worker_id: '', type: 'All', dateFrom: '', dateTo: '', search: '' })
   const [saving, setSaving] = useState(false)
-  
+
   const [shifts, setShifts] = useState([])
   const todayStr = new Date().toISOString().split('T')[0]
   const [dayCode, setDayCode] = useState(todayStr.replace(/-/g, '').slice(-4))
@@ -44,7 +44,7 @@ export default function StaffSalaryPage() {
   async function fetchData() {
     setLoading(true)
     try {
-      if (activeTab === 'salary' || activeTab === 'attendance' || activeTab === 'ledger') {
+      if (activeTab === 'salary' || activeTab === 'attendance') {
         let wQ = supabase.from('workers').select('*').order('name')
         if (branchId) wQ = wQ.eq('branch_id', branchId)
         const { data: wData } = await wQ
@@ -55,18 +55,16 @@ export default function StaffSalaryPage() {
           const { data: rData } = await rQ
           const workerIds = (wData || []).map(w => w.id)
           setRecords((rData || []).filter(r => workerIds.includes(r.worker_id)))
+
+          let tQ = supabase.from('staff_transactions').select(`*, workers(name, role)`).order('created_at', { ascending: false })
+          if (branchId) tQ = tQ.eq('branch_id', branchId)
+          const { data: tData } = await tQ
+          setTransactions(tData || [])
         }
 
         if (activeTab === 'attendance') {
           const { data: sData } = await supabase.from('shifts').select('*').gte('clock_in', `${todayStr}T00:00:00Z`)
           setShifts(sData || [])
-        }
-
-        if (activeTab === 'ledger') {
-          let tQ = supabase.from('staff_transactions').select(`*, workers(name, role)`).order('created_at', { ascending: false })
-          if (branchId) tQ = tQ.eq('branch_id', branchId)
-          const { data: tData } = await tQ
-          setTransactions(tData || [])
         }
       }
 
@@ -89,9 +87,9 @@ export default function StaffSalaryPage() {
     setSaving(true)
     try {
       const payload = {
-        name: workerForm.name, 
-        role: workerForm.role, 
-        base_salary: parseFloat(workerForm.base_salary), 
+        name: workerForm.name,
+        role: workerForm.role,
+        base_salary: parseFloat(workerForm.base_salary),
         branch_id: workerForm.branch_id,
         is_active: workerForm.is_active
       }
@@ -105,7 +103,7 @@ export default function StaffSalaryPage() {
         if (error) throw error
         toast.success('Worker added')
       }
-      
+
       setShowWorkerForm(false)
       setEditingWorker(null)
       setWorkerForm({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true })
@@ -147,7 +145,7 @@ export default function StaffSalaryPage() {
         if (error) throw error
         toast.success('User created')
       }
-      
+
       setShowUserForm(false)
       setEditingUser(null)
       setUserForm({ username: '', password: '', role: 'manager', branch_id: branchId || 'gurukul' })
@@ -240,7 +238,7 @@ export default function StaffSalaryPage() {
 
       const { error } = await supabase.from('staff_transactions').insert(payload)
       if (error) throw error
-      
+
       // If it's an advance, we might want to update the salary record for the current month too
       if (txForm.type === 'ADVANCE') {
         const monthYear = txForm.date.slice(0, 7)
@@ -274,7 +272,7 @@ export default function StaffSalaryPage() {
     const matchesType = txFilters.type === 'All' || tx.type === txFilters.type
     const matchesDateFrom = !txFilters.dateFrom || tx.created_at >= txFilters.dateFrom
     const matchesDateTo = !txFilters.dateTo || tx.created_at <= `${txFilters.dateTo}T23:59:59`
-    const matchesSearch = !txFilters.search || 
+    const matchesSearch = !txFilters.search ||
       tx.workers?.name?.toLowerCase().includes(txFilters.search.toLowerCase()) ||
       tx.notes?.toLowerCase().includes(txFilters.search.toLowerCase())
     return matchesWorker && matchesType && matchesDateFrom && matchesDateTo && matchesSearch
@@ -296,14 +294,13 @@ export default function StaffSalaryPage() {
           <h1 className="text-2xl font-black text-ink-900 dark:text-white tracking-tight">Staff & Salary Management</h1>
           <div className="flex gap-4 mt-3">
             {[
-              { id: 'salary', label: 'Salary Monthly', icon: DollarSign },
-              { id: 'ledger', label: 'Transaction Ledger', icon: History },
+              { id: 'salary', label: 'Salary & Ledger', icon: DollarSign },
               { id: 'attendance', label: 'Daily Attendance', icon: Clock },
               { id: 'access', label: 'System Access', icon: Shield }
             ].map(tab => (
-              <button 
-                key={tab.id} 
-                onClick={() => setActiveTab(tab.id)} 
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-2 text-sm font-bold pb-2 border-b-2 transition-all ${activeTab === tab.id ? 'border-ember text-ember' : 'border-transparent text-ink-400 hover:text-ink-600'}`}
               >
                 <tab.icon size={16} /> {tab.label}
@@ -311,7 +308,7 @@ export default function StaffSalaryPage() {
             ))}
           </div>
         </div>
-        
+
         <div className="flex gap-2">
           {activeTab === 'salary' && (
             <div className="flex gap-2">
@@ -320,20 +317,21 @@ export default function StaffSalaryPage() {
             </div>
           )}
           {activeTab === 'access' && isAdmin && (
-            <button className="btn-primary py-2 px-4" onClick={() => { setEditingUser(null); setUserForm({ username: '', password: '', role: 'manager', branch_id: branchId || 'gurukul' }); setShowUserForm(true); }}><Plus size={16} className="mr-1"/> Add User</button>
+            <button className="btn-primary py-2 px-4" onClick={() => { setEditingUser(null); setUserForm({ username: '', password: '', role: 'manager', branch_id: branchId || 'gurukul' }); setShowUserForm(true); }}><Plus size={16} className="mr-1" /> Add User</button>
           )}
-          {activeTab === 'ledger' && (
-            <button className="btn-primary py-2 px-4" onClick={() => setShowTxForm(true)}><Plus size={16} className="mr-1"/> Log Transaction</button>
+          {activeTab === 'salary' && (
+            <button className="btn-primary py-2 px-4" onClick={() => setShowTxForm(true)}><Plus size={16} className="mr-1" /> Log Transaction</button>
           )}
-          {(activeTab === 'salary' || activeTab === 'attendance' || activeTab === 'ledger') && (
-            <button className="btn-primary py-2 px-4" onClick={() => { setEditingWorker(null); setWorkerForm({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true }); setShowWorkerForm(true); }}><Plus size={16} className="mr-1"/> Add Worker</button>
+          {(activeTab === 'salary' || activeTab === 'attendance') && (
+            <button className="btn-primary py-2 px-4" onClick={() => { setEditingWorker(null); setWorkerForm({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true }); setShowWorkerForm(true); }}><Plus size={16} className="mr-1" /> Add Worker</button>
           )}
         </div>
       </div>
 
       <div className="min-h-[60vh]">
         {activeTab === 'salary' && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             <div className="lg:col-span-1 space-y-4">
               <h3 className="text-xs font-black text-ink-400 uppercase tracking-widest">Active Staff</h3>
               <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden divide-y divide-ink-100 dark:divide-ink-800">
@@ -345,8 +343,8 @@ export default function StaffSalaryPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       {!w.is_active && <span className="badge bg-red-100 text-red-600 text-[9px] mr-2">Inactive</span>}
-                      <button onClick={() => { setEditingWorker(w); setWorkerForm({ ...w }); setShowWorkerForm(true); }} className="p-1.5 text-ink-400 hover:text-ember opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={12}/></button>
-                      <button onClick={() => deleteWorker(w.id)} className="p-1.5 text-ink-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12}/></button>
+                      <button onClick={() => { setEditingWorker(w); setWorkerForm({ ...w }); setShowWorkerForm(true); }} className="p-1.5 text-ink-400 hover:text-ember opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={12} /></button>
+                      <button onClick={() => deleteWorker(w.id)} className="p-1.5 text-ink-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
                     </div>
                   </div>
                 ))}
@@ -378,13 +376,10 @@ export default function StaffSalaryPage() {
                           </td>
                           <td className="px-4 py-4 text-right font-bold text-sm">₹{r.base_salary}</td>
                           <td className="px-4 py-4">
-                            <input 
-                              type="number" 
-                              className="w-full bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold text-center py-1 rounded-lg border border-red-100 dark:border-red-900/50 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                              defaultValue={r.advance_taken}
-                              onBlur={(e) => updateAdvance(r.id, parseFloat(e.target.value) || 0)}
-                              disabled={r.status === 'paid'}
-                            />
+                            <div className="flex items-center gap-2">
+                              <span className="w-full bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold text-center py-1 rounded-lg border border-red-100 dark:border-red-900/50 text-sm">{r.advance_taken || 0}</span>
+                              <button onClick={() => { setTxForm({ ...txForm, worker_id: w.id }); setShowTxForm(true); }} className="p-1.5 text-blue-500 hover:text-blue-700 bg-blue-50 rounded-lg shrink-0" title="Log Transaction"><Plus size={14} /></button>
+                            </div>
                           </td>
                           <td className="px-4 py-4 text-right font-black text-emerald-600 dark:text-emerald-400">₹{r.net_payable.toLocaleString()}</td>
                           <td className="px-4 py-4 text-center">
@@ -393,9 +388,9 @@ export default function StaffSalaryPage() {
                           <td className="px-4 py-4 text-right">
                             <div className="flex justify-end items-center gap-2">
                               {r.status !== 'paid' && (
-                                <button onClick={() => {if(confirm(`Mark ₹${r.net_payable} as PAID to ${w.name}?`)) markPaid(r.id)}} className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95">Pay Now</button>
+                                <button onClick={() => { if (confirm(`Mark ₹${r.net_payable} as PAID to ${w.name}?`)) markPaid(r.id) }} className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg shadow-sm transition-all active:scale-95">Pay Now</button>
                               )}
-                              <button onClick={() => deleteSalaryRecord(r.id)} className="p-1.5 text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12}/></button>
+                              <button onClick={() => deleteSalaryRecord(r.id)} className="p-1.5 text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
                             </div>
                           </td>
                         </tr>
@@ -409,353 +404,362 @@ export default function StaffSalaryPage() {
               </div>
             </div>
           </div>
-        )}
-
-        {activeTab === 'ledger' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-              <div className="card p-4 border-l-4 border-l-blue-500">
-                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Advance</p>
-                <p className="text-xl font-black text-blue-600">₹{txTotals.advance.toLocaleString()}</p>
-              </div>
-              <div className="card p-4 border-l-4 border-l-emerald-500">
-                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Salary Paid</p>
-                <p className="text-xl font-black text-emerald-600">₹{txTotals.salary.toLocaleString()}</p>
-              </div>
-              <div className="card p-4 border-l-4 border-l-amber-500">
-                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Bonus</p>
-                <p className="text-xl font-black text-amber-600">₹{txTotals.bonus.toLocaleString()}</p>
-              </div>
-              <div className="card p-4 border-l-4 border-l-red-500">
-                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Deductions</p>
-                <p className="text-xl font-black text-red-600">₹{txTotals.deduction.toLocaleString()}</p>
-              </div>
-              <div className="card p-4 border-l-4 border-l-ember bg-ember/5">
-                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Amount</p>
-                <p className="text-xl font-black text-ember">₹{txTotals.total.toLocaleString()}</p>
-              </div>
+          <div className="mt-6">
+            <h2 className="text-xl font-black text-ink-900 dark:text-white mb-4">Transaction Ledger</h2>
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="card p-4 border-l-4 border-l-blue-500">
+              <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Advance</p>
+              <p className="text-xl font-black text-blue-600">₹{txTotals.advance.toLocaleString()}</p>
+            </div>
+            <div className="card p-4 border-l-4 border-l-emerald-500">
+              <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Salary Paid</p>
+              <p className="text-xl font-black text-emerald-600">₹{txTotals.salary.toLocaleString()}</p>
+            </div>
+            <div className="card p-4 border-l-4 border-l-amber-500">
+              <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Bonus</p>
+              <p className="text-xl font-black text-amber-600">₹{txTotals.bonus.toLocaleString()}</p>
+            </div>
+            <div className="card p-4 border-l-4 border-l-red-500">
+              <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Deductions</p>
+              <p className="text-xl font-black text-red-600">₹{txTotals.deduction.toLocaleString()}</p>
+            </div>
+            <div className="card p-4 border-l-4 border-l-ember bg-ember/5">
+              <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Total Amount</p>
+              <p className="text-xl font-black text-ember">₹{txTotals.total.toLocaleString()}</p>
+            </div>
             </div>
 
-            <div className="flex flex-col lg:flex-row gap-4 items-end bg-white dark:bg-ink-900 p-4 rounded-2xl border border-ink-200 dark:border-ink-800 shadow-sm">
-              <div className="flex-1 w-full">
-                <label className="label text-[10px]">Filter by Staff</label>
-                <select className="input text-sm" value={txFilters.worker_id} onChange={e=>setTxFilters({...txFilters, worker_id: e.target.value})}>
-                  <option value="">All Staff</option>
-                  {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
-              </div>
-              <div className="flex-1 w-full">
-                <label className="label text-[10px]">Type</label>
-                <select className="input text-sm" value={txFilters.type} onChange={e=>setTxFilters({...txFilters, type: e.target.value})}>
-                  <option value="All">All Types</option>
-                  <option value="SALARY">Salary</option>
-                  <option value="ADVANCE">Advance</option>
-                  <option value="BONUS">Bonus</option>
-                  <option value="DEDUCTION">Deduction</option>
-                </select>
-              </div>
-              <div className="flex-1 w-full">
-                <label className="label text-[10px]">From</label>
-                <input type="date" className="input text-sm" value={txFilters.dateFrom} onChange={e=>setTxFilters({...txFilters, dateFrom: e.target.value})} />
-              </div>
-              <div className="flex-1 w-full">
-                <label className="label text-[10px]">To</label>
-                <input type="date" className="input text-sm" value={txFilters.dateTo} onChange={e=>setTxFilters({...txFilters, dateTo: e.target.value})} />
-              </div>
-              <div className="flex-1 w-full relative">
-                <Search size={14} className="absolute left-3 top-10 text-ink-400" />
-                <input type="text" className="input text-sm pl-9" placeholder="Search notes..." value={txFilters.search} onChange={e=>setTxFilters({...txFilters, search: e.target.value})} />
-              </div>
+              <div className="flex flex-col lg:flex-row gap-4 items-end bg-white dark:bg-ink-900 p-4 rounded-2xl border border-ink-200 dark:border-ink-800 shadow-sm">
+            <div className="flex-1 w-full">
+              <label className="label text-[10px]">Filter by Staff</label>
+              <select className="input text-sm" value={txFilters.worker_id} onChange={e => setTxFilters({ ...txFilters, worker_id: e.target.value })}>
+                <option value="">All Staff</option>
+                {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
             </div>
+            <div className="flex-1 w-full">
+              <label className="label text-[10px]">Type</label>
+              <select className="input text-sm" value={txFilters.type} onChange={e => setTxFilters({ ...txFilters, type: e.target.value })}>
+                <option value="All">All Types</option>
+                <option value="SALARY">Salary</option>
+                <option value="ADVANCE">Advance</option>
+                <option value="BONUS">Bonus</option>
+                <option value="DEDUCTION">Deduction</option>
+              </select>
+            </div>
+            <div className="flex-1 w-full">
+              <label className="label text-[10px]">From</label>
+              <input type="date" className="input text-sm" value={txFilters.dateFrom} onChange={e => setTxFilters({ ...txFilters, dateFrom: e.target.value })} />
+            </div>
+            <div className="flex-1 w-full">
+              <label className="label text-[10px]">To</label>
+              <input type="date" className="input text-sm" value={txFilters.dateTo} onChange={e => setTxFilters({ ...txFilters, dateTo: e.target.value })} />
+            </div>
+            <div className="flex-1 w-full relative">
+              <Search size={14} className="absolute left-3 top-10 text-ink-400" />
+              <input type="text" className="input text-sm pl-9" placeholder="Search notes..." value={txFilters.search} onChange={e => setTxFilters({ ...txFilters, search: e.target.value })} />
+            </div>
+              </div>
 
-            <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-ink-50 dark:bg-ink-950/50">
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Date / Time</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Staff Member</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Type</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Mode</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Amount</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-                  {filteredTransactions.map(t => (
-                    <tr key={t.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors group">
-                      <td className="px-4 py-4">
-                        <p className="text-xs font-bold text-ink-900 dark:text-white">{new Date(t.created_at).toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'})}</p>
-                        <p className="text-[10px] text-ink-400 uppercase font-black">{new Date(t.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <p className="font-bold text-sm text-ink-900 dark:text-white">{t.workers?.name}</p>
-                        <p className="text-[10px] text-ink-500 font-bold uppercase">{t.workers?.role}</p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
-                          t.type === 'SALARY' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                          t.type === 'ADVANCE' ? 'bg-blue-50 text-blue-600 border-blue-100' :
-                          t.type === 'BONUS' ? 'bg-amber-50 text-amber-600 border-amber-100' :
-                          'bg-red-50 text-red-600 border-red-100'
-                        }`}>{t.type}</span>
-                      </td>
-                      <td className="px-4 py-4 text-xs font-black text-ink-400 uppercase tracking-tighter">{t.payment_mode}</td>
-                      <td className="px-4 py-4 text-right">
-                        <p className={`font-black text-sm ${t.type === 'DEDUCTION' ? 'text-red-500' : 'text-emerald-500'}`}>
-                          {t.type === 'DEDUCTION' ? '-' : '+'}₹{Number(t.amount).toLocaleString('en-IN')}
-                        </p>
-                        {t.notes && <p className="text-[9px] text-ink-400 italic mt-0.5 truncate max-w-[120px] ml-auto">"{t.notes}"</p>}
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        <button onClick={() => deleteTransaction(t.id)} className="p-1.5 text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12}/></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredTransactions.length === 0 && (
-                    <tr><td colSpan="6" className="py-20 text-center text-ink-400 italic text-sm">No transactions found. Adjust filters or log a new one.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'attendance' && (
-          <div className="space-y-6">
-            <div className="bg-gradient-to-r from-ink-900 to-ink-800 p-6 rounded-2xl border border-ink-700 shadow-xl flex justify-between items-center text-white">
-              <div>
-                <h2 className="text-xl font-black tracking-tight">Daily Attendance Tracking</h2>
-                <p className="text-ink-400 text-xs mt-1 font-semibold uppercase tracking-widest">Date: {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] font-black text-ember uppercase tracking-widest mb-1">Today's Clock-in Code</p>
-                <div className="text-4xl font-black text-white bg-white/10 px-6 py-2 rounded-xl border border-white/20 letter-spacing-widest">
-                  {dayCode}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-ink-50 dark:bg-ink-950/50">
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Worker</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Role</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Clock In</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Clock Out</th>
-                    <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Status / Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-                  {workers.filter(w=>w.is_active).map(w => {
-                    const shift = shifts.find(s => s.worker_id === w.id && !s.clock_out)
-                    const completedShift = shifts.find(s => s.worker_id === w.id && s.clock_out)
-                    return (
-                      <tr key={w.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
-                        <td className="px-4 py-4 font-bold text-sm text-ink-900 dark:text-white">{w.name}</td>
-                        <td className="px-4 py-4 text-xs font-semibold text-ink-500 uppercase">{w.role}</td>
-                        <td className="px-4 py-4 text-center font-mono text-sm">
-                          {shift ? new Date(shift.clock_in).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 
-                           completedShift ? new Date(completedShift.clock_in).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--:--'}
-                        </td>
-                        <td className="px-4 py-4 text-center font-mono text-sm">
-                          {completedShift ? new Date(completedShift.clock_out).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '--:--'}
-                        </td>
-                        <td className="px-4 py-4 text-right">
-                          {!shift && !completedShift && (
-                            <button onClick={()=>clockIn(w.id)} className="text-xs font-black text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-100 tracking-wider uppercase">Clock In</button>
-                          )}
-                          {shift && !completedShift && (
-                            <button onClick={()=>clockOut(shift.id)} className="text-xs font-black text-amber-600 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-100 tracking-wider uppercase">Clock Out</button>
-                          )}
-                          {completedShift && <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">Shift Completed</span>}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        {activeTab === 'access' && (
-          <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+              <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-ink-50 dark:bg-ink-950/50">
-                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Username</th>
-                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Role</th>
-                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Branch Scope</th>
-                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Status</th>
-                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Actions</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Date / Time</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Staff Member</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Type</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Mode</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Amount</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-                {users.map(u => (
-                  <tr key={u.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors group">
-                    <td className="px-4 py-4 font-bold text-sm text-ink-900 dark:text-white">@{u.username}</td>
+                {filteredTransactions.map(t => (
+                  <tr key={t.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors group">
                     <td className="px-4 py-4">
-                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${u.role === 'super_admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>{u.role}</span>
+                      <p className="text-xs font-bold text-ink-900 dark:text-white">{new Date(t.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                      <p className="text-[10px] text-ink-400 uppercase font-black">{new Date(t.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</p>
                     </td>
-                    <td className="px-4 py-4 text-xs font-bold text-ink-500 uppercase">{u.branch_id || 'Global / All'}</td>
-                    <td className="px-4 py-4 text-center">
-                      {u.is_active ? <span className="text-emerald-500 font-bold text-[10px] uppercase">Active</span> : <span className="text-red-500 font-bold text-[10px] uppercase">Disabled</span>}
+                    <td className="px-4 py-4">
+                      <p className="font-bold text-sm text-ink-900 dark:text-white">{t.workers?.name}</p>
+                      <p className="text-[10px] text-ink-500 font-bold uppercase">{t.workers?.role}</p>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${t.type === 'SALARY' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                        t.type === 'ADVANCE' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                          t.type === 'BONUS' ? 'bg-amber-50 text-amber-600 border-amber-100' :
+                            'bg-red-50 text-red-600 border-red-100'
+                        }`}>{t.type}</span>
+                    </td>
+                    <td className="px-4 py-4 text-xs font-black text-ink-400 uppercase tracking-tighter">{t.payment_mode}</td>
+                    <td className="px-4 py-4 text-right">
+                      <p className={`font-black text-base ${t.type === 'DEDUCTION' ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        {t.type === 'DEDUCTION' ? '-' : '+'}₹{t.amount.toLocaleString()}
+                      </p>
+                      {t.notes && <p className="text-[10px] text-ink-400 truncate max-w-[120px] ml-auto">{t.notes}</p>}
                     </td>
                     <td className="px-4 py-4 text-right">
-                      <div className="flex justify-end items-center gap-2">
-                        {isAdmin && u.role !== 'super_admin' && (
-                          <button 
-                            onClick={() => toggleUserStatus(u.id, u.is_active)}
-                            className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all active:scale-95 ${u.is_active ? 'text-amber-500 border-amber-200 bg-amber-50 hover:bg-amber-100' : 'text-emerald-500 border-emerald-200 bg-emerald-50 hover:bg-emerald-100'}`}
-                          >
-                            {u.is_active ? 'Disable' : 'Enable'}
-                          </button>
-                        )}
-                        {isAdmin && u.role !== 'super_admin' && (
-                          <button onClick={() => { setEditingUser(u); setUserForm({ ...u, password: '' }); setShowUserForm(true); }} className="p-1.5 text-ink-400 hover:text-ember opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={14}/></button>
-                        )}
-                        {isAdmin && u.role !== 'super_admin' && (
-                          <button onClick={() => deleteUser(u.id)} className="p-1.5 text-ink-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
-                        )}
-                      </div>
+                      <button onClick={() => deleteTransaction(t.id)} className="p-1.5 text-ink-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
                     </td>
                   </tr>
                 ))}
+                {filteredTransactions.length === 0 && (
+                  <tr><td colSpan="6" className="py-12 text-center text-ink-400 italic text-sm">No transactions found</td></tr>
+                )}
               </tbody>
             </table>
+              </div>
+            </div>
           </div>
+        </>
         )}
+
+        {activeTab === 'attendance' && (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-ink-900 to-ink-800 p-6 rounded-2xl border border-ink-700 shadow-xl flex justify-between items-center text-white">
+          <div>
+            <h2 className="text-xl font-black tracking-tight">Daily Attendance Tracking</h2>
+            <p className="text-ink-400 text-xs mt-1 font-semibold uppercase tracking-widest">Date: {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-black text-ember uppercase tracking-widest mb-1">Today's Clock-in Code</p>
+            <div className="text-4xl font-black text-white bg-white/10 px-6 py-2 rounded-xl border border-white/20 letter-spacing-widest">
+              {dayCode}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-ink-50 dark:bg-ink-950/50">
+                <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Worker</th>
+                <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Role</th>
+                <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Clock In</th>
+                <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Clock Out</th>
+                <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Status / Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+              {workers.filter(w => w.is_active).map(w => {
+                const shift = shifts.find(s => s.worker_id === w.id && !s.clock_out)
+                const completedShift = shifts.find(s => s.worker_id === w.id && s.clock_out)
+                return (
+                  <tr key={w.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
+                    <td className="px-4 py-4 font-bold text-sm text-ink-900 dark:text-white">{w.name}</td>
+                    <td className="px-4 py-4 text-xs font-semibold text-ink-500 uppercase">{w.role}</td>
+                    <td className="px-4 py-4 text-center font-mono text-sm">
+                      {shift ? new Date(shift.clock_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) :
+                        completedShift ? new Date(completedShift.clock_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                    </td>
+                    <td className="px-4 py-4 text-center font-mono text-sm">
+                      {completedShift ? new Date(completedShift.clock_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      {!shift && !completedShift && (
+                        <button onClick={() => clockIn(w.id)} className="text-xs font-black text-emerald-600 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-100 tracking-wider uppercase">Clock In</button>
+                      )}
+                      {shift && !completedShift && (
+                        <button onClick={() => clockOut(shift.id)} className="text-xs font-black text-amber-600 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-100 tracking-wider uppercase">Clock Out</button>
+                      )}
+                      {completedShift && <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">Shift Completed</span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
+    )
+  }
+  {
+    activeTab === 'access' && (
+      <div className="bg-white dark:bg-ink-900 rounded-2xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-ink-50 dark:bg-ink-950/50">
+              <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Username</th>
+              <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Role</th>
+              <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase">Branch Scope</th>
+              <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-center">Status</th>
+              <th className="px-4 py-3 text-[10px] font-black text-ink-400 uppercase text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+            {users.map(u => (
+              <tr key={u.id} className="hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors group">
+                <td className="px-4 py-4 font-bold text-sm text-ink-900 dark:text-white">@{u.username}</td>
+                <td className="px-4 py-4">
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${u.role === 'super_admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>{u.role}</span>
+                </td>
+                <td className="px-4 py-4 text-xs font-bold text-ink-500 uppercase">{u.branch_id || 'Global / All'}</td>
+                <td className="px-4 py-4 text-center">
+                  {u.is_active ? <span className="text-emerald-500 font-bold text-[10px] uppercase">Active</span> : <span className="text-red-500 font-bold text-[10px] uppercase">Disabled</span>}
+                </td>
+                <td className="px-4 py-4 text-right">
+                  <div className="flex justify-end items-center gap-2">
+                    {isAdmin && u.role !== 'super_admin' && (
+                      <button
+                        onClick={() => toggleUserStatus(u.id, u.is_active)}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all active:scale-95 ${u.is_active ? 'text-amber-500 border-amber-200 bg-amber-50 hover:bg-amber-100' : 'text-emerald-500 border-emerald-200 bg-emerald-50 hover:bg-emerald-100'}`}
+                      >
+                        {u.is_active ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
+                    {isAdmin && u.role !== 'super_admin' && (
+                      <button onClick={() => { setEditingUser(u); setUserForm({ ...u, password: '' }); setShowUserForm(true); }} className="p-1.5 text-ink-400 hover:text-ember opacity-0 group-hover:opacity-100 transition-all"><Edit2 size={14} /></button>
+                    )}
+                    {isAdmin && u.role !== 'super_admin' && (
+                      <button onClick={() => deleteUser(u.id)} className="p-1.5 text-ink-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+      </div >
 
-      {/* Forms Overlay / Modals */}
-      {showWorkerForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <form onSubmit={handleSaveWorker} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
-            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
-              <h3 className="font-bold text-ink-900 dark:text-white">{editingWorker ? 'Edit Staff Member' : 'Add New Staff Member'}</h3>
-              <button type="button" onClick={() => setShowWorkerForm(false)} className="text-ink-400 hover:text-ink-900"><X size={20}/></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div><label className="label">Full Name</label><input required type="text" className="input" placeholder="e.g. Ramesh Kumar" value={workerForm.name} onChange={e=>setWorkerForm({...workerForm, name: e.target.value})} /></div>
-              <div><label className="label">Role</label><input required type="text" className="input" placeholder="e.g. Head Chef" value={workerForm.role} onChange={e=>setWorkerForm({...workerForm, role: e.target.value})} /></div>
-              <div><label className="label">Base Salary (per month)</label><input required type="number" className="input" placeholder="₹" value={workerForm.base_salary} onChange={e=>setWorkerForm({...workerForm, base_salary: e.target.value})} /></div>
-              {isSuperAdmin && (
-                <div><label className="label">Assign to Branch</label>
-                  <select className="input" value={workerForm.branch_id} onChange={e=>setWorkerForm({...workerForm, branch_id: e.target.value})}>
-                    <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
-                  </select>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="worker_active" checked={workerForm.is_active} onChange={e=>setWorkerForm({...workerForm, is_active: e.target.checked})} />
-                <label htmlFor="worker_active" className="text-sm font-bold text-ink-700 dark:text-ink-300">Staff is currently active</label>
-              </div>
-            </div>
-            <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
-              <button type="button" onClick={() => setShowWorkerForm(false)} className="btn-secondary flex-1">Cancel</button>
-              <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : editingWorker ? 'Update' : 'Add Worker'}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {showUserForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <form onSubmit={handleSaveUser} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
-            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
-              <h3 className="font-bold text-ink-900 dark:text-white">{editingUser ? 'Edit User Access' : 'Create System Login'}</h3>
-              <button type="button" onClick={() => setShowUserForm(false)} className="text-ink-400 hover:text-ink-900"><X size={20}/></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div><label className="label">Username</label><input required type="text" className="input lowercase" placeholder="e.g. bhat_manager" value={userForm.username} onChange={e=>setUserForm({...userForm, username: e.target.value.replace(/\s+/g,'_')})} /></div>
-              <div>
-                <label className="label">{editingUser ? 'New Password (leave blank to keep current)' : 'Temporary Password'}</label>
-                <div className="relative">
-                  <input required={!editingUser} type="text" className="input pr-10" placeholder="Set password" value={userForm.password} onChange={e=>setUserForm({...userForm, password: e.target.value})} />
-                  <Key size={16} className="absolute right-3 top-3.5 text-ink-300" />
-                </div>
-              </div>
-              <div><label className="label">System Role</label>
-                <select className="input" value={userForm.role} onChange={e=>setUserForm({...userForm, role: e.target.value})} disabled={!isSuperAdmin && editingUser?.role === 'super_admin'}>
-                  <option value="manager">Manager</option>
-                  <option value="admin">Admin</option>
-                  {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+    {/* Forms Overlay / Modals */ }
+  {
+    showWorkerForm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <form onSubmit={handleSaveWorker} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+          <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+            <h3 className="font-bold text-ink-900 dark:text-white">{editingWorker ? 'Edit Staff Member' : 'Add New Staff Member'}</h3>
+            <button type="button" onClick={() => setShowWorkerForm(false)} className="text-ink-400 hover:text-ink-900"><X size={20} /></button>
+          </div>
+          <div className="p-6 space-y-4">
+            <div><label className="label">Full Name</label><input required type="text" className="input" placeholder="e.g. Ramesh Kumar" value={workerForm.name} onChange={e => setWorkerForm({ ...workerForm, name: e.target.value })} /></div>
+            <div><label className="label">Role</label><input required type="text" className="input" placeholder="e.g. Head Chef" value={workerForm.role} onChange={e => setWorkerForm({ ...workerForm, role: e.target.value })} /></div>
+            <div><label className="label">Base Salary (per month)</label><input required type="number" className="input" placeholder="₹" value={workerForm.base_salary} onChange={e => setWorkerForm({ ...workerForm, base_salary: e.target.value })} /></div>
+            {isSuperAdmin && (
+              <div><label className="label">Assign to Branch</label>
+                <select className="input" value={workerForm.branch_id} onChange={e => setWorkerForm({ ...workerForm, branch_id: e.target.value })}>
+                  <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
                 </select>
               </div>
-              {isSuperAdmin && (
-                <div><label className="label">Login Branch Access</label>
-                  <select className="input" value={userForm.branch_id} onChange={e=>setUserForm({...userForm, branch_id: e.target.value})}>
-                    <option value="">Global / All</option>
-                    <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
-                  </select>
-                </div>
-              )}
+            )}
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="worker_active" checked={workerForm.is_active} onChange={e => setWorkerForm({ ...workerForm, is_active: e.target.checked })} />
+              <label htmlFor="worker_active" className="text-sm font-bold text-ink-700 dark:text-ink-300">Staff is currently active</label>
             </div>
-            <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
-              <button type="button" onClick={() => setShowUserForm(false)} className="btn-secondary flex-1">Cancel</button>
-              <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : editingUser ? 'Update Login' : 'Create Login'}</button>
-            </div>
-          </form>
-        </div>
-      )}
-      {showTxForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <form onSubmit={handleSaveTransaction} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
-            <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
-              <div>
-                <h3 className="font-bold text-ink-900 dark:text-white">Log Staff Transaction</h3>
-                <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest mt-0.5">Advance, Salary, Bonus, etc.</p>
+          </div>
+          <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
+            <button type="button" onClick={() => setShowWorkerForm(false)} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : editingWorker ? 'Update' : 'Add Worker'}</button>
+          </div>
+        </form>
+      </div>
+    )
+  }
+
+  {
+    showUserForm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <form onSubmit={handleSaveUser} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+          <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+            <h3 className="font-bold text-ink-900 dark:text-white">{editingUser ? 'Edit User Access' : 'Create System Login'}</h3>
+            <button type="button" onClick={() => setShowUserForm(false)} className="text-ink-400 hover:text-ink-900"><X size={20} /></button>
+          </div>
+          <div className="p-6 space-y-4">
+            <div><label className="label">Username</label><input required type="text" className="input lowercase" placeholder="e.g. bhat_manager" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value.replace(/\s+/g, '_') })} /></div>
+            <div>
+              <label className="label">{editingUser ? 'New Password (leave blank to keep current)' : 'Temporary Password'}</label>
+              <div className="relative">
+                <input required={!editingUser} type="text" className="input pr-10" placeholder="Set password" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} />
+                <Key size={16} className="absolute right-3 top-3.5 text-ink-300" />
               </div>
-              <button type="button" onClick={() => { setShowTxForm(false); setEditingUser(null); }} className="text-ink-400 hover:text-ink-900"><X size={20}/></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Date</label>
-                  <input required type="date" className="input" value={txForm.date} onChange={e=>setTxForm({...txForm, date: e.target.value})} />
-                </div>
-                <div>
-                  <label className="label">Transaction Type</label>
-                  <select className="input" value={txForm.type} onChange={e=>setTxForm({...txForm, type: e.target.value})}>
-                    <option value="ADVANCE">Advance Given</option>
-                    <option value="SALARY">Salary Payment</option>
-                    <option value="BONUS">Bonus / Reward</option>
-                    <option value="DEDUCTION">Deduction</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="label">Staff Member</label>
-                <select required className="input" value={txForm.worker_id} onChange={e=>setTxForm({...txForm, worker_id: e.target.value})}>
-                  <option value="">Select staff…</option>
-                  {workers.map(w => <option key={w.id} value={w.id}>{w.name} ({w.role})</option>)}
+            <div><label className="label">System Role</label>
+              <select className="input" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value })} disabled={!isSuperAdmin && editingUser?.role === 'super_admin'}>
+                <option value="manager">Manager</option>
+                <option value="admin">Admin</option>
+                {isSuperAdmin && <option value="super_admin">Super Admin</option>}
+              </select>
+            </div>
+            {isSuperAdmin && (
+              <div><label className="label">Login Branch Access</label>
+                <select className="input" value={userForm.branch_id} onChange={e => setUserForm({ ...userForm, branch_id: e.target.value })}>
+                  <option value="">Global / All</option>
+                  <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Amount (₹)</label>
-                  <input required type="number" className="input font-bold" placeholder="0.00" value={txForm.amount} onChange={e=>setTxForm({...txForm, amount: e.target.value})} />
-                </div>
-                <div>
-                  <label className="label">Payment Mode</label>
-                  <select className="input" value={txForm.payment_mode} onChange={e=>setTxForm({...txForm, payment_mode: e.target.value})}>
-                    <option value="CASH">Cash</option>
-                    <option value="UPI">UPI / Online</option>
-                  </select>
-                </div>
+            )}
+          </div>
+          <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
+            <button type="button" onClick={() => setShowUserForm(false)} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : editingUser ? 'Update Login' : 'Create Login'}</button>
+          </div>
+        </form>
+      </div>
+    )
+  }
+  {
+    showTxForm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <form onSubmit={handleSaveTransaction} className="bg-white dark:bg-ink-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-slide-up">
+          <div className="px-6 py-4 border-b border-ink-100 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
+            <div>
+              <h3 className="font-bold text-ink-900 dark:text-white">Log Staff Transaction</h3>
+              <p className="text-[10px] font-black text-ink-400 uppercase tracking-widest mt-0.5">Advance, Salary, Bonus, etc.</p>
+            </div>
+            <button type="button" onClick={() => { setShowTxForm(false); setEditingUser(null); }} className="text-ink-400 hover:text-ink-900"><X size={20} /></button>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Date</label>
+                <input required type="date" className="input" value={txForm.date} onChange={e => setTxForm({ ...txForm, date: e.target.value })} />
               </div>
               <div>
-                <label className="label">Notes / Remarks</label>
-                <textarea className="input min-h-[80px]" placeholder="Optional notes about this payment..." value={txForm.notes} onChange={e=>setTxForm({...txForm, notes: e.target.value})} />
+                <label className="label">Transaction Type</label>
+                <select className="input" value={txForm.type} onChange={e => setTxForm({ ...txForm, type: e.target.value })}>
+                  <option value="ADVANCE">Advance Given</option>
+                  <option value="SALARY">Salary Payment</option>
+                  <option value="BONUS">Bonus / Reward</option>
+                  <option value="DEDUCTION">Deduction</option>
+                </select>
               </div>
             </div>
-            <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
-              <button type="button" onClick={() => { setShowTxForm(false); setEditingUser(null); }} className="btn-secondary flex-1">Cancel</button>
-              <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : 'Log Transaction'}</button>
+            <div>
+              <label className="label">Staff Member</label>
+              <select required className="input" value={txForm.worker_id} onChange={e => setTxForm({ ...txForm, worker_id: e.target.value })}>
+                <option value="">Select staff…</option>
+                {workers.map(w => <option key={w.id} value={w.id}>{w.name} ({w.role})</option>)}
+              </select>
             </div>
-          </form>
-        </div>
-      )}
-    </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Amount (₹)</label>
+                <input required type="number" className="input font-bold" placeholder="0.00" value={txForm.amount} onChange={e => setTxForm({ ...txForm, amount: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Payment Mode</label>
+                <select className="input" value={txForm.payment_mode} onChange={e => setTxForm({ ...txForm, payment_mode: e.target.value })}>
+                  <option value="CASH">Cash</option>
+                  <option value="UPI">UPI / Online</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="label">Notes / Remarks</label>
+              <textarea className="input min-h-[80px]" placeholder="Optional notes about this payment..." value={txForm.notes} onChange={e => setTxForm({ ...txForm, notes: e.target.value })} />
+            </div>
+          </div>
+          <div className="p-6 bg-ink-50 dark:bg-ink-950/50 flex gap-3">
+            <button type="button" onClick={() => { setShowTxForm(false); setEditingUser(null); }} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" className="btn-primary flex-1 py-3" disabled={saving}>{saving ? 'Saving...' : 'Log Transaction'}</button>
+          </div>
+        </form>
+      </div>
+    )
+  }
+    </div >
   )
 }

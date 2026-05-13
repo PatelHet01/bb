@@ -135,6 +135,12 @@ ALTER TABLE announcements ADD COLUMN IF NOT EXISTS recorded_by TEXT;
 ALTER TABLE staff_transactions ADD COLUMN IF NOT EXISTS recorded_by TEXT;
 ALTER TABLE vendor_ledger ADD COLUMN IF NOT EXISTS recorded_by TEXT;
 
+-- 16. INVENTORY LOG RECORDED_BY
+ALTER TABLE inventory_log ADD COLUMN IF NOT EXISTS recorded_by TEXT;
+
+-- 17. CUSTOMER AVATAR
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+
 -- 14. Fix vendor_ledger missing branch_id (Wait, it is already added in step 4 above, but just in case)
 ALTER TABLE vendor_ledger ADD COLUMN IF NOT EXISTS branch_id TEXT REFERENCES branches(id);
 
@@ -194,6 +200,12 @@ BEGIN
   WHERE id = p_item_id;
 END;
 $$ LANGUAGE plpgsql;
+
+NOTIFY pgrst, 'reload schema';
+
+-- 19. UNITS PER BOX — for pack-based items (cigarettes, etc.)
+-- Stores how many units are in one box/pack. Default 1 = no pack logic.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS units_per_box INT DEFAULT 1;
 
 NOTIFY pgrst, 'reload schema';
 

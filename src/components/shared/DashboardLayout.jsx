@@ -9,6 +9,7 @@ import {
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import OrderNotificationOverlay from './OrderNotificationOverlay'
+import BBLogo from './BBLogo'
 
 const NAV_GROUPS = [
   {
@@ -117,11 +118,9 @@ export default function DashboardLayout() {
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-dash-border dark:border-dash-borderDark">
+      <div className="px-4 py-4 border-b border-dash-border dark:border-dash-borderDark">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-dash-primary dark:bg-white rounded-lg flex items-center justify-center flex-shrink-0">
-            <span className="text-sm">🪑</span>
-          </div>
+          <BBLogo size={38} animate />
           <div className="min-w-0">
             <p className="font-bold text-dash-text dark:text-dash-textDark text-sm truncate">Bombay Bethak</p>
             <p className="text-[10px] text-dash-muted dark:text-dash-mutedDark font-medium uppercase tracking-wider">{branchName}</p>

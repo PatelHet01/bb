@@ -25,6 +25,7 @@ export default function MyBethakDashboard() {
   const [advLedger, setAdvLedger] = useState([])
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
   useEffect(() => {
     if (!customer) { navigate('/my-bethak'); return }
@@ -37,10 +38,48 @@ export default function MyBethakDashboard() {
       setKhataLedger(kRes.data || [])
       setAdvLedger(aRes.data || [])
       setOrders(oRes.data || [])
+      setOrders(oRes.data || [])
       setLoading(false)
     }
     fetch()
   }, [customer])
+
+  async function handleAvatarUpload(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploadingAvatar(true)
+    try {
+      const reader = new FileReader()
+      reader.onload = async (event) => {
+        const img = new Image()
+        img.onload = async () => {
+          const canvas = document.createElement('canvas')
+          const MAX_SIZE = 150
+          let width = img.width
+          let height = img.height
+          if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } } 
+          else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, width, height)
+          const base64Avatar = canvas.toDataURL('image/jpeg', 0.8)
+          
+          const { error } = await supabase.from('customers').update({ avatar_url: base64Avatar }).eq('id', customer.id)
+          if (error) throw error
+          
+          useCustomerStore.getState().setCustomer({ ...customer, avatar_url: base64Avatar })
+          toast.success('Profile picture updated!')
+          setUploadingAvatar(false)
+        }
+        img.src = event.target.result
+      }
+      reader.readAsDataURL(file)
+    } catch (err) {
+      toast.error('Failed to update picture: ' + err.message)
+      setUploadingAvatar(false)
+    }
+  }
 
   const rawKhata = khataLedger.reduce((s, l) => l.type === 'CREDIT' ? s + Number(l.amount) : s - Number(l.amount), 0)
   const rawAdv = advLedger.reduce((s, l) => l.type === 'TOPUP' ? s + Number(l.amount) : s - Number(l.amount), 0)
@@ -74,9 +113,17 @@ export default function MyBethakDashboard() {
       <div style={S.container}>
         {/* Profile strip */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...S.card, display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-          <div style={{ width: '52px', height: '52px', border: '1px solid rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', fontWeight: 900, flexShrink: 0 }}>
-            {customer.name[0].toUpperCase()}
-          </div>
+          <label style={{ cursor: 'pointer', position: 'relative' }}>
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+            <div style={{ width: '52px', height: '52px', border: '1px solid rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', fontWeight: 900, flexShrink: 0, overflow: 'hidden', opacity: uploadingAvatar ? 0.5 : 1 }}>
+              {customer.avatar_url ? (
+                <img src={customer.avatar_url} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                customer.name[0].toUpperCase()
+              )}
+            </div>
+            {uploadingAvatar && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '0.7rem' }}>...</div>}
+          </label>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ fontWeight: 800, fontSize: '1.1rem' }}>{customer.name}</p>
             <p style={{ ...S.label, marginTop: '0.1rem' }}>@{customer.username} · {customer.mobile_number}</p>

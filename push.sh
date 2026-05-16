@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Get current version from package.json
-VERSION=$(node -p "require('./package.json').version")
+VERSION=$(jq -r .version package.json)
 IFS='.' read -r major minor patch <<< "$VERSION"
 
 # Custom Increment Logic: 0.0.9 -> 0.1.0
@@ -22,7 +22,7 @@ fi
 NEW_VERSION="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
 
 # Update package.json
-node -e "const pkg = require('./package.json'); pkg.version = '$NEW_VERSION'; require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');"
+jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
 
 # Git operations
 git add .

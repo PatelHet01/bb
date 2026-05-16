@@ -55,8 +55,6 @@ export default function BillingPage() {
   const [selectedTable, setSelectedTable] = useState(null) // { id, table_number, current_order_id }
   const [loadingTable, setLoadingTable] = useState(false)
   const isBhatBranch = (branchId || selectedBranch) === 'bhat'
-  const [loadingTable, setLoadingTable] = useState(false)
-  const isBhatBranch = (branchId || selectedBranch) === 'bhat'
 
   // Order Management
   const [editingOrderId, setEditingOrderId] = useState(null)

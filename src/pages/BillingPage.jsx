@@ -49,10 +49,21 @@ export default function BillingPage() {
   const [showOrdersModal, setShowOrdersModal] = useState(false)
   const [recentOrders, setRecentOrders] = useState([])
 
-  const total = cart.reduce((s, c) => {
+  // Discounts
+  const [discountType, setDiscountType] = useState('FLAT') // 'FLAT' or 'PERCENT'
+  const [discountValue, setDiscountValue] = useState(0)
+
+  // Offers
+  const [activeOffers, setActiveOffers] = useState([])
+
+  const subtotal = cart.reduce((s, c) => {
     const isPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
     return s + (isPack ? (c.pack_price || c.price) : c.price) * c.quantity
   }, 0)
+
+  const calculatedDiscount = discountType === 'PERCENT' ? (subtotal * (discountValue / 100)) : discountValue
+  const total = Math.max(0, subtotal - calculatedDiscount)
+
   const totalPaid = payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
 
   // Cash denomination helper state (UI only, never stored)
@@ -82,9 +93,10 @@ export default function BillingPage() {
   }, [total])
 
   useEffect(() => {
+    const targetBranch = branchId || selectedBranch
+
     async function fetchInventory() {
       setLoading(true)
-      const targetBranch = branchId || selectedBranch
       const { data } = await supabase.from('items').select('*')
         .eq('branch_id', targetBranch)
         .neq('category', 'Inventory')
@@ -92,9 +104,23 @@ export default function BillingPage() {
         .eq('is_archived', false)
         .neq('item_type', 'RAW_MATERIAL')
       setItems(data || [])
+      
+      const { data: offersData } = await supabase.from('offers').select('*, offer_items(*, items(*))')
+        .eq('is_active', true)
+        .or(`branch_id.eq.${targetBranch},branch_id.is.null`)
+      setActiveOffers(offersData || [])
+      
       setLoading(false)
     }
     fetchInventory()
+
+    const filter = (targetBranch && targetBranch !== 'All Branches') ? `branch_id=eq.${targetBranch}` : undefined
+    const ch = supabase.channel('billing_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter }, () => fetchInventory())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'offers', filter }, () => fetchInventory())
+      .subscribe()
+
+    return () => supabase.removeChannel(ch)
   }, [branchId, selectedBranch])
 
   // Fetch cafe tables for Bhat
@@ -269,6 +295,14 @@ export default function BillingPage() {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - qty } : i))
   }
 
+  function handleOfferTap(offer) {
+    setCart(prev => {
+      const idx = prev.findIndex(c => c.id === offer.id)
+      if (idx >= 0) return prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + 1 } : c)
+      return [{ ...offer, isOffer: true, quantity: 1, stock_quantity: 999, category: 'Offer', subcategory: 'Combo' }, ...prev]
+    })
+  }
+
   function updateQty(id, delta) {
     setCart(prev => prev.map(c => c.id === id ? { ...c, quantity: c.quantity + delta } : c).filter(c => c.quantity > 0))
     // Restore stock if removing from cart
@@ -365,7 +399,7 @@ export default function BillingPage() {
       if (editingOrderId || selectedTable?.current_order_id) {
         const orderIdToUpdate = editingOrderId || selectedTable.current_order_id
         const { data: updatedOrder, error } = await supabase.from('orders')
-          .update({ customer_id: customer?.id || null, subtotal: total, total, status: 'completed', order_type: orderType })
+          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType })
           .eq('id', orderIdToUpdate)
           .select().single()
         if (error) throw error
@@ -378,17 +412,17 @@ export default function BillingPage() {
 
         // Replace order items with final cart
         await supabase.from('order_items').insert(cart.map(c => ({
-          order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
+          order_id: order.id, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.quantity * c.price
         })))
       } else {
         const { data: newOrder, error } = await supabase.from('orders').insert({
-          customer_id: customer?.id || null, branch_id: target_branch, subtotal: total, discount: 0, total, status: 'completed',
+          customer_id: customer?.id || null, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
           table_number: selectedTable?.table_number || null, order_type: orderType
         }).select().single()
         if (error) throw error
         order = newOrder
         await supabase.from('order_items').insert(cart.map(c => ({
-          order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.quantity * c.price
+          order_id: order.id, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.quantity * c.price
         })))
       }
       
@@ -397,16 +431,32 @@ export default function BillingPage() {
       let maggiBowlCount = 0;
 
       for (const c of cart) {
-        await supabase.rpc('decrement_stock', { p_item_id: c.id, p_amount: c.quantity })
-        
-        // Dynamic Recipe Ingredient Deduction
-        const { data: ingredients } = await supabase.from('item_ingredients')
-          .select('ingredient_item_id, quantity_per_unit').eq('item_id', c.id)
-        
-        if (ingredients && ingredients.length > 0) {
-          for (const ing of ingredients) {
-            const totalDeduction = ing.quantity_per_unit * c.quantity
-            await supabase.rpc('decrement_stock', { p_item_id: ing.ingredient_item_id, p_amount: totalDeduction })
+        if (c.isOffer) {
+          const { data: offerItems } = await supabase.from('offer_items').select('item_id, quantity').eq('offer_id', c.id)
+          if (offerItems) {
+            for (const oi of offerItems) {
+              await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: oi.quantity * c.quantity })
+              // Ingredients of combo items
+              const { data: ingredients } = await supabase.from('item_ingredients').select('ingredient_item_id, quantity_per_unit').eq('item_id', oi.item_id)
+              if (ingredients && ingredients.length > 0) {
+                for (const ing of ingredients) {
+                  await supabase.rpc('decrement_stock', { p_item_id: ing.ingredient_item_id, p_amount: ing.quantity_per_unit * (oi.quantity * c.quantity) })
+                }
+              }
+            }
+          }
+        } else {
+          await supabase.rpc('decrement_stock', { p_item_id: c.id, p_amount: c.quantity })
+          
+          // Dynamic Recipe Ingredient Deduction
+          const { data: ingredients } = await supabase.from('item_ingredients')
+            .select('ingredient_item_id, quantity_per_unit').eq('item_id', c.id)
+          
+          if (ingredients && ingredients.length > 0) {
+            for (const ing of ingredients) {
+              const totalDeduction = ing.quantity_per_unit * c.quantity
+              await supabase.rpc('decrement_stock', { p_item_id: ing.ingredient_item_id, p_amount: totalDeduction })
+            }
           }
         }
 
@@ -788,6 +838,45 @@ export default function BillingPage() {
             <div className="absolute inset-0 flex items-center justify-center"><div className="animate-spin text-4xl">⏳</div></div>
           ) : (
             <div className="space-y-6">
+              {/* Active Offers Ribbon */}
+              {activeOffers.length > 0 && (
+                <div className="bg-indigo-50/50 dark:bg-indigo-900/20 p-3 rounded-2xl border border-indigo-200 dark:border-indigo-800/50 mb-6">
+                  <h3 className="font-black text-indigo-900 dark:text-indigo-300 text-sm mb-3 uppercase tracking-wider px-1 flex items-center gap-2">🔥 Active Combos & Offers</h3>
+                  <div className="flex overflow-x-auto pb-2 -mx-1 px-1 gap-2 no-scrollbar snap-x">
+                    {activeOffers.map(offer => {
+                      const inCart = cart.find(c => c.id === offer.id)
+                      const qty = inCart ? inCart.quantity : 0
+                      return (
+                        <button key={offer.id} 
+                          onClick={() => handleOfferTap(offer)}
+                          className={`relative flex-shrink-0 snap-start w-[140px] h-[110px] flex flex-col justify-between p-2.5 rounded-xl text-left select-none transition-all
+                            ${qty > 0 ? 'bg-indigo-900 border-2 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 
+                              'bg-white dark:bg-zinc-800 border border-indigo-200 dark:border-indigo-700 hover:border-indigo-400'}
+                          `}>
+                          {qty > 0 && (
+                            <div className="absolute -top-2 -right-2 bg-indigo-500 text-white w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shadow-md z-10">
+                              {qty}
+                            </div>
+                          )}
+                          <div>
+                            <div className={`font-black text-sm leading-tight line-clamp-2 ${qty > 0 ? 'text-white' : 'text-zinc-900 dark:text-white'}`}>
+                              {offer.name}
+                            </div>
+                            <div className={`text-[10px] mt-0.5 font-bold ${qty > 0 ? 'text-indigo-200' : 'text-zinc-500'}`}>
+                              {offer.description || 'Combo Deal'}
+                            </div>
+                          </div>
+                          <div className="text-right mt-1">
+                            <span className={`font-black text-lg ${qty > 0 ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`}>₹{offer.price}</span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Regular Items */}
               {subcategories.map(sub => {
                 const subItems = activeItems.filter(i => i.subcategory === sub)
                 if (subItems.length === 0) return null
@@ -950,6 +1039,23 @@ export default function BillingPage() {
                       {type}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Discounts */}
+              <div className="bg-ink-50 dark:bg-ink-950 p-3 rounded-xl border border-ink-200 dark:border-ink-800">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Discount</span>
+                  <div className="flex bg-white dark:bg-ink-900 rounded p-0.5 border border-ink-200 dark:border-ink-800">
+                    <button onClick={() => setDiscountType('FLAT')} className={`px-2 py-0.5 text-xs font-bold rounded ${discountType === 'FLAT' ? 'bg-ember text-white' : 'text-ink-500'}`}>₹</button>
+                    <button onClick={() => setDiscountType('PERCENT')} className={`px-2 py-0.5 text-xs font-bold rounded ${discountType === 'PERCENT' ? 'bg-ember text-white' : 'text-ink-500'}`}>%</button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="number" min="0" step={discountType === 'PERCENT' ? '1' : '0.5'} className="input flex-1 text-right font-black" value={discountValue} onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)} placeholder="0" />
+                  {calculatedDiscount > 0 && (
+                    <span className="text-xs font-bold text-red-500">-₹{calculatedDiscount.toLocaleString('en-IN', {maximumFractionDigits:2})}</span>
+                  )}
                 </div>
               </div>
 

@@ -217,3 +217,34 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'SELLABLE';
 ALTER TABLE items ADD COLUMN IF NOT EXISTS pack_price NUMERIC(10,2) DEFAULT 0;
 
 NOTIFY pgrst, 'reload schema';
+
+-- 22. OFFERS & COMBOS (Feature #18)
+CREATE TABLE IF NOT EXISTS offers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id TEXT REFERENCES branches(id), -- NULL = global
+  name TEXT NOT NULL,
+  description TEXT,
+  offer_type TEXT NOT NULL DEFAULT 'COMBO_BUNDLE',
+  price NUMERIC(10,2) NOT NULL,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE offers DISABLE ROW LEVEL SECURITY;
+
+-- 23. OFFER ITEMS
+CREATE TABLE IF NOT EXISTS offer_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  offer_id UUID REFERENCES offers(id) ON DELETE CASCADE,
+  item_id UUID REFERENCES items(id) ON DELETE CASCADE,
+  quantity INT DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE offer_items DISABLE ROW LEVEL SECURITY;
+
+NOTIFY pgrst, 'reload schema';
+
+-- 24. MODIFY ORDER ITEMS FOR OFFERS
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS offer_id UUID REFERENCES offers(id);
+ALTER TABLE order_items ALTER COLUMN item_id DROP NOT NULL;
+
+NOTIFY pgrst, 'reload schema';

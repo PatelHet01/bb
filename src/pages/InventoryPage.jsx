@@ -67,7 +67,7 @@ export default function InventoryPage() {
 
   async function fetchItems() {
     let q = supabase.from('items').select('*').order('category').order('name')
-    if (branchId) q = q.eq('branch_id', branchId)
+    if (branchId && branchId !== 'All Branches') q = q.eq('branch_id', branchId)
     const { data } = await q
     setItems(data || [])
     setLoading(false)
@@ -87,8 +87,9 @@ export default function InventoryPage() {
     fetchCategories()
     
     // Realtime Sync
+    const filter = (branchId && branchId !== 'All Branches') ? `branch_id=eq.${branchId}` : undefined
     const chan = supabase.channel('items_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: branchId ? `branch_id=eq.${branchId}` : undefined }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter }, () => {
         // Debounce or just refetch
         fetchItems()
       })

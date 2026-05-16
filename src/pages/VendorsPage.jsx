@@ -35,7 +35,7 @@ export default function VendorsPage() {
 
   // Manual ledger entry form
   const [showLedgerForm, setShowLedgerForm] = useState(false)
-  const [ledgerForm, setLedgerForm] = useState({ type: 'PURCHASE', amount: '', reference: '' })
+  const [ledgerForm, setLedgerForm] = useState({ type: 'PURCHASE', amount: '', reference: '', created_at: '' })
   const [editingLedgerId, setEditingLedgerId] = useState(null)
 
   // Items tagged to vendor
@@ -46,7 +46,7 @@ export default function VendorsPage() {
   const [allItems, setAllItems] = useState([]) // all inventory items for this branch
   const [showPOForm, setShowPOForm] = useState(false)
   const [editingPO, setEditingPO] = useState(null) // PO being edited (draft only)
-  const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
+  const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '' })
   const [poLines, setPOLines] = useState([{ item_id: '', quantity: '', unit_price: '' }])
   const [expandedPO, setExpandedPO] = useState(null)
 
@@ -163,6 +163,9 @@ export default function VendorsPage() {
         created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
         recorded_by: user.username
       }
+      if (ledgerForm.created_at) {
+        payload.created_at = new Date(ledgerForm.created_at).toISOString()
+      }
       
       if (editingLedgerId) {
         if (!editingLedgerId) throw new Error("Missing entry ID for update");
@@ -179,7 +182,7 @@ export default function VendorsPage() {
       
       setShowLedgerForm(false)
       setEditingLedgerId(null)
-      setLedgerForm({ type: 'PURCHASE', amount: '', reference: '' })
+      setLedgerForm({ type: 'PURCHASE', amount: '', reference: '', created_at: '' })
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
   }
@@ -242,6 +245,8 @@ export default function VendorsPage() {
       const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
       const amtPaid = parseFloat(poForm.amount_paid) || 0
       const newStatus = receiveNow ? 'received' : 'draft'
+      const customDate = poForm.created_at ? new Date(poForm.created_at).toISOString() : undefined
+
       const { data: po, error: poErr } = await supabase.from('vendor_purchase_orders').insert({
         vendor_id: selectedVendor.id,
         branch_id: selectedVendor.branch_id || branchId || 'gurukul',
@@ -251,8 +256,9 @@ export default function VendorsPage() {
         payment_mode: poForm.payment_mode,
         invoice_ref: poForm.invoice_ref || null,
         notes: poForm.notes || null,
-        received_at: receiveNow ? new Date().toISOString() : null,
+        received_at: receiveNow ? (customDate || new Date().toISOString()) : null,
         recorded_by: user.username,
+        ...(customDate && { created_at: customDate })
       }).select().single()
       if (poErr) throw poErr
 
@@ -269,12 +275,12 @@ export default function VendorsPage() {
           const unitPricePerUnit = (parseFloat(l.unit_price) || 0) / unitsPerBox
           await applyWeightedCostPrice(l.item_id, qChange, unitPricePerUnit)
           await supabase.rpc('increment_stock', { p_item_id: l.item_id, p_amount: qChange })
-          await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
+          await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
         }
         // Auto vendor ledger entries
-        await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PURCHASE', amount: total, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+        await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PURCHASE', amount: total, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
         if (amtPaid > 0) {
-          await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PAYMENT', amount: amtPaid, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+          await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PAYMENT', amount: amtPaid, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
         }
       }
 
@@ -383,7 +389,8 @@ export default function VendorsPage() {
 
   function startEditPO(po) {
     setEditingPO(po)
-    setPOForm({ invoice_ref: po.invoice_ref || '', payment_mode: po.payment_mode || 'CREDIT', amount_paid: po.amount_paid || '', notes: po.notes || '' })
+    const localDateStr = po.created_at ? new Date(new Date(po.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''
+    setPOForm({ invoice_ref: po.invoice_ref || '', payment_mode: po.payment_mode || 'CREDIT', amount_paid: po.amount_paid || '', notes: po.notes || '', created_at: localDateStr })
     setPOLines((po.vendor_purchase_items || []).map(li => ({ id: li.id, item_id: li.item_id, quantity: String(li.quantity), unit_price: String(li.unit_price) })))
     setShowPOForm(true)
     setExpandedPO(null)
@@ -396,12 +403,14 @@ export default function VendorsPage() {
     setSaving(true)
     try {
       const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+      const customDate = poForm.created_at ? new Date(poForm.created_at).toISOString() : undefined
       await supabase.from('vendor_purchase_orders').update({
         total_amount: total,
         amount_paid: parseFloat(poForm.amount_paid) || 0,
         payment_mode: poForm.payment_mode,
         invoice_ref: poForm.invoice_ref || null,
         notes: poForm.notes || null,
+        ...(customDate && { created_at: customDate })
       }).eq('id', editingPO.id)
       // Replace all line items
       await supabase.from('vendor_purchase_items').delete().eq('purchase_order_id', editingPO.id)
@@ -411,7 +420,7 @@ export default function VendorsPage() {
       toast.success('Purchase order updated')
       setShowPOForm(false)
       setEditingPO(null)
-      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
+      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '' })
       setPOLines([{ item_id: '', quantity: '', unit_price: '' }])
       await refreshVendorData()
     } catch (err) { toast.error(err.message) }
@@ -622,7 +631,7 @@ export default function VendorsPage() {
           {/* Ledger entry form */}
           {showLedgerForm && (
             <form onSubmit={addLedgerEntry} className="p-4 bg-ink-50 dark:bg-ink-950/30 border-b border-ink-200 dark:border-ink-800 space-y-3 animate-slide-up">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
                   <label className="label">Type</label>
                   <select className="input text-sm" value={ledgerForm.type} onChange={e => setLedgerForm(p => ({...p, type: e.target.value}))}>
@@ -638,6 +647,10 @@ export default function VendorsPage() {
                 <div>
                   <label className="label">Reference</label>
                   <input className="input text-sm" value={ledgerForm.reference} onChange={e => setLedgerForm(p => ({...p, reference: e.target.value}))} placeholder="Invoice / note" />
+                </div>
+                <div>
+                  <label className="label">Date (Optional)</label>
+                  <input type="datetime-local" className="input text-sm" value={ledgerForm.created_at} onChange={e => setLedgerForm(p => ({...p, created_at: e.target.value}))} />
                 </div>
               </div>
               <div className="flex gap-2 justify-end">
@@ -672,7 +685,13 @@ export default function VendorsPage() {
                         {l.type === 'PURCHASE' ? '+' : '-'}₹{Number(l.amount).toLocaleString('en-IN')}
                       </div>
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={() => { setEditingLedgerId(l.id); setLedgerForm({ type: l.type, amount: l.amount, reference: l.reference || '' }); setShowLedgerForm(true); }} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
+                        <button onClick={() => { 
+                          const d = new Date(l.created_at);
+                          const localDateStr = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                          setEditingLedgerId(l.id); 
+                          setLedgerForm({ type: l.type, amount: l.amount, reference: l.reference || '', created_at: localDateStr }); 
+                          setShowLedgerForm(true); 
+                        }} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
                         <button onClick={() => deleteLedgerEntry(l.id)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={12}/></button>
                       </div>
                     </div>
@@ -696,6 +715,10 @@ export default function VendorsPage() {
                       <div>
                         <label className="label">Invoice / Bill Ref</label>
                         <input className="input text-sm" value={poForm.invoice_ref} onChange={e => setPOForm(p => ({...p, invoice_ref: e.target.value}))} placeholder="e.g. INV-001" />
+                      </div>
+                      <div>
+                        <label className="label">Date (Optional)</label>
+                        <input type="datetime-local" className="input text-sm" value={poForm.created_at} onChange={e => setPOForm(p => ({...p, created_at: e.target.value}))} />
                       </div>
                       <div>
                         <label className="label">Payment Mode</label>

@@ -23,6 +23,7 @@ const NAV_GROUPS = [
     title: 'OPERATIONS',
     items: [
       { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'], feature: 'inventory' },
+      { to: '/admin/offers',    label: 'Offers',       icon: Gift,            roles: ['super_admin','admin','manager'], feature: 'inventory' },
       { to: '/admin/orders',    label: 'Orders',        icon: ClipboardList,   roles: ['super_admin','admin'], feature: 'orders' },
       { to: '/kitchen',         label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'], feature: 'kitchen' }
     ]

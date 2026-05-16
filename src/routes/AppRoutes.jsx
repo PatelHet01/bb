@@ -24,6 +24,7 @@ import CafeOrderPage from '../pages/CafeOrderPage'
 import OrdersPage from '../pages/OrdersPage'
 import VendorsPage from '../pages/VendorsPage'
 import BranchTransfersPage from '../pages/BranchTransfersPage'
+import OffersPage from '../pages/OffersPage'
 
 function AdminRoute({ children, allowedRoles }) {
   const { user, role } = useAuthStore()
@@ -62,6 +63,7 @@ export default function AppRoutes() {
             <CustomersPage />
           </AdminRoute>
         } />
+        <Route path="offers" element={<OffersPage />} />
         
         {/* HR & Operations */}
         <Route path="hr" element={

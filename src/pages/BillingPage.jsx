@@ -20,43 +20,29 @@ export default function BillingPage() {
   const [items, setItems] = useState([])
   const [activeCategory, setActiveCategory] = useState(branchId === 'bhat' || selectedBranch === 'bhat' ? 'BB Cafe' : 'Paan')
 
-  // ── Multi-table cart map ───────────────────────────────────────────────────
-  // { [tableId]: { cart, customer, custBalances, orderType, discountType, discountValue, orderId } }
+  // ── Active Context States ──────────────────────────────────────────────────
+  const [cart, setCart] = useState([])
+  const [customer, setCustomer] = useState(null)
+  const [custBalances, setCustBalances] = useState({ khata: 0, advance: 0 })
+  const [orderType, setOrderType] = useState('Dine-in')
+  const [discountType, setDiscountType] = useState('FLAT')
+  const [discountValue, setDiscountValue] = useState(0)
+  
+  // ── Multi-table cart cache ─────────────────────────────────────────────────
+  // Used merely as a background cache to restore state when switching
   const [tableCarts, setTableCarts] = useState({})
-  // Standalone cart for Takeaway / Zomato orders (no table)
-  const [standaloneCart, setStandaloneCart] = useState([])
-
-  // Derived active cart — always read THIS instead of a raw cart state
-  const cart = selectedTable ? (tableCarts[selectedTable.id]?.cart || []) : standaloneCart
-
-  // Unified cart setter — routes to the right bucket
-  function setCart(updater) {
-    if (selectedTable) {
-      setTableCarts(prev => {
-        const cur = prev[selectedTable.id]?.cart || []
-        const next = typeof updater === 'function' ? updater(cur) : updater
-        return { ...prev, [selectedTable.id]: { ...(prev[selectedTable.id] || {}), cart: next } }
-      })
-    } else {
-      setStandaloneCart(updater)
-    }
-  }
 
   const [cartExpanded, setCartExpanded] = useState(false)
   const [qtyEditor, setQtyEditor] = useState(null)
   const [packMode, setPackMode] = useState({}) // { [item_id]: true = pack mode }
 
-  // Customer
   const [customerSearch, setCustomerSearch] = useState('')
-  const [customer, setCustomer] = useState(null)
   const [customerResults, setCustomerResults] = useState([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
-  const [custBalances, setCustBalances] = useState({ khata: 0, advance: 0 })
 
   // Payments & Checkout
   const [payments, setPayments] = useState([{ mode: 'CASH', subtype: '', amount: 0 }])
   const [loading, setLoading] = useState(true)
-  const [orderType, setOrderType] = useState('Dine-in')
 
   // Search & New Customer
   const [itemSearch, setItemSearch] = useState('')
@@ -75,10 +61,6 @@ export default function BillingPage() {
   const [editingOrderId, setEditingOrderId] = useState(null)
   const [showOrdersModal, setShowOrdersModal] = useState(false)
   const [recentOrders, setRecentOrders] = useState([])
-
-  // Discounts
-  const [discountType, setDiscountType] = useState('FLAT')
-  const [discountValue, setDiscountValue] = useState(0)
 
   // Offers
   const [activeOffers, setActiveOffers] = useState([])
@@ -158,24 +140,20 @@ export default function BillingPage() {
       const { data } = await supabase.from('cafe_tables').select('*').eq('branch_id', branch).order('table_number')
       setCafeTables(data || [])
 
-      // Pre-load pending carts (so they survive page refresh)
-      for (const tbl of (data || [])) {
-        if (!tbl.current_order_id) continue
-        const { data: ord } = await supabase.from('orders').select('status, order_type, customer_id, customers(*)').eq('id', tbl.current_order_id).single()
-        if (!ord || ord.status !== 'pending') continue
-        const { data: ois } = await supabase.from('order_items').select('*, items(*)').eq('order_id', tbl.current_order_id)
-        setTableCarts(prev => ({
-          ...prev,
-          [tbl.id]: {
-            cart: (ois || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price })),
-            customer: ord?.customers || null,
-            custBalances: { khata: 0, advance: 0 },
-            orderType: ord?.order_type || 'Dine-in',
-            orderId: tbl.current_order_id,
-            discountType: 'FLAT', discountValue: 0
-          }
-        }))
+      // Pre-load temporary carts from pos_carts
+      const { data: posCarts } = await supabase.from('pos_carts').select('*').eq('branch_id', branch)
+      const newTableCarts = {}
+      for (const tCart of (posCarts || [])) {
+        newTableCarts[tCart.table_id] = {
+          cart: tCart.cart_data || [],
+          customer: tCart.customer_data || null,
+          custBalances: tCart.cust_balances || { khata: 0, advance: 0 },
+          orderType: tCart.order_type || 'Dine-in',
+          discountType: tCart.discount_type || 'FLAT',
+          discountValue: tCart.discount_value || 0
+        }
       }
+      setTableCarts(prev => ({ ...prev, ...newTableCarts }))
     }
     fetchTables()
     const ch = supabase.channel('billing_tables')
@@ -285,91 +263,66 @@ export default function BillingPage() {
     fetchRecentOrders()
   }
 
+  // ── Central Sync Effect ────────────────────────────────────────────────────
+  // Auto-syncs active context to tableCarts cache and to Supabase whenever changes occur
+  useEffect(() => {
+    if (!selectedTable) return
+    const ctx = { cart, customer, custBalances, orderType, discountType, discountValue }
+    
+    // Update local cache without triggering a deep dependency loop
+    setTableCarts(prev => ({ ...prev, [selectedTable.id]: ctx }))
+    
+    // Trigger debounced DB sync
+    syncCartToDB(selectedTable.id, ctx)
+  }, [cart, customer, custBalances, orderType, discountType, discountValue, selectedTable, syncCartToDB])
+
   // ── Debounced DB sync for pending table carts ──────────────────────────────
   const syncCartToDB = useCallback(
-    debounce(async (orderId, cartItems) => {
-      if (!orderId) return
-      await supabase.from('order_items').delete().eq('order_id', orderId)
-      if (cartItems.length > 0) {
-        await supabase.from('order_items').insert(
-          cartItems.map(c => ({ order_id: orderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
-        )
-      }
-      const sub = cartItems.reduce((s, c) => s + c.price * c.quantity, 0)
-      await supabase.from('orders').update({ subtotal: sub, total: sub }).eq('id', orderId)
-    }, 900),
-    []
+    debounce(async (tableId, ctx) => {
+      if (!tableId) return
+      await supabase.from('pos_carts').upsert({
+        table_id: tableId,
+        branch_id: branchId || selectedBranch,
+        cart_data: ctx.cart,
+        customer_data: ctx.customer,
+        cust_balances: ctx.custBalances,
+        order_type: ctx.orderType,
+        discount_type: ctx.discountType,
+        discount_value: ctx.discountValue,
+        last_updated: new Date().toISOString()
+      }, { onConflict: 'table_id' })
+    }, 500),
+    [branchId, selectedBranch]
   )
-
-  // Create a pending order for a fresh table (no orderId yet)
-  async function createPendingTableOrder(table) {
-    const branch = branchId || selectedBranch
-    const { data: newOrder } = await supabase.from('orders').insert({
-      branch_id: branch, subtotal: 0, total: 0, status: 'pending',
-      table_number: table.table_number, order_type: 'Dine-in'
-    }).select().single()
-    if (newOrder) {
-      await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: newOrder.id }).eq('id', table.id)
-      setTableCarts(prev => ({
-        ...prev,
-        [table.id]: { ...(prev[table.id] || {}), orderId: newOrder.id }
-      }))
-      // Also update local cafeTables state so the dashboard shows occupied
-      setCafeTables(prev => prev.map(t => t.id === table.id ? { ...t, status: 'occupied', current_order_id: newOrder.id } : t))
-    }
-    return newOrder
-  }
 
   // ── Fast table switching (reads in-memory first, DB only on first load) ─────
   async function switchTable(table) {
     setSelectedTable(table)
     setCashGiven(0)
 
-    // Restore per-table discount/payments state if available
     const cached = tableCarts[table.id]
     if (cached) {
+      setCart(cached.cart || [])
       setCustomer(cached.customer || null)
       setCustBalances(cached.custBalances || { khata: 0, advance: 0 })
       setOrderType(cached.orderType || 'Dine-in')
       setDiscountType(cached.discountType || 'FLAT')
       setDiscountValue(cached.discountValue || 0)
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
-      return // instant — no DB call
+      return
     }
 
-    // First time loading this table
-    if (table.current_order_id) {
-      setLoadingTable(true)
-      const [{ data: ois }, { data: ord }] = await Promise.all([
-        supabase.from('order_items').select('*, items(*)').eq('order_id', table.current_order_id),
-        supabase.from('orders').select('customer_id, customers(*), order_type, status').eq('id', table.current_order_id).single()
-      ])
-      const cartItems = (ois || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
-      const ctx = {
-        cart: cartItems,
-        customer: ord?.customers || null,
-        custBalances: { khata: 0, advance: 0 },
-        orderType: ord?.order_type || 'Dine-in',
-        orderId: table.current_order_id,
-        discountType: 'FLAT', discountValue: 0
-      }
-      setTableCarts(prev => ({ ...prev, [table.id]: ctx }))
-      setCustomer(ctx.customer)
-      setOrderType(ctx.orderType)
-      setLoadingTable(false)
-      if (cartItems.length > 0) toast.success(`Table ${table.table_number} — ${cartItems.length} item(s) loaded`)
-    } else {
-      // Fresh empty table
-      setTableCarts(prev => ({
-        ...prev,
-        [table.id]: { cart: [], customer: null, custBalances: { khata: 0, advance: 0 }, orderType: 'Dine-in', orderId: null, discountType: 'FLAT', discountValue: 0 }
-      }))
-      setCustomer(null)
-      setCustBalances({ khata: 0, advance: 0 })
-      setOrderType('Dine-in')
-      setDiscountType('FLAT')
-      setDiscountValue(0)
-    }
+    // Fresh empty table
+    setTableCarts(prev => ({
+      ...prev,
+      [table.id]: { cart: [], customer: null, custBalances: { khata: 0, advance: 0 }, orderType: 'Dine-in', discountType: 'FLAT', discountValue: 0 }
+    }))
+    setCart([])
+    setCustomer(null)
+    setCustBalances({ khata: 0, advance: 0 })
+    setOrderType('Dine-in')
+    setDiscountType('FLAT')
+    setDiscountValue(0)
     setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
   }
 
@@ -381,9 +334,12 @@ export default function BillingPage() {
       setTableCarts(prev => { const n = { ...prev }; delete n[selectedTable.id]; return n })
     }
     setSelectedTable(null)
-    setStandaloneCart([])
+    setCart([])
     setCustomer(null)
     setCustBalances({ khata: 0, advance: 0 })
+    setOrderType('Dine-in')
+    setDiscountType('FLAT')
+    setDiscountValue(0)
   }
 
   function deselectCustomer() {
@@ -398,21 +354,9 @@ export default function BillingPage() {
       const idx = prev.findIndex(c => c.id === item.id)
       const next = idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty }, ...prev]
 
-      // Trigger DB sync for table carts
-      if (selectedTable) {
-        const orderId = tableCarts[selectedTable.id]?.orderId
-        if (orderId) {
-          syncCartToDB(orderId, next)
-        } else {
-          // First item on a fresh table — create the pending order first, then sync
-          createPendingTableOrder(selectedTable).then(ord => {
-            if (ord) syncCartToDB(ord.id, next)
-          })
-        }
-      }
+      // DB sync is handled automatically inside the centralized setCart function
       return next
     })
-    // Optimistic stock deduction on UI side
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - qty } : i))
   }
 
@@ -427,10 +371,6 @@ export default function BillingPage() {
   function updateQty(id, delta) {
     setCart(prev => {
       const next = prev.map(c => c.id === id ? { ...c, quantity: c.quantity + delta } : c).filter(c => c.quantity > 0)
-      if (selectedTable) {
-        const orderId = tableCarts[selectedTable.id]?.orderId
-        if (orderId) syncCartToDB(orderId, next)
-      }
       return next
     })
     setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - delta } : i))
@@ -662,12 +602,14 @@ export default function BillingPage() {
       // Clear table cart from map & DB
       if (selectedTable) {
         await supabase.from('cafe_tables').update({ status: 'available', current_order_id: null }).eq('id', selectedTable.id)
+        await supabase.from('pos_carts').delete().eq('table_id', selectedTable.id)
         setTableCarts(prev => { const n = { ...prev }; delete n[selectedTable.id]; return n })
         setCafeTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, status: 'available', current_order_id: null } : t))
         setSelectedTable(null)
       }
       // RESET POS (Blanking)
-      setStandaloneCart([]); setCustomer(null); setCustomerSearch(''); setOrderType('Dine-in'); setShowAddCustomer(false); setNewCustName('');
+      setCart([]); setCustomer(null); setCustomerSearch(''); setOrderType('Dine-in'); setShowAddCustomer(false); setNewCustName('');
+      setDiscountType('FLAT'); setDiscountValue(0);
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       setCashGiven(0)
       setCartExpanded(false)
@@ -891,46 +833,34 @@ export default function BillingPage() {
       <div className="flex-1 flex flex-col min-w-0 bg-ink-50 dark:bg-ink-950 pb-16 md:pb-0 relative overflow-hidden">
         {/* Table Selector moved to left sidebar */}
 
-      {/* ── Table Switcher Bar (Bhat only, in POS mode) ───────────────────── */}
+      {/* ── Table Switcher Dropdown (Bhat only, in POS mode) ───────────────────── */}
       {isBhatBranch && cafeTables.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-3 py-2 bg-ink-950 border-b border-ink-800 flex-shrink-0">
-          <span className="text-[9px] font-black text-ink-500 uppercase tracking-widest flex-shrink-0 mr-1">Tables</span>
-          {cafeTables.map(t => {
-            const isActive = selectedTable?.id === t.id
-            const tc = tableCarts[t.id]
-            const itemCount = tc?.cart?.reduce((s, c) => s + c.quantity, 0) || 0
-            const isOccupied = t.status === 'occupied'
-            return (
-              <button
-                key={t.id}
-                onClick={() => switchTable(t)}
-                className={`relative flex-shrink-0 px-3.5 py-1.5 rounded-xl text-sm font-black transition-all border whitespace-nowrap
-                  ${isActive
-                    ? 'bg-ember text-white border-ember shadow-lg shadow-ember/40 scale-105'
-                    : itemCount > 0
-                      ? 'bg-amber-900/60 text-amber-300 border-amber-700 hover:border-amber-500'
-                      : isOccupied
-                        ? 'bg-red-900/30 text-red-300 border-red-800 hover:border-red-600'
-                        : 'bg-ink-800 text-ink-400 border-ink-700 hover:border-ink-500 hover:text-ink-200'
-                  }`}
-              >
-                T-{t.table_number}
-                {itemCount > 0 && !isActive && (
-                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 text-ink-900 rounded-full text-[8px] font-black flex items-center justify-center shadow">
-                    {itemCount}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-          <div className="w-px h-5 bg-ink-700 flex-shrink-0 mx-1" />
-          <button
-            onClick={() => { setSelectedTable(null); setCustomer(null); setCustBalances({ khata: 0, advance: 0 }); setOrderType('Takeaway') }}
-            className={`flex-shrink-0 px-3.5 py-1.5 rounded-xl text-sm font-black border transition-all whitespace-nowrap
-              ${!selectedTable ? 'bg-amber-500 text-white border-amber-500 scale-105 shadow-lg shadow-amber-500/30' : 'bg-ink-800 text-ink-400 border-ink-700 hover:border-amber-600 hover:text-amber-400'}`}
+        <div className="flex items-center gap-3 px-4 py-2 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex-shrink-0 shadow-sm z-30">
+          <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest flex-shrink-0">Table Context:</span>
+          <select 
+            className="flex-1 bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 text-sm font-bold text-ink-900 dark:text-white p-2 rounded-xl focus:ring-2 focus:ring-ember outline-none cursor-pointer"
+            value={selectedTable?.id || 'direct'}
+            onChange={e => {
+              const val = e.target.value
+              if (val === 'direct') {
+                setSelectedTable(null)
+                setCustomer(null)
+                setCustBalances({ khata: 0, advance: 0 })
+                setOrderType('Takeaway')
+              } else {
+                const tbl = cafeTables.find(t => t.id === val)
+                if (tbl) switchTable(tbl)
+              }
+            }}
           >
-            Direct
-          </button>
+            <option value="direct">🚀 Takeaway / Zomato (No Table)</option>
+            {cafeTables.map(t => {
+              const tc = tableCarts[t.id]
+              const itemCount = tc?.cart?.reduce((s, c) => s + c.quantity, 0) || 0
+              const label = `Table ${t.table_number} ${itemCount > 0 ? `(${itemCount} items)` : t.status === 'occupied' ? '(Occupied)' : ''}`
+              return <option key={t.id} value={t.id}>{label}</option>
+            })}
+          </select>
         </div>
       )}
 

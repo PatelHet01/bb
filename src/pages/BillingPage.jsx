@@ -312,6 +312,30 @@ export default function BillingPage() {
       return
     }
 
+    // Check if the table has an active order in DB (e.g., from QR / KDS)
+    if (table.current_order_id) {
+      setLoadingTable(true)
+      const [{ data: ois }, { data: ord }] = await Promise.all([
+        supabase.from('order_items').select('*, items(*)').eq('order_id', table.current_order_id),
+        supabase.from('orders').select('customer_id, customers(*), order_type, status').eq('id', table.current_order_id).single()
+      ])
+      const cartItems = (ois || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
+      const ctx = {
+        cart: cartItems,
+        customer: ord?.customers || null,
+        custBalances: { khata: 0, advance: 0 },
+        orderType: ord?.order_type || 'Dine-in',
+        discountType: 'FLAT', discountValue: 0
+      }
+      setTableCarts(prev => ({ ...prev, [table.id]: ctx }))
+      setCart(ctx.cart)
+      setCustomer(ctx.customer)
+      setOrderType(ctx.orderType)
+      setLoadingTable(false)
+      if (cartItems.length > 0) toast.success(`Table ${table.table_number} — ${cartItems.length} item(s) loaded`)
+      return
+    }
+
     // Fresh empty table
     setTableCarts(prev => ({
       ...prev,

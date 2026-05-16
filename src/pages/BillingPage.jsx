@@ -55,7 +55,8 @@ export default function BillingPage() {
   const [selectedTable, setSelectedTable] = useState(null) // { id, table_number, current_order_id }
   const [loadingTable, setLoadingTable] = useState(false)
   const isBhatBranch = (branchId || selectedBranch) === 'bhat'
-  const [posMode, setPosMode] = useState(false)
+  const [loadingTable, setLoadingTable] = useState(false)
+  const isBhatBranch = (branchId || selectedBranch) === 'bhat'
 
   // Order Management
   const [editingOrderId, setEditingOrderId] = useState(null)
@@ -265,9 +266,11 @@ export default function BillingPage() {
 
   // ── Debounced DB sync for pending table carts ──────────────────────────────
   const syncCartToDB = useCallback(
-    debounce(async (tableId, ctx) => {
+    debounce(async (tableId, ctx, currentOrderId, tableNumber) => {
       if (!tableId) return
-      await supabase.from('pos_carts').upsert({
+      
+      // 1. Sync UI cache to pos_carts
+      const { error } = await supabase.from('pos_carts').upsert({
         table_id: tableId,
         branch_id: branchId || selectedBranch,
         cart_data: ctx.cart,
@@ -278,6 +281,36 @@ export default function BillingPage() {
         discount_value: ctx.discountValue,
         last_updated: new Date().toISOString()
       }, { onConflict: 'table_id' })
+      if (error) {
+        console.error('Failed to sync cart to pos_carts:', error)
+        toast.error('Cart sync failed: ' + error.message)
+        return
+      }
+
+      // 2. Sync real DB for KDS (mirrors to `orders` table)
+      let realOrderId = currentOrderId
+      if (!realOrderId && ctx.cart.length > 0) {
+        const { data: newOrder } = await supabase.from('orders').insert({
+          branch_id: branchId || selectedBranch, subtotal: 0, total: 0, status: 'pending',
+          table_number: tableNumber, order_type: ctx.orderType
+        }).select().single()
+        if (newOrder) {
+          realOrderId = newOrder.id
+          await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: realOrderId }).eq('id', tableId)
+          setSelectedTable(prev => prev?.id === tableId ? { ...prev, current_order_id: realOrderId } : prev)
+        }
+      }
+
+      if (realOrderId) {
+        await supabase.from('order_items').delete().eq('order_id', realOrderId)
+        if (ctx.cart.length > 0) {
+          await supabase.from('order_items').insert(
+            ctx.cart.map(c => ({ order_id: realOrderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
+          )
+        }
+        const sub = ctx.cart.reduce((s, c) => s + c.price * c.quantity, 0)
+        await supabase.from('orders').update({ subtotal: sub, total: sub }).eq('id', realOrderId)
+      }
     }, 500),
     [branchId, selectedBranch]
   )
@@ -292,7 +325,7 @@ export default function BillingPage() {
     setTableCarts(prev => ({ ...prev, [selectedTable.id]: ctx }))
     
     // Trigger debounced DB sync
-    syncCartToDB(selectedTable.id, ctx)
+    syncCartToDB(selectedTable.id, ctx, selectedTable.current_order_id, selectedTable.table_number)
   }, [cart, customer, custBalances, orderType, discountType, discountValue, selectedTable, syncCartToDB])
 
   // ── Fast table switching (reads in-memory first, DB only on first load) ─────
@@ -719,124 +752,61 @@ export default function BillingPage() {
   }, [items, activeCategory, itemSearch])
   const subcategories = activeSubcategories
 
-  const renderTableDashboard = () => (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-8 animate-fade-in pb-20">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-black text-ink-900 dark:text-white">Active Orders</h1>
-        <div className="flex gap-2">
-          {!branchId && (
-            <select className="input font-bold" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}>
-              <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
-            </select>
-          )}
-          <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary whitespace-nowrap text-xs md:text-sm px-4">Manage Orders</button>
-        </div>
-      </div>
-
-      {isBhatBranch && (
-        <div>
-          <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-ink-900 dark:text-white"><Grid3X3 className="text-ember"/> Dine-in Tables</h2>
-          {cafeTables.length === 0 ? (
-            <p className="text-ink-500 italic">No tables active.</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {cafeTables.map(t => {
-                const isOccupied = t.status === 'occupied'
-                return (
-                  <div key={t.id} className={`card p-4 flex flex-col items-center justify-center gap-3 border-2 transition-all shadow-md ${isOccupied ? 'border-red-400 bg-red-50 dark:bg-red-900/10' : 'border-emerald-400 bg-emerald-50 dark:bg-emerald-900/10'}`}>
-                    <h3 className={`text-3xl font-black ${isOccupied ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{t.table_number}</h3>
-                    <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-full ${isOccupied ? 'bg-red-200 dark:bg-red-900/50 text-red-800 dark:text-red-300' : 'bg-emerald-200 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300'}`}>
-                      {t.status}
-                    </span>
-                    <button onClick={() => { loadTableOrder(t); setPosMode(true); }} className={`w-full py-2.5 rounded-xl text-sm font-black text-white shadow-lg transition-transform active:scale-95 ${isOccupied ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'}`}>
-                      {isOccupied ? 'Update Order' : 'New Order'}
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div>
-        <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-ink-900 dark:text-white"><ShoppingBag className="text-ember"/> Direct Orders</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="card p-6 border-2 border-amber-500 flex flex-col justify-between gap-4 bg-amber-50/30 dark:bg-amber-900/10">
-            <div>
-              <h3 className="text-2xl font-black text-amber-600 mb-1">Takeaway</h3>
-              <p className="text-sm text-ink-500 font-medium">Walk-in customers picking up orders.</p>
-            </div>
-            <button onClick={() => { setOrderType('Takeaway'); setSelectedTable(null); setPosMode(true); }} className="btn-primary bg-amber-500 hover:bg-amber-600 w-full py-3.5 shadow-lg shadow-amber-500/30 font-black">Start Takeaway Order</button>
-          </div>
-          <div className="card p-6 border-2 border-rose-500 flex flex-col justify-between gap-4 bg-rose-50/30 dark:bg-rose-900/10">
-            <div>
-              <h3 className="text-2xl font-black text-rose-600 mb-1">Zomato / Swiggy</h3>
-              <p className="text-sm text-ink-500 font-medium">Online delivery aggregators.</p>
-            </div>
-            <button onClick={() => { setOrderType('Zomato/Swiggy'); setSelectedTable(null); setPosMode(true); }} className="btn-primary bg-rose-500 hover:bg-rose-600 w-full py-3.5 shadow-lg shadow-rose-500/30 font-black">Start Delivery Order</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-
-  if (!posMode) {
-    return (
-      <div className="h-full overflow-y-auto">
-        {renderTableDashboard()}
-        
-        {/* Manage Orders Modal (shared) */}
-        {showOrdersModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/80 backdrop-blur-sm">
-            <div className="bg-ink-50 dark:bg-ink-950 w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-scale-up">
-              <div className="flex justify-between items-center p-4 border-b border-ink-200 dark:border-ink-800 bg-white dark:bg-ink-900">
-                <h3 className="font-black text-lg text-ink-900 dark:text-white flex items-center gap-2"><Receipt size={20} className="text-ember"/> Manage Today's Orders</h3>
-                <button onClick={() => setShowOrdersModal(false)} className="text-ink-400 hover:text-red-500"><X size={24}/></button>
-              </div>
-              <div className="p-4 overflow-y-auto no-scrollbar space-y-3 flex-1">
-                {recentOrders.length === 0 ? <p className="text-center text-ink-400 py-10">No orders today.</p> :
-                 recentOrders.map(o => (
-                   <div key={o.id} className={`p-4 rounded-xl border ${o.status==='cancelled'?'bg-red-50/50 border-red-100':'bg-white dark:bg-ink-900 border-ink-200 dark:border-ink-800'}`}>
-                     <div className="flex justify-between items-start mb-2">
-                       <div>
-                         <p className={`font-bold text-sm ${o.status==='cancelled'?'text-red-500 line-through':'text-ink-900 dark:text-white'}`}>
-                           {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
-                           <span className="ml-2 text-xs font-normal text-ink-400 no-underline">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
-                         </p>
-                         <p className="text-xs text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
-                       </div>
-                       <div className="text-right">
-                         <p className="font-black text-lg text-ink-900 dark:text-white">₹{o.total}</p>
-                         {o.status === 'cancelled' ? <span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-0.5 rounded">Cancelled</span> :
-                          <div className="flex gap-2 justify-end mt-1">
-                            <button onClick={() => editOrder(o)} className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded">Edit</button>
-                            <button onClick={() => cancelOrder(o.id)} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded">Cancel</button>
-                          </div>
-                         }
-                       </div>
-                     </div>
-                     <div className="text-xs text-ink-500 mt-2 border-t border-ink-100 dark:border-ink-800/50 pt-2 flex flex-col gap-0.5">
-                       {(o.order_items||[]).map((oi, idx) => (
-                         <div key={idx} className="flex justify-between">
-                           <span><span className="font-bold">{oi.quantity}x</span> {oi.items?.name} {oi.items?.variant && `(${oi.items.variant})`}</span>
-                           <span>₹{oi.price * oi.quantity}</span>
-                         </div>
-                       ))}
-                     </div>
-                   </div>
-                 ))
-                }
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-5rem)] -m-4 md:-m-6 bg-ink-100 dark:bg-ink-950 relative overflow-hidden">
+      
+      {/* Manage Orders Modal */}
+      {showOrdersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/80 backdrop-blur-sm">
+          <div className="bg-ink-50 dark:bg-ink-950 w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-scale-up">
+            <div className="flex justify-between items-center p-4 border-b border-ink-200 dark:border-ink-800 bg-white dark:bg-ink-900">
+              <h3 className="font-black text-lg text-ink-900 dark:text-white flex items-center gap-2"><Receipt size={20} className="text-ember"/> Manage Today's Orders</h3>
+              <div className="flex gap-2">
+                {!branchId && (
+                  <select className="input font-bold h-8 py-0" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}>
+                    <option value="gurukul">Gurukul</option><option value="bhat">Bhat</option><option value="visat">Visat</option>
+                  </select>
+                )}
+                <button onClick={() => setShowOrdersModal(false)} className="text-ink-400 hover:text-red-500"><X size={24}/></button>
+              </div>
+            </div>
+            <div className="p-4 overflow-y-auto no-scrollbar space-y-3 flex-1">
+              {recentOrders.length === 0 ? <p className="text-center text-ink-400 py-10">No orders today.</p> :
+               recentOrders.map(o => (
+                 <div key={o.id} className={`p-4 rounded-xl border ${o.status==='cancelled'?'bg-red-50/50 border-red-100':'bg-white dark:bg-ink-900 border-ink-200 dark:border-ink-800'}`}>
+                   <div className="flex justify-between items-start mb-2">
+                     <div>
+                       <p className={`font-bold text-sm ${o.status==='cancelled'?'text-red-500 line-through':'text-ink-900 dark:text-white'}`}>
+                         {o.order_number || `#${o.id.slice(0,8).toUpperCase()}`}
+                         <span className="ml-2 text-xs font-normal text-ink-400 no-underline">{new Date(o.created_at).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'})}</span>
+                       </p>
+                       <p className="text-xs text-ink-500 mt-0.5">{o.customers?.name || 'Guest'} {o.table_number ? `· T-${o.table_number}` : ''}</p>
+                     </div>
+                     <div className="text-right">
+                       <p className="font-black text-lg text-ink-900 dark:text-white">₹{o.total}</p>
+                       {o.status === 'cancelled' ? <span className="text-xs font-bold text-red-500 bg-red-100 px-2 py-0.5 rounded">Cancelled</span> :
+                        <div className="flex gap-2 justify-end mt-1">
+                          <button onClick={() => editOrder(o)} className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded">Edit</button>
+                          <button onClick={() => cancelOrder(o.id)} className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded">Cancel</button>
+                        </div>
+                       }
+                     </div>
+                   </div>
+                   <div className="text-xs text-ink-500 mt-2 border-t border-ink-100 dark:border-ink-800/50 pt-2 flex flex-col gap-0.5">
+                     {(o.order_items||[]).map((oi, idx) => (
+                       <div key={idx} className="flex justify-between">
+                         <span><span className="font-bold">{oi.quantity}x</span> {oi.items?.name} {oi.items?.variant && `(${oi.items.variant})`}</span>
+                         <span>₹{oi.price * oi.quantity}</span>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               ))
+              }
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* LEFT / TOP: Category Tabs */}
       <div className="md:w-32 lg:w-40 bg-white dark:bg-ink-900 border-b md:border-b-0 md:border-r border-ink-200 dark:border-ink-800 flex-shrink-0 z-10 flex flex-col overflow-hidden">
@@ -890,8 +860,8 @@ export default function BillingPage() {
 
       {/* Top Search Bar (Menu + Customer) */}
         <div className="p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex flex-col md:flex-row items-center gap-3 shadow-sm z-20">
-          <button onClick={() => setPosMode(false)} className="btn-secondary w-full md:w-auto md:px-4 py-2.5 md:mr-2 shrink-0 border-ink-300 hover:bg-ink-100 flex items-center justify-center gap-2">
-            <ArrowLeft size={16}/> Back to Dashboard
+          <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary w-full md:w-auto md:px-4 py-2.5 md:mr-2 shrink-0 border-ink-300 hover:bg-ink-100 flex items-center justify-center gap-2">
+            <Receipt size={16}/> Manage Orders
           </button>
           
           <div className="flex w-full gap-3">

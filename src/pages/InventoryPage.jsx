@@ -103,7 +103,7 @@ export default function InventoryPage() {
     if (!form.name || !form.category || !form.subcategory) { toast.error('Fill required fields'); return }
     setSaving(true)
     try {
-      await supabase.from('items').insert({
+      const { error } = await supabase.from('items').insert({
         name: form.name, 
         category: form.category, 
         subcategory: form.subcategory,
@@ -120,11 +120,15 @@ export default function InventoryPage() {
         item_type: form.item_type || 'SELLABLE',
         is_archived: false
       })
+      if (error) throw error
       toast.success('Item added')
       setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
       setShowForm(false)
       fetchItems()
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { 
+      console.error(e)
+      toast.error(e.message || 'Error adding item') 
+    }
     finally { setSaving(false) }
   }
 

@@ -263,19 +263,6 @@ export default function BillingPage() {
     fetchRecentOrders()
   }
 
-  // ── Central Sync Effect ────────────────────────────────────────────────────
-  // Auto-syncs active context to tableCarts cache and to Supabase whenever changes occur
-  useEffect(() => {
-    if (!selectedTable) return
-    const ctx = { cart, customer, custBalances, orderType, discountType, discountValue }
-    
-    // Update local cache without triggering a deep dependency loop
-    setTableCarts(prev => ({ ...prev, [selectedTable.id]: ctx }))
-    
-    // Trigger debounced DB sync
-    syncCartToDB(selectedTable.id, ctx)
-  }, [cart, customer, custBalances, orderType, discountType, discountValue, selectedTable, syncCartToDB])
-
   // ── Debounced DB sync for pending table carts ──────────────────────────────
   const syncCartToDB = useCallback(
     debounce(async (tableId, ctx) => {
@@ -294,6 +281,19 @@ export default function BillingPage() {
     }, 500),
     [branchId, selectedBranch]
   )
+
+  // ── Central Sync Effect ────────────────────────────────────────────────────
+  // Auto-syncs active context to tableCarts cache and to Supabase whenever changes occur
+  useEffect(() => {
+    if (!selectedTable) return
+    const ctx = { cart, customer, custBalances, orderType, discountType, discountValue }
+    
+    // Update local cache without triggering a deep dependency loop
+    setTableCarts(prev => ({ ...prev, [selectedTable.id]: ctx }))
+    
+    // Trigger debounced DB sync
+    syncCartToDB(selectedTable.id, ctx)
+  }, [cart, customer, custBalances, orderType, discountType, discountValue, selectedTable, syncCartToDB])
 
   // ── Fast table switching (reads in-memory first, DB only on first load) ─────
   async function switchTable(table) {

@@ -21,7 +21,7 @@ export default function InventoryPage() {
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
+  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
   const [saving, setSaving] = useState(false)
 
   // Inline Editing
@@ -114,7 +114,6 @@ export default function InventoryPage() {
         stock_quantity: parseInt(form.stock_quantity) || 0,
         low_stock_threshold: parseInt(form.low_stock_threshold) || 5,
         units_per_box: parseInt(form.units_per_box) || 1,
-        pack_price: form.pack_price ? parseFloat(form.pack_price) : 0,
         branch_id: form.branch_id, 
         is_active: form.is_active,
         item_type: form.item_type || 'SELLABLE',
@@ -122,7 +121,7 @@ export default function InventoryPage() {
       })
       if (error) throw error
       toast.success('Item added')
-      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
+      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
       setShowForm(false)
       fetchItems()
     } catch (e) { 
@@ -208,7 +207,7 @@ export default function InventoryPage() {
   }
   async function saveInlineEdit() {
     if (!editForm.name || !editForm.category) return
-    const { id, branch_id, ...updates } = editForm
+    const { id, branch_id, pack_price, ...updates } = editForm
     await supabase.from('items').update(updates).eq('id', id)
     setItems(p => p.map(i => i.id === id ? { ...i, ...updates } : i))
     setEditingRow(null)
@@ -631,8 +630,6 @@ export default function InventoryPage() {
               </div>
               {parseInt(form.units_per_box) > 1 && form.item_type !== 'RAW_MATERIAL' && (
                 <div>
-                  <label className="label">Pack/Box Price (₹)</label>
-                  <input className="input w-full font-bold text-indigo-600" type="number" min="0" step="0.5" value={form.pack_price} onChange={e => setForm(p => ({ ...p, pack_price: e.target.value }))} placeholder="Price for 1 full box" />
                   <p className="text-[10px] text-zinc-400 mt-1">Staff can toggle Single/Pack in cart</p>
                 </div>
               )}
@@ -733,8 +730,6 @@ export default function InventoryPage() {
                           </div>
                           {(editForm.units_per_box||1) > 1 && editForm.item_type !== 'RAW_MATERIAL' && (
                             <div className="w-28">
-                              <label className="text-[10px] uppercase font-bold text-indigo-500 mb-1 block">Pack Price (₹)</label>
-                              <input type="number" min="0" step="0.5" className="input w-full text-sm py-1.5 text-indigo-600 font-bold" value={editForm.pack_price || ''} onChange={e=>setEditForm({...editForm, pack_price:e.target.value})} placeholder="Box price"/>
                             </div>
                           )}
                           <div className="flex gap-2 justify-end ml-auto">

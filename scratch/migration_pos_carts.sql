@@ -12,3 +12,11 @@ CREATE TABLE pos_carts (
 
 -- Note: Also you might want to remove 'pending' status rows from orders if there are any left over
 -- DELETE FROM orders WHERE status = 'pending';
+
+-- Fix for "violates row-level security policy" error:
+-- Disable RLS to allow the POS app to insert/update draft carts freely
+ALTER TABLE pos_carts DISABLE ROW LEVEL SECURITY;
+
+-- (Alternatively, if you prefer to keep RLS enabled for security warnings, use these 2 lines instead)
+-- ALTER TABLE pos_carts ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Allow all operations" ON pos_carts FOR ALL USING (true) WITH CHECK (true);

@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
-import { useSearchParams, Link } from 'react-router-dom'
+import { useEffect, useState, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
 import { WheelGame, SlotsGame, OXOGame } from '../components/games/GameComponents'
-import { ShoppingCart, Plus, Minus, Trash2, ChevronUp, User, X } from 'lucide-react'
+import { ShoppingCart, Plus, Minus, ChevronUp, Loader } from 'lucide-react'
 
 export default function CafeOrderPage() {
   const [params] = useSearchParams()
@@ -21,16 +21,22 @@ export default function CafeOrderPage() {
   const [activeGame, setActiveGame] = useState(null)
   const [coins, setCoins] = useState(0)
 
-  // CRM state
-  const [showCustomerForm, setShowCustomerForm] = useState(false)
-  const [custForm, setCustForm] = useState({ name: '', mobile: '', email: '' })
-  const [custLookup, setCustLookup] = useState(null) // found existing customer
-  const [lookingUp, setLookingUp] = useState(false)
-  const [custConfirmed, setCustConfirmed] = useState(null) // final linked customer
+  // Auth + session state
+  const [authDone, setAuthDone] = useState(false)
+  const [authForm, setAuthForm] = useState({ name: '', mobile: '' })
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [custConfirmed, setCustConfirmed] = useState(null)
+  // Resume session state
+  const [resumeData, setResumeData] = useState(null) // { customer, orderStatus, orderId }
+  // Pending order tracking
+  const [pendingOrderId, setPendingOrderId] = useState(null)
+  const [orderLocked, setOrderLocked] = useState(false)
 
   const categories = [...new Set(items.map(i => i.subcategory))].sort()
   const total = cart.reduce((s, c) => s + c.price * c.quantity, 0)
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0)
+  const sessionKey = token ? `bb_session_${token}` : null
 
   useEffect(() => {
     if (categories.length > 0 && !activeTab) setActiveTab(categories[0])
@@ -47,10 +53,47 @@ export default function CafeOrderPage() {
         .eq('is_active', true).eq('is_archived', false)
         .order('subcategory').order('name')
       setItems(menuItems || [])
+
+      // Check sessionStorage for existing session
+      const raw = sessionStorage.getItem(`bb_session_${token}`)
+      if (raw) {
+        try {
+          const session = JSON.parse(raw)
+          setCustConfirmed({ id: session.customer_id, name: session.name, mobile: session.mobile })
+          // Check if there's still an active order for this table
+          if (tbl.current_order_id) {
+            const { data: existingOrder } = await supabase.from('orders').select('id, status').eq('id', tbl.current_order_id).single()
+            if (existingOrder) {
+              if (['preparing', 'ready', 'completed'].includes(existingOrder.status)) {
+                // Order locked — can only resume
+                setResumeData({ customer: { id: session.customer_id, name: session.name }, orderStatus: existingOrder.status, orderId: existingOrder.id, canStartFresh: false })
+              } else {
+                // Order still pending — allow resume or start fresh
+                setResumeData({ customer: { id: session.customer_id, name: session.name }, orderStatus: existingOrder.status, orderId: existingOrder.id, canStartFresh: true })
+              }
+              setLoading(false); return
+            }
+          }
+          // Session exists but no active order
+          setAuthDone(true)
+        } catch (_) {}
+      }
       setLoading(false)
     }
     init()
   }, [token])
+
+  // Subscribe to order status changes (lock when preparing)
+  useEffect(() => {
+    if (!pendingOrderId) return
+    const ch = supabase.channel(`cafe-order-${pendingOrderId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${pendingOrderId}` }, ({ new: updated }) => {
+        if (['preparing', 'ready'].includes(updated.status)) setOrderLocked(true)
+      })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [pendingOrderId])
+
 
   function addToCart(item) {
     setCart(p => {
@@ -68,79 +111,73 @@ export default function CafeOrderPage() {
     })
   }
 
-  // CRM: lookup by mobile
-  async function lookupMobile(mobile) {
-    if (mobile.length < 10) { setCustLookup(null); return }
-    setLookingUp(true)
-    const { data } = await supabase.from('customers').select('*').eq('mobile_number', mobile).maybeSingle()
-    setCustLookup(data || null)
-    if (data) setCustForm(f => ({ ...f, name: data.name, email: data.email || '' }))
-    setLookingUp(false)
-  }
-
-  async function confirmCustomer() {
-    const mobile = custForm.mobile.trim()
-    if (!mobile || mobile.length < 10) return alert('Enter a valid 10-digit mobile number')
-    if (!custForm.name.trim()) return alert('Name is required')
-
-    let customer = custLookup
-    if (!customer) {
-      // Upsert: if mobile exists, update name; otherwise create
-      const { data: existing } = await supabase.from('customers')
-        .select('*').eq('mobile_number', mobile).maybeSingle()
+  // ── Auth submit ────────────────────────────────────────────────────────────
+  async function handleAuth() {
+    const name = authForm.name.trim()
+    const mobile = authForm.mobile.trim()
+    if (!name) { setAuthError('Name is required'); return }
+    if (!/^\d{10}$/.test(mobile)) { setAuthError('Enter a valid 10-digit mobile number'); return }
+    setAuthError(''); setAuthLoading(true)
+    try {
+      // Upsert customer by mobile number
+      let customer
+      const { data: existing } = await supabase.from('customers').select('*').eq('mobile_number', mobile).maybeSingle()
       if (existing) {
-        // Update name if changed
-        if (existing.name !== custForm.name.trim()) {
-          await supabase.from('customers').update({ name: custForm.name.trim() }).eq('id', existing.id)
-        }
-        customer = { ...existing, name: custForm.name.trim() }
+        if (existing.name !== name) await supabase.from('customers').update({ name }).eq('id', existing.id)
+        customer = { ...existing, name }
       } else {
         const { data: newCust, error } = await supabase.from('customers').insert({
-          name: custForm.name.trim(),
-          mobile_number: mobile,
-          email: custForm.email.trim() || null,
-          branch_id: tableInfo.branch_id,
-          registration_type: 'self',
+          name, mobile_number: mobile, branch_id: tableInfo.branch_id, registration_type: 'self'
         }).select().single()
-        if (error) return alert('Could not save details: ' + error.message)
+        if (error) throw error
         customer = newCust
       }
+      // Save session
+      sessionStorage.setItem(sessionKey, JSON.stringify({ customer_id: customer.id, name: customer.name, mobile, table_id: tableInfo.id, session_start: Date.now() }))
+      setCustConfirmed(customer)
+      setAuthDone(true)
+    } catch (e) {
+      setAuthError('Could not save: ' + e.message)
+    } finally {
+      setAuthLoading(false)
     }
-    setCustConfirmed(customer)
-    setShowCustomerForm(false)
-    // Immediately place order
-    placeOrder(customer)
   }
 
-  async function placeOrder(customerOverride) {
+  function handleResume() {
+    if (resumeData) {
+      setCustConfirmed(resumeData.customer)
+      setPendingOrderId(resumeData.orderId)
+      if (['preparing', 'ready'].includes(resumeData.orderStatus)) setOrderLocked(true)
+      setOrderPlaced({ id: resumeData.orderId, order_number: '' }) // show game/wait screen
+    }
+  }
+
+  function handleStartFresh() {
+    setResumeData(null)
+    setAuthDone(true)
+  }
+
+  async function placeOrder() {
     if (cart.length === 0) return
     setPlacing(true)
-    const customer = customerOverride || custConfirmed
-
     const { data: order, error } = await supabase.from('orders').insert({
       branch_id: tableInfo.branch_id,
       table_number: tableInfo.table_number,
-      subtotal: total,
-      total,
-      status: 'new',
-      customer_id: customer?.id || null,
+      subtotal: total, total,
+      status: 'pending',
+      order_type: 'Dine-in',
+      customer_id: custConfirmed?.id || null,
     }).select().single()
-
     if (error || !order) { setPlacing(false); return alert('Failed to place order.') }
     await supabase.from('order_items').insert(cart.map(c => ({
       order_id: order.id, item_id: c.id, quantity: c.quantity, price: c.price, total: c.price * c.quantity,
     })))
     await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: order.id }).eq('id', tableInfo.id)
+    setPendingOrderId(order.id)
     setOrderPlaced(order)
     setCart([])
     setCartOpen(false)
     setPlacing(false)
-  }
-
-  function handleCheckout() {
-    setCartOpen(false)
-    // Always require customer details — no anonymous orders
-    setShowCustomerForm(true)
   }
 
   const filteredItems = items.filter(i => i.subcategory === activeTab)
@@ -161,6 +198,73 @@ export default function CafeOrderPage() {
         <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>❌</div>
         <h2 style={{ fontSize: '1.25rem', fontWeight: 900 }}>Invalid QR Code</h2>
         <p style={{ color: 'rgba(255,255,255,0.4)', marginTop: '0.5rem' }}>Ask staff for a valid QR.</p>
+      </div>
+    </div>
+  )
+
+  /* ─── Resume Session Screen ─── */
+  if (resumeData) return (
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ background: '#111', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '2.5rem', maxWidth: '360px', width: '100%', textAlign: 'center', color: 'white' }}>
+        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>👋</div>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.5rem' }}>Welcome back, {resumeData.customer.name}!</h2>
+        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.9rem', marginBottom: '2rem' }}>
+          You have an {resumeData.orderStatus === 'pending' ? 'open' : 'active'} order on this table.
+        </p>
+        <button onClick={handleResume} style={{ width: '100%', background: '#f59e0b', color: '#000', fontWeight: 900, padding: '1rem', borderRadius: '12px', border: 'none', cursor: 'pointer', fontSize: '1rem', marginBottom: '0.75rem' }}>
+          ▶ Resume Order
+        </button>
+        {resumeData.canStartFresh && (
+          <button onClick={handleStartFresh} style={{ width: '100%', background: 'transparent', color: 'rgba(255,255,255,0.4)', fontWeight: 700, padding: '0.75rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', fontSize: '0.9rem' }}>
+            Start Fresh
+          </button>
+        )}
+        {!resumeData.canStartFresh && (
+          <p style={{ color: 'rgba(255,100,100,0.6)', fontSize: '0.8rem', marginTop: '0.75rem' }}>
+            Your order is being prepared — cannot start a new one.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+
+  /* ─── Mandatory Auth Modal ─── */
+  if (!authDone) return (
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', fontFamily: 'Inter, sans-serif' }}>
+      <div style={{ background: '#111', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '2.5rem', maxWidth: '380px', width: '100%', color: 'white' }}>
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>☕</div>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.25rem' }}>Welcome to Bombay Bethak</h2>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem' }}>
+            {tableInfo ? `Table ${tableInfo.table_number} · ${tableInfo.branches?.name}` : 'Please identify yourself to continue'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Your Name *</label>
+            <input
+              type="text" value={authForm.name} onChange={e => setAuthForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. Rahul Sharma"
+              style={{ width: '100%', background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: 'white', padding: '0.85rem 1rem', fontSize: '1rem', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Mobile Number *</label>
+            <input
+              type="tel" maxLength={10} value={authForm.mobile} onChange={e => setAuthForm(f => ({ ...f, mobile: e.target.value.replace(/\D/g,'') }))}
+              onKeyDown={e => e.key === 'Enter' && handleAuth()}
+              placeholder="10-digit mobile"
+              style={{ width: '100%', background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '10px', color: 'white', padding: '0.85rem 1rem', fontSize: '1rem', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
+          {authError && <p style={{ color: '#f87171', fontSize: '0.8rem', fontWeight: 600 }}>{authError}</p>}
+          <button
+            onClick={handleAuth} disabled={authLoading}
+            style={{ width: '100%', background: '#f59e0b', color: '#000', fontWeight: 900, padding: '1rem', borderRadius: '12px', border: 'none', cursor: authLoading ? 'wait' : 'pointer', fontSize: '1rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+          >
+            {authLoading ? 'Saving...' : 'Enter & View Menu →'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -271,7 +375,13 @@ export default function CafeOrderPage() {
   /* ─── Main Menu ─── */
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', color: 'white', fontFamily: 'Inter, sans-serif', paddingBottom: '100px' }}>
-      {customerModal}
+
+      {/* Order Locked Banner */}
+      {orderLocked && (
+        <div style={{ background: '#92400e', color: '#fef3c7', padding: '0.75rem 1.5rem', textAlign: 'center', fontSize: '0.85rem', fontWeight: 700 }}>
+          🍳 Your order is being prepared — no more changes allowed.
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, background: '#0a0a0a', zIndex: 40 }}>
@@ -362,8 +472,8 @@ export default function CafeOrderPage() {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <span style={{ fontWeight: 900 }}>₹{item.price * item.quantity}</span>
-                          <button onClick={() => setCart(p => p.filter(c => c.id !== item.id))}
-                            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex' }}>
+                          <button onClick={() => !orderLocked && setCart(p => p.filter(c => c.id !== item.id))}
+                            style={{ background: 'none', border: 'none', color: orderLocked ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)', cursor: orderLocked ? 'not-allowed' : 'pointer', display: 'flex' }}>
                             <Trash2 size={14} />
                           </button>
                         </div>
@@ -376,9 +486,9 @@ export default function CafeOrderPage() {
                     </div>
                     <p style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.4rem' }}>Payment at counter or to staff</p>
                   </div>
-                  <button onClick={handleCheckout} disabled={placing}
-                    style={{ width: '100%', background: 'white', color: 'black', border: 'none', padding: '1rem', borderRadius: '12px', fontWeight: 900, fontSize: '1rem', cursor: 'pointer' }}>
-                    {placing ? 'Placing…' : `Checkout · ₹${total}`}
+                  <button onClick={placeOrder} disabled={placing || orderLocked}
+                    style={{ width: '100%', background: orderLocked ? '#555' : 'white', color: 'black', border: 'none', padding: '1rem', borderRadius: '12px', fontWeight: 900, fontSize: '1rem', cursor: orderLocked ? 'not-allowed' : 'pointer' }}>
+                    {placing ? 'Placing…' : orderLocked ? 'Order Locked 🔒' : `Place Order · ₹${total}`}
                   </button>
                 </>
               )}

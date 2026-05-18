@@ -25,7 +25,7 @@ const NAV_GROUPS = [
       { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'], feature: 'inventory' },
       { to: '/admin/offers',    label: 'Offers',       icon: Gift,            roles: ['super_admin','admin','manager'], feature: 'inventory' },
       { to: '/admin/orders',    label: 'Orders',        icon: ClipboardList,   roles: ['super_admin','admin'], feature: 'orders' },
-      { to: '/kitchen',         label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'], feature: 'kitchen' }
+      { to: null,               label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'], feature: 'kitchen', newTab: true }
     ]
   },
   {
@@ -99,16 +99,27 @@ export default function DashboardLayout() {
             </p>
           )}
           <div className="space-y-0.5">
-            {groupItems.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-                onClick={() => setSidebarOpen(false)}
-              >
-                <Icon size={15} strokeWidth={2} />
-                {label}
-              </NavLink>
+            {groupItems.map(({ to, label, icon: Icon, newTab }) => (
+              newTab ? (
+                <button
+                  key={label}
+                  onClick={() => { window.open('/kitchen', '_blank'); setSidebarOpen(false) }}
+                  className="nav-link w-full text-left"
+                >
+                  <Icon size={15} strokeWidth={2} />
+                  {label}
+                </button>
+              ) : (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <Icon size={15} strokeWidth={2} />
+                  {label}
+                </NavLink>
+              )
             ))}
           </div>
         </div>

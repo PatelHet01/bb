@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../store/authStore'
 import { Utensils, X, ChevronRight } from 'lucide-react'
+import { playBell } from '../../utils/bell'
 
 export default function OrderNotificationOverlay() {
   const { branchId } = useAuthStore()
@@ -22,7 +23,7 @@ export default function OrderNotificationOverlay() {
         // Only trigger for priority orders with table numbers (QR/TMS)
         if (order.table_number || order.order_type?.includes('QR')) {
           setNewOrderAlert(order)
-          try { new Audio('/notification.mp3').play().catch(()=>{}) } catch(e){}
+          playBell()
         }
       })
       .subscribe()

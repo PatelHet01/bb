@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag } from 'lucide-react'
+import { playBell } from '../utils/bell'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -55,6 +56,11 @@ export default function BillingPage() {
   const [selectedTable, setSelectedTable] = useState(null) // { id, table_number, current_order_id }
   const [loadingTable, setLoadingTable] = useState(false)
   const isBhatBranch = (branchId || selectedBranch) === 'bhat'
+
+  // Kitchen State
+  const [kitchenOrderId, setKitchenOrderId] = useState(null)   // non-table kitchen order
+  const [sentToKitchenIds, setSentToKitchenIds] = useState([]) // item IDs already sent
+  const isKitchenSent = sentToKitchenIds.length > 0
 
   // Order Management
   const [editingOrderId, setEditingOrderId] = useState(null)
@@ -172,6 +178,101 @@ export default function BillingPage() {
     }, 250)
     return () => clearTimeout(t)
   }, [customerSearch, branchId, selectedBranch])
+
+  // ── Subscribe to order-ready broadcast (bell + toast) ───────────────────────
+  useEffect(() => {
+    const ch = supabase.channel('order-ready-broadcast')
+      .on('broadcast', { event: 'order_ready' }, ({ payload }) => {
+        playBell()
+        const label = payload.table_number ? `Table ${payload.table_number}` : (payload.order_type || 'Direct')
+        toast(`🔔 Order #${payload.order_number || ''} READY — ${label}`, {
+          duration: 8000,
+          style: { background: '#d97706', color: '#fff', fontWeight: 'bold' }
+        })
+      })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [])
+
+  // ── Send to Kitchen ───────────────────────────────────────────────────────────
+  async function sendToKitchen() {
+    if (cart.length === 0) { toast.error('Cart is empty'); return }
+    const branch = branchId || selectedBranch
+    let orderId = selectedTable?.current_order_id || kitchenOrderId
+
+    try {
+      if (!orderId) {
+        // Create new order in 'preparing' state
+        const { data: newOrder, error } = await supabase.from('orders').insert({
+          branch_id: branch,
+          subtotal, total,
+          status: 'preparing',
+          table_number: selectedTable?.table_number || null,
+          order_type: orderType,
+          customer_id: customer?.id || null
+        }).select().single()
+        if (error) throw error
+        orderId = newOrder.id
+        setKitchenOrderId(orderId)
+
+        await supabase.from('order_items').insert(
+          cart.map(c => ({ order_id: orderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
+        )
+        if (selectedTable) {
+          await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: orderId }).eq('id', selectedTable.id)
+          setSelectedTable(prev => prev ? { ...prev, current_order_id: orderId } : prev)
+          setCafeTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, status: 'occupied', current_order_id: orderId } : t))
+        }
+      } else {
+        // Update existing order to 'preparing' and re-sync items
+        await supabase.from('orders').update({ status: 'preparing', subtotal, total, customer_id: customer?.id || null }).eq('id', orderId)
+        await supabase.from('order_items').delete().eq('order_id', orderId)
+        await supabase.from('order_items').insert(
+          cart.map(c => ({ order_id: orderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
+        )
+      }
+
+      // Insert kds_items (clear old, insert fresh — not addon)
+      await supabase.from('kds_items').delete().eq('order_id', orderId)
+      await supabase.from('kds_items').insert(
+        cart.map(c => ({
+          order_id: orderId,
+          item_id: c.isOffer ? null : c.id,
+          item_name: c.name + (c.variant ? ` (${c.variant})` : '') + (c.isOffer ? ' [Combo]' : ''),
+          quantity: c.quantity,
+          status: 'pending',
+          is_addon: false
+        }))
+      )
+
+      setSentToKitchenIds(cart.map(c => c.id))
+      toast.success('Sent to Kitchen! 🍳', { duration: 3000 })
+    } catch (e) {
+      toast.error('Send to Kitchen failed: ' + e.message)
+    }
+  }
+
+  // ── Append add-ons to kitchen order ──────────────────────────────────────────
+  async function appendKdsAddon(item, qty) {
+    const orderId = selectedTable?.current_order_id || kitchenOrderId
+    if (!orderId) return
+    // Append to order_items
+    await supabase.from('order_items').insert({
+      order_id: orderId, item_id: item.id, quantity: qty, price: item.price, total: item.price * qty
+    })
+    // Insert kds_item with is_addon=true
+    await supabase.from('kds_items').insert({
+      order_id: orderId,
+      item_id: item.id,
+      item_name: item.name + (item.variant ? ` (${item.variant})` : ''),
+      quantity: qty,
+      status: 'pending',
+      is_addon: true
+    })
+    // Update order totals
+    const newTotal = cart.reduce((s, c) => s + c.price * c.quantity, 0) + item.price * qty
+    await supabase.from('orders').update({ subtotal: newTotal, total: newTotal }).eq('id', orderId)
+  }
 
   async function selectCustomer(c) {
     setCustomer(c)
@@ -405,14 +506,15 @@ export default function BillingPage() {
 
   function addToCart(item, qty = 1) {
     if (!item.is_active || !item.price || item.stock_quantity <= 0) return
+    const alreadyInCart = cart.some(c => c.id === item.id)
+    const isNewAddon = isKitchenSent && !sentToKitchenIds.includes(item.id) && !alreadyInCart
     setCart(prev => {
       const idx = prev.findIndex(c => c.id === item.id)
-      const next = idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty }, ...prev]
-
-      // DB sync is handled automatically inside the centralized setCart function
-      return next
+      return idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty, isAddon: isNewAddon }, ...prev]
     })
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - qty } : i))
+    // If kitchen order is active and this is a brand-new item, push to KDS as add-on
+    if (isNewAddon) appendKdsAddon(item, qty)
   }
 
   function handleOfferTap(offer) {
@@ -516,10 +618,10 @@ export default function BillingPage() {
         }
       }
 
-      // If billing from a table or editing, update the existing order; otherwise create new
+      // If billing from a table, kitchen order, or editing, update the existing order; otherwise create new
       let order
-      if (editingOrderId || selectedTable?.current_order_id) {
-        const orderIdToUpdate = editingOrderId || selectedTable.current_order_id
+      if (editingOrderId || selectedTable?.current_order_id || kitchenOrderId) {
+        const orderIdToUpdate = editingOrderId || selectedTable?.current_order_id || kitchenOrderId
         const { data: updatedOrder, error } = await supabase.from('orders')
           .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType })
           .eq('id', orderIdToUpdate)
@@ -668,6 +770,8 @@ export default function BillingPage() {
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       setCashGiven(0)
       setCartExpanded(false)
+      setKitchenOrderId(null)
+      setSentToKitchenIds([])
       const wasEditing = editingOrderId
       setEditingOrderId(null)
       toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
@@ -1080,6 +1184,14 @@ export default function BillingPage() {
           </div>
         )}
 
+        {/* Kitchen Sent Banner */}
+        {isKitchenSent && (
+          <div className="mx-3 mt-3 flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+            <Flame size={14} className="text-amber-400 flex-shrink-0" />
+            <span className="text-xs font-bold text-amber-300">Order in Kitchen — add items freely</span>
+          </div>
+        )}
+
         {/* Cart List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-ink-50 dark:bg-ink-950/30">
           {cart.length === 0 ? (
@@ -1099,7 +1211,10 @@ export default function BillingPage() {
                   <button onClick={() => updateQty(c.id, -1)} className="w-7 h-6 flex items-center justify-center hover:bg-ink-200 dark:hover:bg-ink-700 rounded active:scale-95"><Minus size={14} /></button>
                 </div>
                 <div className="flex-1 min-w-0 pl-2">
-                  <p className="font-bold text-sm text-ink-900 dark:text-white truncate leading-tight">{c.name}</p>
+                  <p className="font-bold text-sm text-ink-900 dark:text-white truncate leading-tight">
+                    {c.name}
+                    {c.isAddon && <span className="ml-1 text-[9px] font-black text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">ADD-ON</span>}
+                  </p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <p className="text-[10px] font-bold text-ink-500">{c.variant && `${c.variant} • `}₹{linePrice}</p>
                     {(c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0 && (
@@ -1236,16 +1351,28 @@ export default function BillingPage() {
           )}
           
           <div className="flex gap-2 mt-2">
-            {payments.length === 1 && payments[0].mode === 'CASH' ? (
-              <button className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none" onClick={handleExactCash} disabled={cart.length===0 || loading}>
-                <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Exact Cash</span>
-                <span className="text-xl">₹{total}</span>
+            {/* Send to Kitchen */}
+            {!isKitchenSent ? (
+              <button
+                onClick={sendToKitchen}
+                disabled={cart.length === 0 || loading}
+                className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-xl shadow-[0_8px_20px_rgba(245,158,11,0.3)] transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40"
+              >
+                <Flame size={18} /> Send to Kitchen
               </button>
             ) : (
-              <button className="flex-1 bg-ember hover:bg-ember-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(255,100,0,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none disabled:opacity-50" onClick={() => handleBill()} disabled={cart.length===0 || loading || Math.abs(total-totalPaid)>0.01}>
-                <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Confirm</span>
-                <span className="text-xl">₹{total}</span>
-              </button>
+              /* After kitchen send — collect payment */
+              payments.length === 1 && payments[0].mode === 'CASH' ? (
+                <button className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none" onClick={handleExactCash} disabled={cart.length === 0 || loading}>
+                  <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Collect Payment</span>
+                  <span className="text-xl">₹{total}</span>
+                </button>
+              ) : (
+                <button className="flex-1 bg-ember hover:bg-ember-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(255,100,0,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none disabled:opacity-50" onClick={() => handleBill()} disabled={cart.length === 0 || loading || Math.abs(total - totalPaid) > 0.01}>
+                  <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Collect Payment</span>
+                  <span className="text-xl">₹{total}</span>
+                </button>
+              )
             )}
           </div>
         </div>

@@ -136,10 +136,13 @@ export default function DashboardHome() {
             const enriched = await Promise.all(tables.map(async t => {
               if (!t.current_order_id) return { ...t, itemCount: 0, amount: 0 }
               const { data: oi } = await supabase.from('order_items')
-                .select('quantity, price').eq('order_id', t.current_order_id)
+                .select('quantity, price, items(name, variant), item_id').eq('order_id', t.current_order_id)
               const itemCount = (oi || []).reduce((s, i) => s + i.quantity, 0)
               const amount = (oi || []).reduce((s, i) => s + i.quantity * i.price, 0)
-              return { ...t, itemCount, amount }
+              
+              const { data: ord } = await supabase.from('orders').select('status').eq('id', t.current_order_id).single()
+
+              return { ...t, itemCount, amount, orderStatus: ord?.status, orderItems: oi }
             }))
             setActiveTables(enriched)
           } else {
@@ -178,6 +181,31 @@ export default function DashboardHome() {
 
     return () => supabase.removeChannel(channel)
   }, [branchId])
+
+  async function startPreparing(table) {
+    if (!table.current_order_id) return
+    try {
+      await supabase.from('orders').update({ status: 'preparing' }).eq('id', table.current_order_id)
+      
+      const kdsPayload = (table.orderItems || []).map(oi => ({
+        order_id: table.current_order_id,
+        item_id: oi.item_id,
+        item_name: oi.items?.name + (oi.items?.variant ? ` (${oi.items.variant})` : ''),
+        quantity: oi.quantity,
+        status: 'pending',
+        is_addon: false
+      }))
+      await supabase.from('kds_items').delete().eq('order_id', table.current_order_id)
+      if (kdsPayload.length > 0) {
+        await supabase.from('kds_items').insert(kdsPayload)
+      }
+      
+      // Optimistic update
+      setActiveTables(prev => prev.map(t => t.id === table.id ? { ...t, orderStatus: 'preparing' } : t))
+    } catch (e) {
+      console.error('Failed to start preparing:', e)
+    }
+  }
 
   async function handleQuickClock(workerId, activeShift) {
     if (activeShift) {
@@ -269,9 +297,19 @@ export default function DashboardHome() {
                       ₹{t.amount.toLocaleString('en-IN')}
                     </td>
                     <td className="tbl-cell">
-                      <button className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
-                        Bill →
-                      </button>
+                      <div className="flex gap-2">
+                        {t.orderStatus === 'pending' && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); startPreparing(t); }} 
+                            className="text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/20 px-2 py-1 rounded border border-amber-200 dark:border-amber-800"
+                          >
+                            Start Preparing
+                          </button>
+                        )}
+                        <button className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                          Bill →
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

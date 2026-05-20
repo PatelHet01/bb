@@ -25,6 +25,9 @@ import OrdersPage from '../pages/OrdersPage'
 import VendorsPage from '../pages/VendorsPage'
 import BranchTransfersPage from '../pages/BranchTransfersPage'
 import OffersPage from '../pages/OffersPage'
+import CashTrackingPage from '../pages/CashTrackingPage'
+import InternalLedgerPage from '../pages/InternalLedgerPage'
+import SessionPage from '../pages/SessionPage'
 
 function AdminRoute({ children, allowedRoles }) {
   const { user, role } = useAuthStore()
@@ -99,6 +102,15 @@ export default function AppRoutes() {
         } />
         <Route path="vendors" element={
           <AdminRoute allowedRoles={['super_admin', 'admin']}><VendorsPage /></AdminRoute>
+        } />
+        <Route path="cash" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><CashTrackingPage /></AdminRoute>
+        } />
+        <Route path="ledger" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><InternalLedgerPage /></AdminRoute>
+        } />
+        <Route path="sessions" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><SessionPage /></AdminRoute>
         } />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Route>

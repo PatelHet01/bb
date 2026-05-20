@@ -18,6 +18,9 @@ const FEATURES = [
   { id: 'expenses', label: 'Expense Tracking' },
   { id: 'orders', label: 'Orders Management' },
   { id: 'vendors', label: 'Vendors' },
+  { id: 'cash_tracking', label: 'Cash Tracking' },
+  { id: 'internal_ledger', label: 'Internal Ledger' },
+  { id: 'sessions', label: 'Session Management' },
   { id: 'settings', label: 'System Settings' }
 ]
 
@@ -36,6 +39,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [businessHours, setBusinessHours] = useState(DEFAULT_HOURS)
   const [hoursSaving, setHoursSaving] = useState(false)
+
+  // Staff Permissions overrides state
+  const [staffUsers, setStaffUsers] = useState([])
+  const [staffPerms, setStaffPerms] = useState({})
+  const [loadingStaff, setLoadingStaff] = useState(false)
+  const [savingStaff, setSavingStaff] = useState(false)
   
   const activeTab = searchParams.get('tab') || 'permissions'
   const isSuperAdmin = role === 'super_admin' || role === 'admin'
@@ -44,6 +53,68 @@ export default function SettingsPage() {
     fetchPermissions()
     fetchBusinessHours()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'staff_perms') {
+      fetchStaffData()
+    }
+  }, [activeTab])
+
+  async function fetchStaffData() {
+    setLoadingStaff(true)
+    try {
+      const { data: users } = await supabase
+        .from('users')
+        .select('id, username, role')
+        .eq('is_active', true)
+        .in('role', ['manager', 'worker'])
+      setStaffUsers(users || [])
+
+      const { data: staffData } = await supabase
+        .from('system_settings')
+        .select('*')
+        .eq('key', 'staff_permissions')
+        .maybeSingle()
+      if (staffData?.value) {
+        setStaffPerms(staffData.value)
+      } else {
+        setStaffPerms({})
+      }
+    } catch (e) {
+      toast.error('Failed to load staff list: ' + e.message)
+    } finally {
+      setLoadingStaff(false)
+    }
+  }
+
+  const toggleStaffPermission = (userId, featureId) => {
+    if (!isSuperAdmin) return
+    setStaffPerms(prev => {
+      const current = prev[userId] || []
+      const updated = current.includes(featureId)
+        ? current.filter(id => id !== featureId)
+        : [...current, featureId]
+      return { ...prev, [userId]: updated }
+    })
+  }
+
+  async function handleSaveStaffPerms() {
+    if (!isSuperAdmin) return toast.error('Only Super Admin can change staff overrides')
+    setSavingStaff(true)
+    try {
+      const { error } = await supabase.from('system_settings').upsert({
+        key: 'staff_permissions',
+        value: staffPerms,
+        updated_at: new Date().toISOString()
+      })
+      if (error) throw error
+      toast.success('Staff overrides saved successfully!')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setSavingStaff(false)
+    }
+  }
 
   async function fetchPermissions() {
     setLoading(true)
@@ -126,6 +197,7 @@ export default function SettingsPage() {
 
   const TABS = [
     ['permissions', 'Role Permissions'],
+    ['staff_perms', 'Staff Permissions'],
     ['hours', 'Business Hours'],
     ['announcements', 'Announcements'],
     ['rewards', 'Rewards (GHODA)'],
@@ -297,6 +369,74 @@ export default function SettingsPage() {
       {activeTab === 'transfers' && (
         <div className="bg-white dark:bg-ink-900 rounded-3xl border border-ink-200 dark:border-ink-800 shadow-xl overflow-hidden min-h-[60vh]">
           <BranchTransfersPage isEmbedded={true} />
+        </div>
+      )}
+
+      {activeTab === 'staff_perms' && (
+        <div className="bg-white dark:bg-ink-900 rounded-3xl border border-ink-200 dark:border-ink-800 shadow-xl overflow-hidden p-6 space-y-6">
+          <div className="flex justify-between items-center border-b border-ink-100 dark:border-ink-800 pb-4">
+            <div>
+              <h2 className="text-lg font-black text-ink-900 dark:text-white">Staff-Specific Feature Overrides</h2>
+              <p className="text-xs text-ink-500 font-semibold mt-1">Directly control feature access for managers and workers on a granular, per-user basis.</p>
+            </div>
+            <button
+              onClick={handleSaveStaffPerms}
+              disabled={savingStaff}
+              className="btn-primary py-2 px-5 font-black text-xs flex items-center gap-1.5"
+            >
+              <Save size={14} /> {savingStaff ? 'Saving...' : 'Save Overrides'}
+            </button>
+          </div>
+
+          {loadingStaff ? (
+            <div className="py-12 text-center text-ink-400 animate-pulse font-bold">Loading staff data...</div>
+          ) : staffUsers.length === 0 ? (
+            <div className="py-12 text-center text-ink-400 font-bold">No active managers or workers found.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-ink-50 dark:bg-ink-950 text-ink-500 text-[10px] font-black uppercase tracking-widest border-b border-ink-100 dark:border-ink-800">
+                    <th className="px-6 py-3">Staff Username</th>
+                    <th className="px-6 py-3">Role</th>
+                    {FEATURES.filter(f => f.id !== 'settings').map(f => (
+                      <th key={f.id} className="px-4 py-3 text-center whitespace-nowrap">{f.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                  {staffUsers.map(u => {
+                    const userPerms = staffPerms[u.id] || []
+                    return (
+                      <tr key={u.id} className="hover:bg-ink-50/50 dark:hover:bg-ink-950/30">
+                        <td className="px-6 py-4 whitespace-nowrap font-bold text-ink-900 dark:text-white">{u.username}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-xs text-ink-400 capitalize">{u.role}</td>
+                        {FEATURES.filter(f => f.id !== 'settings').map(f => {
+                          const hasPerm = userPerms.includes(f.id)
+                          return (
+                            <td key={f.id} className="px-4 py-4 text-center">
+                              <button
+                                type="button"
+                                disabled={!isSuperAdmin}
+                                onClick={() => toggleStaffPermission(u.id, f.id)}
+                                className={`inline-flex items-center justify-center p-1 rounded-lg transition-colors ${
+                                  hasPerm 
+                                    ? 'text-emerald-500 hover:text-emerald-600' 
+                                    : 'text-zinc-300 dark:text-zinc-700 hover:text-zinc-400'
+                                }`}
+                              >
+                                {hasPerm ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                              </button>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

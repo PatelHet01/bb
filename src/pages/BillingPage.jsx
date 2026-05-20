@@ -28,6 +28,10 @@ export default function BillingPage() {
   const [orderType, setOrderType] = useState('Dine-in')
   const [discountType, setDiscountType] = useState('FLAT')
   const [discountValue, setDiscountValue] = useState(0)
+  const [discountOpen, setDiscountOpen] = useState(false)
+
+  // Session
+  const [currentSessionId, setCurrentSessionId] = useState(null)
   
   // ── Multi-table cart cache ─────────────────────────────────────────────────
   // Used merely as a background cache to restore state when switching
@@ -69,6 +73,24 @@ export default function BillingPage() {
 
   // Offers
   const [activeOffers, setActiveOffers] = useState([])
+
+  // Load active business session for this branch
+  useEffect(() => {
+    async function loadActiveSession() {
+      const branch = branchId || selectedBranch
+      if (!branch) return
+      const { data } = await supabase
+        .from('business_sessions')
+        .select('id')
+        .eq('branch_id', branch)
+        .eq('status', 'open')
+        .order('start_time', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (data) setCurrentSessionId(data.id)
+    }
+    loadActiveSession()
+  }, [branchId, selectedBranch])
 
   const subtotal = cart.reduce((s, c) => {
     const isPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
@@ -168,6 +190,41 @@ export default function BillingPage() {
   }, [branchId, selectedBranch])
 
   useEffect(() => {
+    if (selectedTable) {
+      const match = cafeTables.find(t => t.id === selectedTable.id)
+      // If the currently selected table was cleared remotely or from another screen
+      if (match && match.status === 'available') {
+        setSelectedTable(null)
+        setCart([])
+        setOrderType('Takeaway')
+        setKitchenOrderId(null)
+        setSentToKitchenIds([])
+      }
+    }
+  }, [cafeTables])
+
+  async function clearAllTables() {
+    if (!window.confirm('Are you sure you want to clear ALL tables? This will reset them to available.')) return
+    try {
+      await supabase.from('cafe_tables')
+        .update({ status: 'available', current_order_id: null })
+        .eq('branch_id', 'bhat')
+      
+      setTableCarts({})
+      if (selectedTable) {
+        setSelectedTable(null)
+        setCart([])
+        setOrderType('Takeaway')
+      }
+      setKitchenOrderId(null)
+      setSentToKitchenIds([])
+      toast.success('All tables cleared')
+    } catch (e) {
+      toast.error('Failed to clear tables')
+    }
+  }
+
+  useEffect(() => {
     if (customerSearch.length < 2) { setCustomerResults([]); return }
     const t = setTimeout(async () => {
       let q = supabase.from('customers').select('*')
@@ -233,8 +290,10 @@ export default function BillingPage() {
       }
 
       // Insert kds_items (clear old, insert fresh — not addon)
-      await supabase.from('kds_items').delete().eq('order_id', orderId)
-      await supabase.from('kds_items').insert(
+      const { error: delErr } = await supabase.from('kds_items').delete().eq('order_id', orderId)
+      if (delErr) throw delErr
+
+      const { error: insErr } = await supabase.from('kds_items').insert(
         cart.map(c => ({
           order_id: orderId,
           item_id: c.isOffer ? null : c.id,
@@ -257,11 +316,13 @@ export default function BillingPage() {
     const orderId = selectedTable?.current_order_id || kitchenOrderId
     if (!orderId) return
     // Append to order_items
-    await supabase.from('order_items').insert({
+    const { error: itemErr } = await supabase.from('order_items').insert({
       order_id: orderId, item_id: item.id, quantity: qty, price: item.price, total: item.price * qty
     })
+    if (itemErr) { toast.error('Failed to add item: ' + itemErr.message); return }
+    
     // Insert kds_item with is_addon=true
-    await supabase.from('kds_items').insert({
+    const { error: kdsErr } = await supabase.from('kds_items').insert({
       order_id: orderId,
       item_id: item.id,
       item_name: item.name + (item.variant ? ` (${item.variant})` : ''),
@@ -269,6 +330,8 @@ export default function BillingPage() {
       status: 'pending',
       is_addon: true
     })
+    if (kdsErr) { toast.error('Failed to send to KDS: ' + kdsErr.message); return }
+
     // Update order totals
     const newTotal = cart.reduce((s, c) => s + c.price * c.quantity, 0) + item.price * qty
     await supabase.from('orders').update({ subtotal: newTotal, total: newTotal }).eq('id', orderId)
@@ -480,6 +543,8 @@ export default function BillingPage() {
     setDiscountType('FLAT')
     setDiscountValue(0)
     setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
+    setKitchenOrderId(null)
+    setSentToKitchenIds([])
   }
 
   // Legacy alias kept for table-dashboard button
@@ -623,7 +688,7 @@ export default function BillingPage() {
       if (editingOrderId || selectedTable?.current_order_id || kitchenOrderId) {
         const orderIdToUpdate = editingOrderId || selectedTable?.current_order_id || kitchenOrderId
         const { data: updatedOrder, error } = await supabase.from('orders')
-          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType })
+          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id || null, session_id: currentSessionId })
           .eq('id', orderIdToUpdate)
           .select().single()
         if (error) throw error
@@ -641,7 +706,8 @@ export default function BillingPage() {
       } else {
         const { data: newOrder, error } = await supabase.from('orders').insert({
           customer_id: customer?.id || null, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
-          table_number: selectedTable?.table_number || null, order_type: orderType
+          table_number: selectedTable?.table_number || null, order_type: orderType,
+          received_by: user?.id || null, session_id: currentSessionId
         }).select().single()
         if (error) throw error
         order = newOrder
@@ -943,6 +1009,8 @@ export default function BillingPage() {
                 setCustomer(null)
                 setCustBalances({ khata: 0, advance: 0 })
                 setOrderType('Takeaway')
+                setKitchenOrderId(null)
+                setSentToKitchenIds([])
               } else {
                 const tbl = cafeTables.find(t => t.id === val)
                 if (tbl) switchTable(tbl)
@@ -957,6 +1025,13 @@ export default function BillingPage() {
               return <option key={t.id} value={t.id}>{label}</option>
             })}
           </select>
+          <button 
+            onClick={clearAllTables}
+            className="text-[10px] font-bold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 px-2 py-2 rounded-lg border border-red-200 dark:border-red-800 flex-shrink-0"
+            title="Reset all tables to available"
+          >
+            Clear All
+          </button>
         </div>
       )}
 
@@ -1093,7 +1168,7 @@ export default function BillingPage() {
                             onClick={() => handleCardTap(item)}
                             onContextMenu={(e) => { e.preventDefault(); setQtyEditor(item) }}
                             disabled={isInactive || (isOut && qty === 0)}
-                            className={`relative flex-shrink-0 snap-start w-[100px] h-[110px] flex flex-col justify-between p-2.5 rounded-xl text-left select-none transition-all
+                            className={`relative flex-shrink-0 snap-start w-[100px] min-h-[100px] h-auto flex flex-col justify-between p-2.5 rounded-xl text-left select-none transition-all
                               ${qty > 0 ? 'bg-ink-900 border-2 border-ember shadow-[0_0_15px_rgba(255,100,0,0.3)]' : 
                                 isInactive || (isOut && qty === 0) ? 'bg-ink-100 dark:bg-ink-900/40 border border-transparent opacity-60 grayscale' : 
                                 'bg-ink-800 hover:bg-ink-700 border border-ink-700 hover:border-ink-500'}
@@ -1107,7 +1182,7 @@ export default function BillingPage() {
                             )}
 
                             <div>
-                              <div className={`font-bold text-sm leading-tight line-clamp-2 ${qty > 0 ? 'text-white' : isInactive ? 'text-ink-400' : 'text-white'}`}>
+                              <div className={`font-bold text-sm leading-tight ${qty > 0 ? 'text-white' : isInactive ? 'text-ink-400' : 'text-white'}`}>
                                 {item.name}
                               </div>
                               {item.variant && (
@@ -1268,28 +1343,30 @@ export default function BillingPage() {
                 </div>
               </div>
 
-              {/* Discounts */}
-              <div className="bg-ink-50 dark:bg-ink-950 p-3 rounded-xl border border-ink-200 dark:border-ink-800">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Discount</span>
-                  <div className="flex bg-white dark:bg-ink-900 rounded p-0.5 border border-ink-200 dark:border-ink-800">
-                    <button onClick={() => setDiscountType('FLAT')} className={`px-2 py-0.5 text-xs font-bold rounded ${discountType === 'FLAT' ? 'bg-ember text-white' : 'text-ink-500'}`}>₹</button>
-                    <button onClick={() => setDiscountType('PERCENT')} className={`px-2 py-0.5 text-xs font-bold rounded ${discountType === 'PERCENT' ? 'bg-ember text-white' : 'text-ink-500'}`}>%</button>
-                  </div>
+              {/* Discount — collapsible */}
+              {discountOpen && (
+                <div className="flex gap-2 items-center p-2 bg-amber-50 dark:bg-amber-900/10 rounded-xl border border-amber-200 dark:border-amber-800 animate-slide-up">
+                  <button onClick={() => setDiscountType('FLAT')} className={`px-3 py-1.5 text-xs font-black rounded-lg flex-shrink-0 ${discountType === 'FLAT' ? 'bg-ember text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}>₹ Flat</button>
+                  <button onClick={() => setDiscountType('PERCENT')} className={`px-3 py-1.5 text-xs font-black rounded-lg flex-shrink-0 ${discountType === 'PERCENT' ? 'bg-ember text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}>% Off</button>
+                  <input type="number" min="0" step={discountType === 'PERCENT' ? '1' : '0.5'} className="input flex-1 text-right font-black text-lg"
+                    value={discountValue} onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)} placeholder="0" autoFocus />
+                  {calculatedDiscount > 0 && <span className="text-sm font-black text-emerald-600 flex-shrink-0">−₹{calculatedDiscount.toFixed(0)}</span>}
                 </div>
-                <div className="flex items-center gap-2">
-                  <input type="number" min="0" step={discountType === 'PERCENT' ? '1' : '0.5'} className="input flex-1 text-right font-black" value={discountValue} onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)} placeholder="0" />
-                  {calculatedDiscount > 0 && (
-                    <span className="text-xs font-bold text-red-500">-₹{calculatedDiscount.toLocaleString('en-IN', {maximumFractionDigits:2})}</span>
-                  )}
-                </div>
-              </div>
+              )}
 
               {/* Payments */}
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest">Payment Mode</span>
-                  <button onClick={addPaymentSplit} className="text-[10px] font-bold text-ember bg-ember/10 hover:bg-ember/20 px-2 py-1 rounded transition-colors">Split Bill</button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setDiscountOpen(d => !d); if (!discountOpen) setTimeout(() => {}, 50) }}
+                      className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${discountValue > 0 ? 'bg-ember text-white' : 'bg-ember/10 text-ember hover:bg-ember/20'}`}
+                    >
+                      🏷️ {discountValue > 0 ? `−₹${calculatedDiscount.toFixed(0)}` : 'Discount'}
+                    </button>
+                    <button onClick={addPaymentSplit} className="text-[10px] font-bold text-ember bg-ember/10 hover:bg-ember/20 px-2 py-1 rounded transition-colors">Split</button>
+                  </div>
                 </div>
               {payments.map((p, i) => (
                 <div key={i} className="flex gap-2 items-center bg-ink-50 dark:bg-ink-950 p-2 rounded-xl border border-ink-200 dark:border-ink-800">

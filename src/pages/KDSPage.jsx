@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { Utensils, Clock, Maximize2, Check, ChevronLeft } from 'lucide-react'
+import { Utensils, Clock, Maximize2, Check, ChevronLeft, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { playBell } from '../utils/bell'
 
@@ -48,6 +48,7 @@ export default function KDSPage() {
   const [kdsItems, setKdsItems] = useState({})
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(Date.now())
+  const [dbError, setDbError] = useState(false)
 
   // Live ticking clock
   useEffect(() => {
@@ -57,7 +58,7 @@ export default function KDSPage() {
 
   const fetchAll = useCallback(async () => {
     let q = supabase.from('orders')
-      .select('*, customers(name)')
+      .select('*, customers(name), users!received_by(username)')
       .in('status', ['preparing', 'ready'])
       .order('created_at', { ascending: true })
     if (branchId) q = q.eq('branch_id', branchId)
@@ -68,7 +69,16 @@ export default function KDSPage() {
 
     if (fetched.length > 0) {
       const ids = fetched.map(o => o.id)
-      const { data: kItems } = await supabase.from('kds_items').select('*').in('order_id', ids)
+      const { data: kItems, error } = await supabase.from('kds_items').select('*').in('order_id', ids)
+      
+      if (error) {
+        console.error('KDS Fetch Error:', error)
+        setDbError(true)
+        toast.error('Database Error: Did you run the SQL migration? kds_items is missing.', { id: 'kds-err' })
+      } else {
+        setDbError(false)
+      }
+
       const grouped = {}
       ;(kItems || []).forEach(ki => {
         if (!grouped[ki.order_id]) grouped[ki.order_id] = []
@@ -134,6 +144,13 @@ export default function KDSPage() {
     return m > 0 ? `${m}m ${s % 60}s` : `${s}s`
   }
 
+  async function dismissOrder(orderId) {
+    if (!window.confirm('Dismiss this order from the kitchen board?')) return
+    const { error } = await supabase.from('orders').update({ status: 'completed' }).eq('id', orderId)
+    if (error) { toast.error('Failed to dismiss: ' + error.message); return }
+    setOrders(prev => prev.filter(o => o.id !== orderId))
+  }
+
   return (
     <div className="min-h-screen bg-[#09090F] text-white p-4 md:p-5">
 
@@ -160,6 +177,14 @@ export default function KDSPage() {
           <Maximize2 size={15} /> Fullscreen
         </button>
       </div>
+
+      {dbError && (
+        <div className="mb-6 p-4 bg-red-900/50 border-2 border-red-500 rounded-xl text-red-200">
+          <h2 className="text-xl font-black text-red-400 mb-1 flex items-center gap-2"><AlertTriangle size={20}/> CRITICAL DATABASE ERROR</h2>
+          <p className="font-bold">The KDS cannot function because the <code>kds_items</code> table is missing from Supabase.</p>
+          <p className="text-sm mt-1">You MUST go to the Supabase SQL Editor and run the script in <code>/scratch/migration_kds_items.sql</code></p>
+        </div>
+      )}
 
       {/* Body */}
       {loading ? (
@@ -217,10 +242,23 @@ export default function KDSPage() {
                     {order.customers?.name && (
                       <p className="text-xs text-zinc-500 leading-none mt-0.5">{order.customers.name}</p>
                     )}
+                    {order.users?.username && (
+                      <p className="text-[9px] text-zinc-600 leading-none mt-0.5">Staff: {order.users.username}</p>
+                    )}
                   </div>
-                  <div className={`flex items-center gap-1 text-sm font-bold ${isOld ? 'text-red-400' : 'text-zinc-500'}`}>
-                    <Clock size={13} />
-                    <span className="tabular-nums">{elapsed(order.created_at)}</span>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className={`flex items-center gap-1 text-sm font-bold ${isOld ? 'text-red-400' : 'text-zinc-500'}`}>
+                      <Clock size={13} />
+                      <span className="tabular-nums">{elapsed(order.created_at)}</span>
+                    </div>
+                    {(order.status === 'ready' || allReady || (regular.length === 0 && addons.length === 0)) && (
+                      <button 
+                        onClick={() => dismissOrder(order.id)}
+                        className="text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-2 py-1 rounded-lg font-bold flex items-center gap-1 transition-colors"
+                      >
+                        <X size={12} /> Dismiss
+                      </button>
+                    )}
                   </div>
                 </div>
 

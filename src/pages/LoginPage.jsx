@@ -33,6 +33,7 @@ export default function LoginPage() {
     const { data } = await supabase.from('users').select('*').eq('username', u).eq('is_active', true).single()
     if (data && data.password_hash === password) {
       setAuth({ username: data.username, id: data.id }, data.role, data.branch_id, data.branch_id ? data.branch_id.toUpperCase() : 'All Branches')
+      supabase.from('auth_logs').insert({ user_id: data.id, username: data.username, branch_id: data.branch_id, event: 'LOGIN', user_agent: navigator.userAgent }).then()
       toast.success(`Signed in as ${data.username}`)
       navigate('/admin/dashboard', { replace: true })
       setLoading(false)
@@ -43,6 +44,7 @@ export default function LoginPage() {
     const record = HARDCODED_USERS[u]
     if (record && record.password === password && !data) {
       setAuth({ username: u, id: `hardcoded-${u}` }, record.role, record.branchId, record.branchName)
+      supabase.from('auth_logs').insert({ user_id: null, username: u, branch_id: record.branchId, event: 'LOGIN', user_agent: navigator.userAgent }).then()
       toast.success(`Signed in as ${u}`)
       navigate('/admin/dashboard', { replace: true })
       setLoading(false)

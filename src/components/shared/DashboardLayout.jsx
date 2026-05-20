@@ -4,12 +4,13 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
   BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee, Shield,
-  ClipboardList, Truck, ArrowLeftRight
+  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import OrderNotificationOverlay from './OrderNotificationOverlay'
 import BBLogo from './BBLogo'
+import { useAutoLogout } from '../../hooks/useAutoLogout'
 
 const NAV_GROUPS = [
   {
@@ -25,7 +26,8 @@ const NAV_GROUPS = [
       { to: '/admin/inventory', label: 'Inventory',    icon: Package,         roles: ['super_admin','admin','manager'], feature: 'inventory' },
       { to: '/admin/offers',    label: 'Offers',       icon: Gift,            roles: ['super_admin','admin','manager'], feature: 'inventory' },
       { to: '/admin/orders',    label: 'Orders',        icon: ClipboardList,   roles: ['super_admin','admin'], feature: 'orders' },
-      { to: null,               label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'], feature: 'kitchen', newTab: true }
+      { to: '/admin/sessions',  label: 'Sessions',     icon: Clock,           roles: ['super_admin','admin'], feature: 'sessions' },
+      { to: null,               label: 'Kitchen Display', icon: Utensils,      roles: ['super_admin','admin','manager'], feature: 'billing', newTab: true }
     ]
   },
   {
@@ -39,8 +41,10 @@ const NAV_GROUPS = [
   {
     title: 'FINANCE',
     items: [
-      { to: '/admin/expenses',  label: 'Expenses',     icon: Receipt,         roles: ['super_admin','admin'], feature: 'expenses' },
-      { to: '/admin/analytics', label: 'Analytics',    icon: BarChart2,       roles: ['super_admin','admin'], feature: 'analytics' }
+      { to: '/admin/expenses',  label: 'Expenses',       icon: Receipt,        roles: ['super_admin','admin'], feature: 'expenses' },
+      { to: '/admin/analytics', label: 'Analytics',      icon: BarChart2,      roles: ['super_admin','admin'], feature: 'analytics' },
+      { to: '/admin/cash',      label: 'Cash Tracking',  icon: Banknote,       roles: ['super_admin','admin'], feature: 'cash_tracking' },
+      { to: '/admin/ledger',    label: 'Internal Ledger',icon: ArrowLeftRight, roles: ['super_admin','admin'], feature: 'internal_ledger' }
     ]
   },
   {
@@ -57,6 +61,7 @@ const ROLE_LABEL = {
   admin: 'Admin',
   manager: 'Manager',
   developer: 'Developer',
+  worker: 'Worker',
 }
 
 export default function DashboardLayout() {
@@ -64,12 +69,17 @@ export default function DashboardLayout() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [permissions, setPermissions] = useState(null)
+  const [staffPerms, setStaffPerms] = useState(null)
+  const { showWarning, extendSession } = useAutoLogout()
 
   useEffect(() => {
     // Fetch feature permissions
     async function getPerms() {
       const { data } = await supabase.from('system_settings').select('*').eq('key', 'role_permissions').single()
       if (data) setPermissions(data.value)
+
+      const { data: staffData } = await supabase.from('system_settings').select('*').eq('key', 'staff_permissions').single()
+      if (staffData) setStaffPerms(staffData.value)
     }
     getPerms()
   }, [])
@@ -83,6 +93,14 @@ export default function DashboardLayout() {
     return NAV_GROUPS.map((group, idx) => {
       const groupItems = group.items.filter(n => {
         if (role === 'super_admin' || role === 'developer') return true
+        
+        // 1. Check user-level override
+        if (user?.id && staffPerms && staffPerms[user.id]) {
+          if (!n.feature) return true
+          return staffPerms[user.id].includes(n.feature)
+        }
+
+        // 2. Standard role check
         if (!n.roles.includes(role)) return false
         if (!n.feature) return true
         if (permissions && permissions[role]) return permissions[role].includes(n.feature)
@@ -223,6 +241,21 @@ export default function DashboardLayout() {
         </main>
 
         <OrderNotificationOverlay />
+
+        {/* Auto-logout warning modal */}
+        {showWarning && (
+          <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center">
+            <div className="bg-white dark:bg-zinc-900 rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center animate-scale-up">
+              <div className="text-4xl mb-4">⏱️</div>
+              <h2 className="font-bold text-lg mb-2 text-zinc-900 dark:text-white">Session Expiring Soon</h2>
+              <p className="text-zinc-500 text-sm mb-6">Your session will expire in 5 minutes due to inactivity.</p>
+              <div className="flex gap-3">
+                <button onClick={extendSession} className="btn-primary flex-1">Continue Session</button>
+                <button onClick={handleLogout} className="btn-secondary flex-1">Logout Now</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

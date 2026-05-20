@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X, UtensilsCrossed, GitBranch, Clock } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
+import { toast } from 'react-hot-toast'
 
 export default function DashboardHome() {
   const { role, branchId, branchName } = useAuthStore()
@@ -207,6 +208,39 @@ export default function DashboardHome() {
     }
   }
 
+  async function clearAllTables() {
+    if (!window.confirm('Are you sure you want to clear ALL active tables? This will reset them to available.')) return
+    try {
+      const { error } = await supabase.from('cafe_tables')
+        .update({ status: 'available', current_order_id: null })
+        .eq('branch_id', 'bhat')
+        .eq('status', 'occupied')
+      
+      if (error) throw error
+      setActiveTables([])
+      toast.success('All active tables cleared')
+    } catch (e) {
+      console.error('Failed to clear tables:', e)
+      toast.error('Failed to clear tables: ' + e.message)
+    }
+  }
+
+  async function clearTable(tableId) {
+    if (!window.confirm('Clear this table?')) return
+    try {
+      const { error } = await supabase.from('cafe_tables')
+        .update({ status: 'available', current_order_id: null })
+        .eq('id', tableId)
+      
+      if (error) throw error
+      setActiveTables(prev => prev.filter(t => t.id !== tableId))
+      toast.success('Table cleared')
+    } catch (e) {
+      console.error('Failed to clear table:', e)
+      toast.error('Failed to clear table: ' + e.message)
+    }
+  }
+
   async function handleQuickClock(workerId, activeShift) {
     if (activeShift) {
       await supabase.from('shifts').update({ clock_out: new Date().toISOString() }).eq('id', activeShift.id)
@@ -268,7 +302,12 @@ export default function DashboardHome() {
             <h2 className="font-semibold text-amber-700 dark:text-amber-400 text-sm flex items-center gap-2">
               <UtensilsCrossed size={16} /> Active Tables — Bhat ({activeTables.length} occupied)
             </h2>
-            <Link to="/admin/billing" className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 font-bold">Go to Billing →</Link>
+            <div className="flex items-center gap-4">
+              <button onClick={clearAllTables} className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 font-bold px-2 py-1 bg-red-50 dark:bg-red-900/20 rounded">
+                Clear All
+              </button>
+              <Link to="/admin/billing" className="text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 font-bold">Go to Billing →</Link>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -308,6 +347,12 @@ export default function DashboardHome() {
                         )}
                         <button className="text-xs font-bold text-blue-500 hover:text-blue-700 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
                           Bill →
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); clearTable(t.id); }} 
+                          className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded"
+                        >
+                          Clear
                         </button>
                       </div>
                     </td>

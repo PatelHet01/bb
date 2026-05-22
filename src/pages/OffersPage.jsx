@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
-import { Plus, Trash2, Edit2, Check, X, Tag, Search } from 'lucide-react'
+import { Plus, Trash2, Edit2, Check, X, Tag, Search, Minus } from 'lucide-react'
 
 export default function OffersPage() {
   const { branchId, role } = useAuthStore()

@@ -33,9 +33,9 @@ export default function VendorsPage() {
   const [form, setForm] = useState({ name: '', contact: '', category: 'General', notes: '' })
   const [saving, setSaving] = useState(false)
 
-  // Manual ledger entry form
-  const [showLedgerForm, setShowLedgerForm] = useState(false)
-  const [ledgerForm, setLedgerForm] = useState({ type: 'PURCHASE', amount: '', reference: '', created_at: '' })
+  // Payment recording form (replaces ledger entry form)
+  const [showPaymentForm, setShowPaymentForm] = useState(false)
+  const [paymentForm, setPaymentForm] = useState({ amount: '', mode: 'CASH', remarks: '', created_at: '' })
   const [editingLedgerId, setEditingLedgerId] = useState(null)
 
   // Items tagged to vendor
@@ -47,7 +47,9 @@ export default function VendorsPage() {
   const [showPOForm, setShowPOForm] = useState(false)
   const [editingPO, setEditingPO] = useState(null) // PO being edited (draft only)
   const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '' })
-  const [poLines, setPOLines] = useState([{ item_id: '', quantity: '', unit_price: '' }])
+  const [poLines, setPOLines] = useState([{ item_id: '', quantity: '', unit_price: '', searchText: '' }])
+  const [activeLineSearchIdx, setActiveLineSearchIdx] = useState(null)
+
   const [expandedPO, setExpandedPO] = useState(null)
 
   // Link items to vendor
@@ -149,56 +151,99 @@ export default function VendorsPage() {
     setShowVendorForm(true)
   }
 
-  async function addLedgerEntry(e) {
+  function handleEditPaymentClick(l) {
+    const d = new Date(l.created_at)
+    const localDateStr = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    
+    let parsedMode = 'CASH'
+    let parsedRemarks = l.reference || ''
+    if (l.reference && (l.reference.startsWith('CASH') || l.reference.startsWith('UPI'))) {
+      const parts = l.reference.split(' - ')
+      parsedMode = parts[0]
+      parsedRemarks = parts.slice(1).join(' - ')
+    }
+    
+    setEditingLedgerId(l.id)
+    setPaymentForm({
+      amount: String(l.amount),
+      mode: parsedMode,
+      remarks: parsedRemarks,
+      created_at: localDateStr
+    })
+    setShowPaymentForm(true)
+  }
+
+  async function handleAddPayment(e) {
     e.preventDefault()
-    if (!ledgerForm.amount || parseFloat(ledgerForm.amount) <= 0) return toast.error('Enter valid amount')
+    const amt = parseFloat(paymentForm.amount)
+    if (!amt || amt <= 0) return toast.error('Enter valid amount')
+
+    const currentPaymentAmt = editingLedgerId ? Number(ledger.find(l => l.id === editingLedgerId)?.amount || 0) : 0
+    const maxAllowed = vendorBalance + currentPaymentAmt
+    if (amt > maxAllowed) {
+      toast.error(`Payment amount cannot exceed outstanding balance of ₹${maxAllowed.toFixed(2)}`)
+      return
+    }
+
     setSaving(true)
     try {
+      const refString = paymentForm.remarks.trim()
+        ? `${paymentForm.mode} - ${paymentForm.remarks.trim()}`
+        : paymentForm.mode
+
       const payload = {
         vendor_id: selectedVendor.id,
         branch_id: branchId || selectedVendor.branch_id,
-        type: ledgerForm.type,
-        amount: parseFloat(ledgerForm.amount),
-        reference: ledgerForm.reference || null,
+        type: 'PAYMENT',
+        amount: amt,
+        reference: refString,
         created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
         recorded_by: user.username
       }
-      if (ledgerForm.created_at) {
-        payload.created_at = new Date(ledgerForm.created_at).toISOString()
+      if (paymentForm.created_at) {
+        payload.created_at = new Date(paymentForm.created_at).toISOString()
       }
-      
+
       if (editingLedgerId) {
-        if (!editingLedgerId) throw new Error("Missing entry ID for update");
         const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', editingLedgerId).select().single()
         if (error) throw error
         setLedger(prev => prev.map(l => l.id === editingLedgerId ? data : l))
-        toast.success('Entry updated')
+        toast.success('Payment updated')
       } else {
         const { data, error } = await supabase.from('vendor_ledger').insert(payload).select().single()
         if (error) throw error
         setLedger(prev => [data, ...prev])
-        toast.success('Entry added')
+        toast.success('Payment recorded')
       }
-      
-      setShowLedgerForm(false)
+
+      setShowPaymentForm(false)
       setEditingLedgerId(null)
-      setLedgerForm({ type: 'PURCHASE', amount: '', reference: '', created_at: '' })
+      setPaymentForm({ amount: '', mode: 'CASH', remarks: '', created_at: '' })
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
   }
 
   async function deleteLedgerEntry(id) {
     if (!id || id === 'null') {
-      toast.error(`Cannot delete: Entry ID is missing or invalid (${id})`);
-      return;
+      toast.error(`Cannot delete: Entry ID is missing or invalid (${id})`)
+      return
     }
-    if(!confirm('Delete this ledger entry?')) return
-    
+    const entry = ledger.find(l => l.id === id)
+    if (!entry) {
+      toast.error('Entry not found')
+      return
+    }
+    if (entry.type !== 'PAYMENT') {
+      toast.error('Only payment entries can be deleted')
+      return
+    }
+    if (!confirm('Delete this payment entry?')) return
+
     console.log("Deleting id:", id)
     const { error } = await supabase.from('vendor_ledger').delete().eq('id', id)
-    if(error) toast.error(error.message)
+    if (error) toast.error(error.message)
     else {
-      toast.success('Entry deleted')
+      toast.success('Payment deleted')
       setLedger(prev => prev.filter(l => l.id !== id))
     }
   }
@@ -206,7 +251,7 @@ export default function VendorsPage() {
   // ---- Purchase Order Functions ----
   const poTotal = useMemo(() => poLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0), [poLines])
 
-  function addPOLine() { setPOLines(p => [...p, { item_id: '', quantity: '', unit_price: '' }]) }
+  function addPOLine() { setPOLines(p => [...p, { item_id: '', quantity: '', unit_price: '', searchText: '' }]) }
   function removePOLine(i) { setPOLines(p => p.filter((_, idx) => idx !== i)) }
   function updatePOLine(i, field, val) { setPOLines(p => p.map((l, idx) => idx === i ? { ...l, [field]: val } : l)) }
 
@@ -240,10 +285,18 @@ export default function VendorsPage() {
     e.preventDefault()
     const validLines = poLines.filter(l => l.item_id && parseFloat(l.quantity) > 0)
     if (!validLines.length) { toast.error('Add at least one item'); return }
+    if (!poForm.notes || !poForm.notes.trim()) {
+      toast.error('Remarks are required')
+      return
+    }
+    const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+    const amtPaid = poForm.payment_mode === 'CREDIT' ? 0 : (parseFloat(poForm.amount_paid) || 0)
+    if (poForm.payment_mode !== 'CREDIT' && amtPaid > total) {
+      toast.error('Amount paid cannot exceed total amount')
+      return
+    }
     setSaving(true)
     try {
-      const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
-      const amtPaid = parseFloat(poForm.amount_paid) || 0
       const newStatus = receiveNow ? 'received' : 'draft'
       const customDate = poForm.created_at ? new Date(poForm.created_at).toISOString() : undefined
 
@@ -287,7 +340,7 @@ export default function VendorsPage() {
       toast.success(receiveNow ? 'Purchase received & stock updated!' : 'Draft purchase order saved')
       setShowPOForm(false)
       setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
-      setPOLines([{ item_id: '', quantity: '', unit_price: '' }])
+      setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }])
       await refreshVendorData()
     } catch (err) { toast.error(err.message) }
     finally { setSaving(false) }
@@ -391,7 +444,13 @@ export default function VendorsPage() {
     setEditingPO(po)
     const localDateStr = po.created_at ? new Date(new Date(po.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''
     setPOForm({ invoice_ref: po.invoice_ref || '', payment_mode: po.payment_mode || 'CREDIT', amount_paid: po.amount_paid || '', notes: po.notes || '', created_at: localDateStr })
-    setPOLines((po.vendor_purchase_items || []).map(li => ({ id: li.id, item_id: li.item_id, quantity: String(li.quantity), unit_price: String(li.unit_price) })))
+    setPOLines((po.vendor_purchase_items || []).map(li => ({
+      id: li.id,
+      item_id: li.item_id,
+      quantity: String(li.quantity),
+      unit_price: String(li.unit_price),
+      searchText: li.items?.name || ''
+    })))
     setShowPOForm(true)
     setExpandedPO(null)
   }
@@ -400,13 +459,22 @@ export default function VendorsPage() {
     e.preventDefault()
     const validLines = poLines.filter(l => l.item_id && parseFloat(l.quantity) > 0)
     if (!validLines.length) { toast.error('Add at least one item'); return }
+    if (!poForm.notes || !poForm.notes.trim()) {
+      toast.error('Remarks are required')
+      return
+    }
+    const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+    const amtPaid = poForm.payment_mode === 'CREDIT' ? 0 : (parseFloat(poForm.amount_paid) || 0)
+    if (poForm.payment_mode !== 'CREDIT' && amtPaid > total) {
+      toast.error('Amount paid cannot exceed total amount')
+      return
+    }
     setSaving(true)
     try {
-      const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
       const customDate = poForm.created_at ? new Date(poForm.created_at).toISOString() : undefined
       await supabase.from('vendor_purchase_orders').update({
         total_amount: total,
-        amount_paid: parseFloat(poForm.amount_paid) || 0,
+        amount_paid: amtPaid,
         payment_mode: poForm.payment_mode,
         invoice_ref: poForm.invoice_ref || null,
         notes: poForm.notes || null,
@@ -421,7 +489,7 @@ export default function VendorsPage() {
       setShowPOForm(false)
       setEditingPO(null)
       setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '' })
-      setPOLines([{ item_id: '', quantity: '', unit_price: '' }])
+      setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }])
       await refreshVendorData()
     } catch (err) { toast.error(err.message) }
     finally { setSaving(false) }
@@ -616,46 +684,48 @@ export default function VendorsPage() {
                 {label}
               </button>
             ))}
-            {isAdmin && ledgerTab === 'ledger' && (
-              <button onClick={() => { setEditingLedgerId(null); setLedgerForm({ type: 'PURCHASE', amount: '', reference: '' }); setShowLedgerForm(!showLedgerForm); }} className="ml-auto px-3 py-2 text-xs font-bold text-ember hover:bg-ember/10 rounded-lg transition-colors">
-                + Entry
+            {isAdmin && ledgerTab === 'ledger' && vendorBalance > 0 && (
+              <button onClick={() => { setEditingLedgerId(null); setPaymentForm({ amount: '', mode: 'CASH', remarks: '', created_at: '' }); setShowPaymentForm(!showPaymentForm); }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
+                Record Payment
               </button>
             )}
             {isAdmin && ledgerTab === 'orders' && (
-              <button onClick={() => { setShowPOForm(p => !p); setPOLines([{ item_id: '', quantity: '', unit_price: '' }]); setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' }) }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
+              <button onClick={() => { setShowPOForm(p => !p); setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }]); setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' }) }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
                 + New Purchase
               </button>
             )}
           </div>
 
-          {/* Ledger entry form */}
-          {showLedgerForm && (
-            <form onSubmit={addLedgerEntry} className="p-4 bg-ink-50 dark:bg-ink-950/30 border-b border-ink-200 dark:border-ink-800 space-y-3 animate-slide-up">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Payment recording form */}
+          {showPaymentForm && (
+            <form onSubmit={handleAddPayment} className="p-4 bg-ink-50 dark:bg-ink-950/30 border-b border-ink-200 dark:border-ink-800 space-y-3 animate-slide-up">
+              <div className="text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest">
+                {editingLedgerId ? 'Edit Payment' : 'Record Payment'}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Type</label>
-                  <select className="input text-sm" value={ledgerForm.type} onChange={e => setLedgerForm(p => ({...p, type: e.target.value}))}>
-                    <option value="PURCHASE">Purchase (owe)</option>
-                    <option value="PAYMENT">Payment (paid)</option>
-                    <option value="ADJUSTMENT">Adjustment</option>
+                  <label className="label">Amount (₹) *</label>
+                  <input type="number" min="0.01" step="0.01" required className="input text-sm font-bold" value={paymentForm.amount} onChange={e => setPaymentForm(p => ({...p, amount: e.target.value}))} placeholder="0.00" />
+                </div>
+                <div>
+                  <label className="label">Payment Mode *</label>
+                  <select className="input text-sm" value={paymentForm.mode} onChange={e => setPaymentForm(p => ({...p, mode: e.target.value}))}>
+                    <option value="CASH">Cash</option>
+                    <option value="UPI">UPI</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">Amount (₹)</label>
-                  <input type="number" min="0" step="0.01" required className="input text-sm font-bold" value={ledgerForm.amount} onChange={e => setLedgerForm(p => ({...p, amount: e.target.value}))} />
-                </div>
-                <div>
-                  <label className="label">Reference</label>
-                  <input className="input text-sm" value={ledgerForm.reference} onChange={e => setLedgerForm(p => ({...p, reference: e.target.value}))} placeholder="Invoice / note" />
+                  <label className="label">Remarks</label>
+                  <input className="input text-sm" value={paymentForm.remarks} onChange={e => setPaymentForm(p => ({...p, remarks: e.target.value}))} placeholder="Reference or notes" />
                 </div>
                 <div>
                   <label className="label">Date (Optional)</label>
-                  <input type="datetime-local" className="input text-sm" value={ledgerForm.created_at} onChange={e => setLedgerForm(p => ({...p, created_at: e.target.value}))} />
+                  <input type="datetime-local" className="input text-sm" value={paymentForm.created_at} onChange={e => setPaymentForm(p => ({...p, created_at: e.target.value}))} />
                 </div>
               </div>
               <div className="flex gap-2 justify-end">
-                <button type="button" onClick={() => setShowLedgerForm(false)} className="btn-secondary text-xs">Cancel</button>
-                <button type="submit" disabled={saving} className="btn-primary text-xs">{saving ? '…' : (editingLedgerId ? 'Update Entry' : 'Add Entry')}</button>
+                <button type="button" onClick={() => { setShowPaymentForm(false); setEditingLedgerId(null); }} className="btn-secondary text-xs">Cancel</button>
+                <button type="submit" disabled={saving} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">{saving ? '…' : (editingLedgerId ? 'Update Payment' : 'Record Payment')}</button>
               </div>
             </form>
           )}
@@ -684,16 +754,12 @@ export default function VendorsPage() {
                       <div className={`font-black text-base tabular-nums ${l.type === 'PURCHASE' ? 'text-red-500' : 'text-emerald-500'}`}>
                         {l.type === 'PURCHASE' ? '+' : '-'}₹{Number(l.amount).toLocaleString('en-IN')}
                       </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={() => { 
-                          const d = new Date(l.created_at);
-                          const localDateStr = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-                          setEditingLedgerId(l.id); 
-                          setLedgerForm({ type: l.type, amount: l.amount, reference: l.reference || '', created_at: localDateStr }); 
-                          setShowLedgerForm(true); 
-                        }} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
-                        <button onClick={() => deleteLedgerEntry(l.id)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={12}/></button>
-                      </div>
+                      {l.type === 'PAYMENT' && (
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                          <button onClick={() => handleEditPaymentClick(l)} className="p-1 text-ink-400 hover:text-ember"><Edit2 size={12}/></button>
+                          <button onClick={() => deleteLedgerEntry(l.id)} className="p-1 text-ink-400 hover:text-red-500"><Trash2 size={12}/></button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -724,6 +790,7 @@ export default function VendorsPage() {
                         <label className="label">Payment Mode</label>
                         <select className="input text-sm" value={poForm.payment_mode} onChange={e => setPOForm(p => ({...p, payment_mode: e.target.value}))}>
                           <option value="CREDIT">Credit (Owe Vendor)</option>
+                          <option value="PARTIAL">Partial (Part-Pay)</option>
                           <option value="CASH">Cash (Paid Now)</option>
                           <option value="UPI">UPI (Paid Now)</option>
                         </select>
@@ -731,9 +798,18 @@ export default function VendorsPage() {
                       {poForm.payment_mode !== 'CREDIT' && (
                         <div>
                           <label className="label">Amount Paid (₹)</label>
-                          <input type="number" min="0" className="input text-sm" value={poForm.amount_paid} onChange={e => setPOForm(p => ({...p, amount_paid: e.target.value}))} placeholder="0" />
+                          <input type="number" min="0" step="0.01" className="input text-sm" value={poForm.amount_paid} onChange={e => setPOForm(p => ({...p, amount_paid: e.target.value}))} placeholder="0.00" />
                         </div>
                       )}
+                      {poForm.payment_mode === 'PARTIAL' && (
+                        <div className="col-span-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 p-2.5 rounded-xl text-xs text-amber-800 dark:text-amber-300 font-bold">
+                          Outstanding Credit (Owed to Vendor): ₹{(poTotal - (parseFloat(poForm.amount_paid) || 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}
+                        </div>
+                      )}
+                      <div className="col-span-2">
+                        <label className="label">Remarks <span className="text-red-500">*</span></label>
+                        <textarea rows={3} required className="input text-sm w-full" value={poForm.notes} onChange={e => setPOForm(p => ({...p, notes: e.target.value}))} placeholder="Required remarks..." />
+                      </div>
                     </div>
                     {/* Line Items */}
                     <div className="space-y-2">
@@ -742,25 +818,110 @@ export default function VendorsPage() {
                       </div>
                       {poLines.map((line, i) => (
                         <div key={i} className="grid grid-cols-[1fr_80px_80px_28px] gap-1 items-center">
-                          <select className="input text-xs" value={line.item_id} onChange={e => updatePOLine(i, 'item_id', e.target.value)}>
-                            <option value="">Select item…</option>
-                            {allItems.map(it => {
-                              const upb = it.units_per_box || 1
-                              return <option key={it.id} value={it.id}>{it.name} ({upb > 1 ? `box of ${upb}` : it.unit}) — stock: {it.stock_quantity} {it.unit}s</option>
-                            })}
-                          </select>
+                          {line.item_id ? (
+                            <div className="flex items-center justify-between bg-ink-100 dark:bg-ink-800 text-xs px-2 py-1.5 rounded-lg border border-ink-300 dark:border-ink-700 max-w-[250px]">
+                              <span className="truncate font-bold text-ink-900 dark:text-white">
+                                {(() => {
+                                  const item = allItems.find(it => it.id === line.item_id)
+                                  if (!item) return ''
+                                  const upb = item.units_per_box || 1
+                                  return `${item.name} (${upb > 1 ? `box of ${upb}` : item.unit})`
+                                })()}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updatePOLine(i, 'item_id', '')
+                                  updatePOLine(i, 'searchText', '')
+                                }}
+                                className="text-ink-400 hover:text-red-500 ml-1 flex-shrink-0"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="relative">
+                              <input
+                                type="text"
+                                className="input text-xs w-full"
+                                placeholder="Type to search item..."
+                                value={line.searchText || ''}
+                                onChange={e => {
+                                  updatePOLine(i, 'searchText', e.target.value)
+                                  setActiveLineSearchIdx(i)
+                                }}
+                                onFocus={() => setActiveLineSearchIdx(i)}
+                                onBlur={() => {
+                                  setTimeout(() => {
+                                    setActiveLineSearchIdx(current => current === i ? null : current)
+                                  }, 200)
+                                }}
+                              />
+                              {activeLineSearchIdx === i && line.searchText && (
+                                <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-lg shadow-lg">
+                                  {(() => {
+                                    const searchVal = (line.searchText || '').toLowerCase()
+                                    const matched = allItems.filter(it => {
+                                      const alreadySelected = poLines.some((pl, plIdx) => plIdx !== i && pl.item_id === it.id)
+                                      return !alreadySelected && it.name.toLowerCase().includes(searchVal)
+                                    })
+                                    
+                                    if (matched.length === 0) {
+                                      return <div className="p-2 text-xs text-ink-400 text-center">No items found</div>
+                                    }
+                                    
+                                    return matched.map(it => {
+                                      const upb = it.units_per_box || 1
+                                      return (
+                                        <button
+                                          key={it.id}
+                                          type="button"
+                                          onClick={() => {
+                                            updatePOLine(i, 'item_id', it.id)
+                                            updatePOLine(i, 'searchText', it.name)
+                                            setActiveLineSearchIdx(null)
+                                          }}
+                                          className="w-full text-left px-3 py-2 text-xs hover:bg-ink-100 dark:hover:bg-ink-800 text-ink-900 dark:text-white border-b border-ink-100 dark:border-ink-800 last:border-b-0"
+                                        >
+                                          {it.name} ({upb > 1 ? `box of ${upb}` : it.unit}) — stock: {it.stock_quantity}
+                                        </button>
+                                      )
+                                    })
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {(() => {
                             const selItem = allItems.find(it => it.id === line.item_id)
                             const upb = selItem?.units_per_box || 1
                             const boxes = parseFloat(line.quantity) || 0
                             return (
                               <div className="flex flex-col gap-0.5">
-                                <input type="number" min="0.001" step="any" className="input text-xs text-center" placeholder={upb > 1 ? 'Boxes' : 'Qty'} value={line.quantity} onChange={e => updatePOLine(i, 'quantity', e.target.value)} />
+                                <input
+                                  type="number"
+                                  min="0.001"
+                                  step="any"
+                                  className="input text-xs text-center"
+                                  placeholder={upb > 1 ? 'Boxes' : 'Qty'}
+                                  value={line.quantity}
+                                  onChange={e => updatePOLine(i, 'quantity', e.target.value)}
+                                  disabled={!line.item_id}
+                                />
                                 {upb > 1 && boxes > 0 && <span className="text-[9px] text-amber-600 text-center font-bold">{boxes}×{upb}={boxes*upb} {selItem.unit}s</span>}
                               </div>
                             )
                           })()}
-                          <input type="number" min="0" step="0.01" className="input text-xs text-center" placeholder={(() => { const s = allItems.find(it => it.id === line.item_id); return s?.units_per_box > 1 ? '₹/box' : '₹/unit' })()} value={line.unit_price} onChange={e => updatePOLine(i, 'unit_price', e.target.value)} />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="input text-xs text-center"
+                            placeholder={(() => { const s = allItems.find(it => it.id === line.item_id); return s?.units_per_box > 1 ? '₹/box' : '₹/unit' })()}
+                            value={line.unit_price}
+                            onChange={e => updatePOLine(i, 'unit_price', e.target.value)}
+                            disabled={!line.item_id}
+                          />
                           <button onClick={() => removePOLine(i)} className="text-ink-400 hover:text-red-500"><X size={13}/></button>
                         </div>
                       ))}

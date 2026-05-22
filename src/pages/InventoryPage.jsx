@@ -87,9 +87,8 @@ export default function InventoryPage() {
     fetchCategories()
     
     // Realtime Sync
-    const filter = (branchId && branchId !== 'All Branches') ? `branch_id=eq.${branchId}` : undefined
     const chan = supabase.channel('items_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, () => {
         // Debounce or just refetch
         fetchItems()
       })
@@ -382,7 +381,7 @@ export default function InventoryPage() {
       
       toast.success(`Successfully updated stock for ${successCount} items`);
       setLoading(false);
-      fetchInventory();
+      fetchItems();
       e.target.value = null;
     };
     reader.readAsText(file);
@@ -393,7 +392,12 @@ export default function InventoryPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Inventory</h1>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+            Inventory
+            <button onClick={() => { setLoading(true); fetchItems(); }} title="Refresh Inventory" className="p-1 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+              <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+            </button>
+          </h1>
           <div className="flex flex-wrap items-center gap-2 text-sm mt-1">
             <span className="text-zinc-500">{items.filter(i=>!i.is_archived && i.category !== 'Inventory').length} active</span>
             {isAdmin && <span className="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-100 dark:border-emerald-800">₹{activeValue.toLocaleString('en-IN')} Value</span>}

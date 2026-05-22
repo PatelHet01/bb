@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import { playBell } from '../utils/bell'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2 } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -54,6 +54,22 @@ export default function BillingPage() {
   const [showAddCustomer, setShowAddCustomer] = useState(false)
   const [newCustName, setNewCustName] = useState('')
   const [addingCust, setAddingCust] = useState(false)
+  const [isEditingCustomer, setIsEditingCustomer] = useState(false)
+  const [editCustName, setEditCustName] = useState('')
+  const [editCustMobile, setEditCustMobile] = useState('')
+  const [savingCust, setSavingCust] = useState(false)
+
+  useEffect(() => {
+    if (customer) {
+      setEditCustName(customer.name || '')
+      setEditCustMobile(customer.mobile_number || '')
+    } else {
+      setEditCustName('')
+      setEditCustMobile('')
+    }
+    setIsEditingCustomer(false)
+  }, [customer])
+
 
   // Table billing
   const [cafeTables, setCafeTables] = useState([])
@@ -63,7 +79,8 @@ export default function BillingPage() {
 
   // Kitchen State
   const [kitchenOrderId, setKitchenOrderId] = useState(null)   // non-table kitchen order
-  const [sentToKitchenIds, setSentToKitchenIds] = useState([]) // item IDs already sent
+  const [sentToKitchenQtys, setSentToKitchenQtys] = useState({}) // { [itemId]: quantity }
+  const sentToKitchenIds = useMemo(() => Object.keys(sentToKitchenQtys).filter(id => sentToKitchenQtys[id] > 0), [sentToKitchenQtys])
   const isKitchenSent = sentToKitchenIds.length > 0
 
   // Order Management
@@ -198,7 +215,7 @@ export default function BillingPage() {
         setCart([])
         setOrderType('Takeaway')
         setKitchenOrderId(null)
-        setSentToKitchenIds([])
+        setSentToKitchenQtys({})
       }
     }
   }, [cafeTables])
@@ -217,7 +234,7 @@ export default function BillingPage() {
         setOrderType('Takeaway')
       }
       setKitchenOrderId(null)
-      setSentToKitchenIds([])
+      setSentToKitchenQtys({})
       toast.success('All tables cleared')
     } catch (e) {
       toast.error('Failed to clear tables')
@@ -304,10 +321,93 @@ export default function BillingPage() {
         }))
       )
 
-      setSentToKitchenIds(cart.map(c => c.id))
+      const qtys = {}
+      cart.forEach(c => {
+        qtys[c.id] = c.quantity
+      })
+      setSentToKitchenQtys(qtys)
       toast.success('Sent to Kitchen! 🍳', { duration: 3000 })
     } catch (e) {
       toast.error('Send to Kitchen failed: ' + e.message)
+    }
+  }
+
+  // ── Send Individual Item to Kitchen ──────────────────────────────────────────
+  async function sendIndividualToKitchen(item) {
+    const branch = branchId || selectedBranch
+    let orderId = selectedTable?.current_order_id || kitchenOrderId
+
+    const alreadySentQty = sentToKitchenQtys[item.id] || 0
+    const qtyToSend = item.quantity - alreadySentQty
+    if (qtyToSend <= 0) return
+
+    try {
+      if (!orderId) {
+        // Create new order in 'preparing' state
+        const { data: newOrder, error } = await supabase.from('orders').insert({
+          branch_id: branch,
+          subtotal, total,
+          status: 'preparing',
+          table_number: selectedTable?.table_number || null,
+          order_type: orderType,
+          customer_id: customer?.id || null
+        }).select().single()
+        if (error) throw error
+        orderId = newOrder.id
+        setKitchenOrderId(orderId)
+
+        // Insert all current cart items into order_items so the order is complete
+        await supabase.from('order_items').insert(
+          cart.map(c => ({
+            order_id: orderId,
+            item_id: c.isOffer ? null : c.id,
+            offer_id: c.isOffer ? c.id : null,
+            quantity: c.quantity,
+            price: c.price,
+            total: c.price * c.quantity
+          }))
+        )
+        if (selectedTable) {
+          await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: orderId }).eq('id', selectedTable.id)
+          setSelectedTable(prev => prev ? { ...prev, current_order_id: orderId } : prev)
+          setCafeTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, status: 'occupied', current_order_id: orderId } : t))
+        }
+      } else {
+        // Update existing order to 'preparing' and sync order_items
+        await supabase.from('orders').update({ status: 'preparing', subtotal, total, customer_id: customer?.id || null }).eq('id', orderId)
+        
+        await supabase.from('order_items').delete().eq('order_id', orderId)
+        await supabase.from('order_items').insert(
+          cart.map(c => ({
+            order_id: orderId,
+            item_id: c.isOffer ? null : c.id,
+            offer_id: c.isOffer ? c.id : null,
+            quantity: c.quantity,
+            price: c.price,
+            total: c.price * c.quantity
+          }))
+        )
+      }
+
+      // Insert this item into kds_items (as pending)
+      const { error: insErr } = await supabase.from('kds_items').insert({
+        order_id: orderId,
+        item_id: item.isOffer ? null : item.id,
+        item_name: item.name + (item.variant ? ` (${item.variant})` : '') + (item.isOffer ? ' [Combo]' : ''),
+        quantity: qtyToSend,
+        status: 'pending',
+        is_addon: alreadySentQty > 0 || isKitchenSent
+      })
+      if (insErr) throw insErr
+
+      // Add to sentToKitchenQtys state
+      setSentToKitchenQtys(prev => ({
+        ...prev,
+        [item.id]: item.quantity
+      }))
+      toast.success(`${item.name} sent to kitchen! 🍳`, { duration: 3000 })
+    } catch (e) {
+      toast.error('Send failed: ' + e.message)
     }
   }
 
@@ -372,7 +472,7 @@ export default function BillingPage() {
 
   async function fetchRecentOrders() {
     const today = new Date().toISOString().split('T')[0]
-    let q = supabase.from('orders').select('*, customers(name), order_payments(mode, amount), order_items(quantity, price, items(name, variant))').gte('created_at', today).order('created_at', {ascending: false})
+    let q = supabase.from('orders').select('*, customers(*), order_payments(mode, amount), order_items(quantity, price, items(name, variant))').gte('created_at', today).order('created_at', {ascending: false})
     if (branchId || selectedBranch) q = q.eq('branch_id', branchId || selectedBranch)
     const { data } = await q
     setRecentOrders(data || [])
@@ -381,13 +481,25 @@ export default function BillingPage() {
   async function editOrder(order) {
     if (order.status === 'cancelled') { toast.error('Order is cancelled'); return }
     setLoading(true)
-    const { data: orderItems } = await supabase.from('order_items').select('*, items(*)').eq('order_id', order.id)
-    const cartItems = orderItems.map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
+    const [{ data: orderItems }, { data: kds }] = await Promise.all([
+      supabase.from('order_items').select('*, items(*)').eq('order_id', order.id),
+      supabase.from('kds_items').select('item_id, quantity').eq('order_id', order.id)
+    ])
+    const qtys = {}
+    if (kds) {
+      kds.forEach(k => {
+        if (k.item_id) {
+          qtys[k.item_id] = (qtys[k.item_id] || 0) + (k.quantity || 0)
+        }
+      })
+    }
+    setSentToKitchenQtys(qtys)
+    const cartItems = (orderItems || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
     setCart(cartItems)
     setEditingOrderId(order.id)
     setOrderType(order.order_type || 'Dine-in')
     if (order.customer_id && order.customers) {
-      setCustomer({ id: order.customer_id, name: order.customers.name })
+      setCustomer(order.customers)
       const [khata, adv] = await Promise.all([
         supabase.from('khata_ledger').select('type,amount').eq('customer_id', order.customer_id),
         supabase.from('advance_ledger').select('type,amount').eq('customer_id', order.customer_id)
@@ -481,14 +593,14 @@ export default function BillingPage() {
   // Auto-syncs active context to tableCarts cache and to Supabase whenever changes occur
   useEffect(() => {
     if (!selectedTable) return
-    const ctx = { cart, customer, custBalances, orderType, discountType, discountValue }
+    const ctx = { cart, customer, custBalances, orderType, discountType, discountValue, sentToKitchenQtys }
     
     // Update local cache without triggering a deep dependency loop
     setTableCarts(prev => ({ ...prev, [selectedTable.id]: ctx }))
     
     // Trigger debounced DB sync
     syncCartToDB(selectedTable.id, ctx, selectedTable.current_order_id, selectedTable.table_number)
-  }, [cart, customer, custBalances, orderType, discountType, discountValue, selectedTable, syncCartToDB])
+  }, [cart, customer, custBalances, orderType, discountType, discountValue, sentToKitchenQtys, selectedTable, syncCartToDB])
 
   // ── Fast table switching (reads in-memory first, DB only on first load) ─────
   async function switchTable(table) {
@@ -503,6 +615,7 @@ export default function BillingPage() {
       setOrderType(cached.orderType || 'Dine-in')
       setDiscountType(cached.discountType || 'FLAT')
       setDiscountValue(cached.discountValue || 0)
+      setSentToKitchenQtys(cached.sentToKitchenQtys || {})
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       return
     }
@@ -510,17 +623,28 @@ export default function BillingPage() {
     // Check if the table has an active order in DB (e.g., from QR / KDS)
     if (table.current_order_id) {
       setLoadingTable(true)
-      const [{ data: ois }, { data: ord }] = await Promise.all([
+      const [{ data: ois }, { data: ord }, { data: kds }] = await Promise.all([
         supabase.from('order_items').select('*, items(*)').eq('order_id', table.current_order_id),
-        supabase.from('orders').select('customer_id, customers(*), order_type, status').eq('id', table.current_order_id).single()
+        supabase.from('orders').select('customer_id, customers(*), order_type, status').eq('id', table.current_order_id).single(),
+        supabase.from('kds_items').select('item_id, quantity').eq('order_id', table.current_order_id)
       ])
       const cartItems = (ois || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
+      const qtys = {}
+      if (kds) {
+        kds.forEach(k => {
+          if (k.item_id) {
+            qtys[k.item_id] = (qtys[k.item_id] || 0) + (k.quantity || 0)
+          }
+        })
+      }
+      setSentToKitchenQtys(qtys)
       const ctx = {
         cart: cartItems,
         customer: ord?.customers || null,
         custBalances: { khata: 0, advance: 0 },
         orderType: ord?.order_type || 'Dine-in',
-        discountType: 'FLAT', discountValue: 0
+        discountType: 'FLAT', discountValue: 0,
+        sentToKitchenQtys: qtys
       }
       setTableCarts(prev => ({ ...prev, [table.id]: ctx }))
       setCart(ctx.cart)
@@ -534,7 +658,7 @@ export default function BillingPage() {
     // Fresh empty table
     setTableCarts(prev => ({
       ...prev,
-      [table.id]: { cart: [], customer: null, custBalances: { khata: 0, advance: 0 }, orderType: 'Dine-in', discountType: 'FLAT', discountValue: 0 }
+      [table.id]: { cart: [], customer: null, custBalances: { khata: 0, advance: 0 }, orderType: 'Dine-in', discountType: 'FLAT', discountValue: 0, sentToKitchenQtys: {} }
     }))
     setCart([])
     setCustomer(null)
@@ -544,7 +668,7 @@ export default function BillingPage() {
     setDiscountValue(0)
     setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
     setKitchenOrderId(null)
-    setSentToKitchenIds([])
+    setSentToKitchenQtys({})
   }
 
   // Legacy alias kept for table-dashboard button
@@ -578,8 +702,6 @@ export default function BillingPage() {
       return idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty, isAddon: isNewAddon }, ...prev]
     })
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - qty } : i))
-    // If kitchen order is active and this is a brand-new item, push to KDS as add-on
-    if (isNewAddon) appendKdsAddon(item, qty)
   }
 
   function handleOfferTap(offer) {
@@ -835,9 +957,10 @@ export default function BillingPage() {
       setDiscountType('FLAT'); setDiscountValue(0);
       setPayments([{ mode: 'CASH', subtype: '', amount: 0 }])
       setCashGiven(0)
-      setCartExpanded(false)
+      setShowOrdersModal(false)
+      setCart([])
       setKitchenOrderId(null)
-      setSentToKitchenIds([])
+      setSentToKitchenQtys({})
       const wasEditing = editingOrderId
       setEditingOrderId(null)
       toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
@@ -1008,9 +1131,10 @@ export default function BillingPage() {
                 setSelectedTable(null)
                 setCustomer(null)
                 setCustBalances({ khata: 0, advance: 0 })
-                setOrderType('Takeaway')
+                setSelectedTable(null)
+                setCart([])
                 setKitchenOrderId(null)
-                setSentToKitchenIds([])
+                setSentToKitchenQtys({})
               } else {
                 const tbl = cafeTables.find(t => t.id === val)
                 if (tbl) switchTable(tbl)
@@ -1057,20 +1181,78 @@ export default function BillingPage() {
 
             {/* 2. Customer Search / Selected Customer */}
             {customer ? (
-            <div className="flex-1 flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer.name[0]}</div>
-                <div>
-                  <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
-                  <div className="flex gap-2 text-[9px] font-bold mt-1">
-                    {custBalances.khata > 0 && <span className="text-red-500">Levana: ₹{custBalances.khata}</span>}
-                    {custBalances.advance > 0 && <span className="text-emerald-500">Adv: ₹{custBalances.advance}</span>}
+              isEditingCustomer ? (
+                <div className="flex-1 bg-ink-50 dark:bg-ink-950 rounded-xl p-3 border border-indigo-200 dark:border-indigo-800 space-y-2 relative z-30">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Edit Customer</span>
+                    <button onClick={() => setIsEditingCustomer(false)} className="text-ink-400 hover:text-ink-900"><X size={14}/></button>
+                  </div>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      className="input text-xs w-full py-1.5 bg-white"
+                      placeholder="Customer Name"
+                      value={editCustName}
+                      onChange={e => setEditCustName(e.target.value)}
+                    />
+                    <input
+                      type="tel"
+                      maxLength={10}
+                      className="input text-xs w-full py-1.5 bg-white text-ink-500 font-mono"
+                      placeholder="Mobile Number"
+                      value={editCustMobile}
+                      onChange={e => setEditCustMobile(e.target.value.replace(/\D/g, ''))}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!editCustName.trim() || editCustMobile.trim().length !== 10) {
+                          toast.error('Enter valid name and 10-digit mobile number')
+                          return
+                        }
+                        setSavingCust(true)
+                        try {
+                          const { data, error } = await supabase
+                            .from('customers')
+                            .update({ name: editCustName.trim(), mobile_number: editCustMobile.trim() })
+                            .eq('id', customer.id)
+                            .select()
+                            .single()
+                          if (error) throw error
+                          setCustomer(data)
+                          setIsEditingCustomer(false)
+                          toast.success('Customer updated!')
+                        } catch (err) {
+                          toast.error(err.message)
+                        } finally {
+                          setSavingCust(false)
+                        }
+                      }}
+                      disabled={savingCust}
+                      className="btn-primary w-full py-2 text-xs"
+                    >
+                      {savingCust ? 'Saving...' : 'Apply Changes'}
+                    </button>
                   </div>
                 </div>
-              </div>
-              <button onClick={deselectCustomer} className="p-1.5 text-ink-400 hover:bg-red-50 hover:text-red-500 rounded-md transition-colors"><X size={16}/></button>
-            </div>
-          ) : (
+              ) : (
+                <div className="flex-1 flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer.name[0]}</div>
+                    <div>
+                      <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
+                      <div className="flex gap-2 text-[9px] font-bold mt-1">
+                        {custBalances.khata > 0 && <span className="text-red-500">Levana: ₹{custBalances.khata}</span>}
+                        {custBalances.advance > 0 && <span className="text-emerald-500">Adv: ₹{custBalances.advance}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { setEditCustName(customer.name || ''); setEditCustMobile(customer.mobile_number || ''); setIsEditingCustomer(true); }} className="p-1.5 text-ink-400 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors"><Edit2 size={14}/></button>
+                    <button onClick={deselectCustomer} className="p-1.5 text-ink-400 hover:bg-red-50 hover:text-red-500 rounded-md transition-colors"><X size={16}/></button>
+                  </div>
+                </div>
+              )
+            ) : (
             <div className="flex-1 relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
               <input className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none" placeholder="Select Customer..." value={customerSearch} onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }} />
@@ -1306,6 +1488,23 @@ export default function BillingPage() {
                     )}
                   </div>
                 </div>
+                {c.category === 'BB Cafe' && (
+                  <div className="flex-shrink-0 pl-1">
+                    {(sentToKitchenQtys[c.id] || 0) >= c.quantity ? (
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800/50">
+                        <CheckCircle2 size={12} /> Sent
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => sendIndividualToKitchen(c)}
+                        className="flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/40 px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800/50 transition-colors active:scale-95 animate-pulse"
+                      >
+                        <Flame size={12} className="text-amber-500 animate-bounce" />
+                        {(sentToKitchenQtys[c.id] || 0) > 0 ? 'Send Addon' : 'Send'}
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="text-right pl-2 pr-1">
                   <p className="font-black text-base text-ink-900 dark:text-white leading-tight">₹{(linePrice * c.quantity).toLocaleString('en-IN')}</p>
                 </div>
@@ -1428,28 +1627,17 @@ export default function BillingPage() {
           )}
           
           <div className="flex gap-2 mt-2">
-            {/* Send to Kitchen */}
-            {!isKitchenSent ? (
-              <button
-                onClick={sendToKitchen}
-                disabled={cart.length === 0 || loading}
-                className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 rounded-xl shadow-[0_8px_20px_rgba(245,158,11,0.3)] transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-40"
-              >
-                <Flame size={18} /> Send to Kitchen
+            {/* Direct checkout option for Bhat branch / always available */}
+            {payments.length === 1 && payments[0].mode === 'CASH' ? (
+              <button className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none" onClick={handleExactCash} disabled={cart.length === 0 || loading}>
+                <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Collect Payment</span>
+                <span className="text-xl">₹{total}</span>
               </button>
             ) : (
-              /* After kitchen send — collect payment */
-              payments.length === 1 && payments[0].mode === 'CASH' ? (
-                <button className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none" onClick={handleExactCash} disabled={cart.length === 0 || loading}>
-                  <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Collect Payment</span>
-                  <span className="text-xl">₹{total}</span>
-                </button>
-              ) : (
-                <button className="flex-1 bg-ember hover:bg-ember-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(255,100,0,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none disabled:opacity-50" onClick={() => handleBill()} disabled={cart.length === 0 || loading || Math.abs(total - totalPaid) > 0.01}>
-                  <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Collect Payment</span>
-                  <span className="text-xl">₹{total}</span>
-                </button>
-              )
+              <button className="flex-1 bg-ember hover:bg-ember-600 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(255,100,0,0.3)] transition-all active:scale-95 flex flex-col justify-center items-center leading-none disabled:opacity-50" onClick={() => handleBill()} disabled={cart.length === 0 || loading || Math.abs(total - totalPaid) > 0.01}>
+                <span className="text-[10px] tracking-widest uppercase opacity-80 mb-1">Collect Payment</span>
+                <span className="text-xl">₹{total}</span>
+              </button>
             )}
           </div>
         </div>

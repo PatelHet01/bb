@@ -71,18 +71,18 @@ export default function SessionPage() {
   const [closeModal, setCloseModal] = useState(false)
 
   // Open session form state
-  const [openingDenoms, setOpeningDenoms] = useState({})
+  const [openingBalance, setOpeningBalance] = useState('')
   const [openingNotes, setOpeningNotes] = useState('')
   const [lastClosingInfo, setLastClosingInfo] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Close session state
-  const [closingDenoms, setClosingDenoms] = useState({})
+  const [closingBalance, setClosingBalance] = useState('')
   const [closingNotes, setClosingNotes] = useState('')
   const [sessionSummary, setSessionSummary] = useState(null)
 
-  const openingTotal = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
-  const closingTotal = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
+  const openingTotal = Number(openingBalance) || 0
+  const closingTotal = Number(closingBalance) || 0
 
   useEffect(() => { fetchSessions() }, [branchId])
 
@@ -117,10 +117,10 @@ export default function SessionPage() {
       .limit(1)
       .maybeSingle()
     if (lastClose) {
-      setOpeningDenoms(lastClose.denominations || {})
+      setOpeningBalance(String(lastClose.total_amount || 0))
       setLastClosingInfo({ amount: lastClose.total_amount, date: lastClose.created_at })
     } else {
-      setOpeningDenoms({})
+      setOpeningBalance('')
       setLastClosingInfo(null)
     }
     setOpeningNotes('')
@@ -128,6 +128,7 @@ export default function SessionPage() {
   }
 
   async function handleOpenSession() {
+    if (!openingBalance) return toast.error('Opening balance is required')
     setSubmitting(true)
     const branch = branchId || 'gurukul'
     try {
@@ -139,7 +140,7 @@ export default function SessionPage() {
           opened_by: user?.id || null,
           session_date: today,
           opening_balance: openingTotal,
-          opening_cash_breakdown: openingDenoms,
+          opening_cash_breakdown: {},
           notes: openingNotes,
           status: 'open'
         })
@@ -151,7 +152,7 @@ export default function SessionPage() {
         business_session_id: newSession.id,
         branch_id: branch,
         type: 'OPENING',
-        denominations: openingDenoms,
+        denominations: {},
         total_amount: openingTotal,
         reason: 'Session opened',
         recorded_by: user?.id || null
@@ -191,12 +192,13 @@ export default function SessionPage() {
     const totalExp = (expenses || []).reduce((s, e) => s + Number(e.amount), 0)
 
     setSessionSummary({ revenue, orders: orders?.length || 0, byMode, expenses: totalExp })
-    setClosingDenoms({})
+    setClosingBalance('')
     setClosingNotes('')
     setCloseModal(true)
   }
 
   async function handleCloseSession() {
+    if (!closingBalance) return toast.error('Closing balance is required')
     setSubmitting(true)
     const branch = branchId || 'gurukul'
     try {
@@ -205,7 +207,7 @@ export default function SessionPage() {
         .update({
           status: 'closed',
           closing_balance: closingTotal,
-          closing_cash_breakdown: closingDenoms,
+          closing_cash_breakdown: {},
           closed_by: user?.id || null,
           end_time: new Date().toISOString(),
           notes: closingNotes,
@@ -225,7 +227,7 @@ export default function SessionPage() {
         business_session_id: currentSession.id,
         branch_id: branch,
         type: 'CLOSING',
-        denominations: closingDenoms,
+        denominations: {},
         total_amount: closingTotal,
         reason: closingNotes || 'End of day count',
         recorded_by: user?.id || null

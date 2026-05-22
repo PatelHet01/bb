@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
-import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X, UtensilsCrossed, GitBranch, Clock } from 'lucide-react'
+import { useSessionStore } from '../store/sessionStore'
+import { TrendingUp, ShoppingCart, Users, AlertTriangle, ArrowRight, CreditCard, X, UtensilsCrossed, GitBranch, Clock, Play, Square } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-hot-toast'
 
 export default function DashboardHome() {
   const { role, branchId, branchName } = useAuthStore()
+  const { currentSession, setSession, clearSession } = useSessionStore()
   const navigate = useNavigate()
   const [stats, setStats] = useState({ revenue: 0, cashRev: 0, onlineRev: 0, orders: 0, customers: 0, outKhata: 0 })
   const [lowStockItems, setLowStockItems] = useState({}) // Grouped by category
@@ -28,150 +30,161 @@ export default function DashboardHome() {
   // Quick Attendance
   const [staffStatus, setStaffStatus] = useState([])
 
-  useEffect(() => {
-    async function fetchStats() {
-      try {
-        const today = new Date().toISOString().split('T')[0]
+  const fetchStats = useCallback(async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const branch = branchId || 'gurukul'
+      
+      // Sync active session
+      const { data: openSess } = await supabase
+        .from('business_sessions')
+        .select('*')
+        .eq('branch_id', branch)
+        .eq('status', 'open')
+        .maybeSingle()
+      if (openSess) setSession(openSess)
+      else clearSession()
 
-        let oQ = supabase.from('orders').select('id, order_number, total, created_at, status, table_number, order_type, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
-        if (branchId) oQ = oQ.eq('branch_id', branchId)
-        const { data: orders, error: ordersError } = await oQ.order('created_at', { ascending: false })
-        if (ordersError) throw ordersError
+      let oQ = supabase.from('orders').select('id, order_number, total, created_at, status, table_number, order_type, order_payments(mode, amount), customers(name), order_items(quantity, price, items(name, variant))').gte('created_at', today)
+      if (branchId) oQ = oQ.eq('branch_id', branchId)
+      const { data: orders, error: ordersError } = await oQ.order('created_at', { ascending: false })
+      if (ordersError) throw ordersError
 
-        // Fetch payments separately to ensure reliability
-        const { data: allPayments, error: payError } = await supabase.from('order_payments').select('*').in('order_id', orders.map(o => o.id))
-        if (payError) console.error('Error fetching payments:', payError)
+      // Fetch payments separately to ensure reliability
+      const { data: allPayments, error: payError } = await supabase.from('order_payments').select('*').in('order_id', orders.map(o => o.id))
+      if (payError) console.error('Error fetching payments:', payError)
 
-        // Map payments to orders
-        const ordersWithPayments = orders.map(o => ({
-          ...o,
-          order_payments: (allPayments || []).filter(p => p.order_id === o.id)
-        }))
+      // Map payments to orders
+      const ordersWithPayments = orders.map(o => ({
+        ...o,
+        order_payments: (allPayments || []).filter(p => p.order_id === o.id)
+      }))
 
-        let cQ = supabase.from('customers').select('id', { count: 'exact', head: true })
-        if (branchId) cQ = cQ.eq('branch_id', branchId)
-        const { count: custCount } = await cQ
+      let cQ = supabase.from('customers').select('id', { count: 'exact', head: true })
+      if (branchId) cQ = cQ.eq('branch_id', branchId)
+      const { count: custCount } = await cQ
 
-        // Fetch items for low stock calculation
-        let sQ = supabase.from('items').select('id, name, stock_quantity, low_stock_threshold, category').eq('is_active', true)
-        if (branchId) sQ = sQ.eq('branch_id', branchId)
-        const { data: items, error: itemsError } = await sQ
-        if (itemsError) console.error('Error fetching low stock:', itemsError)
-        
-        const lowStockList = (items || []).filter(i => (i.stock_quantity || 0) <= (i.low_stock_threshold || 5))
+      // Fetch items for low stock calculation
+      let sQ = supabase.from('items').select('id, name, stock_quantity, low_stock_threshold, category').eq('is_active', true)
+      if (branchId) sQ = sQ.eq('branch_id', branchId)
+      const { data: items, error: itemsError } = await sQ
+      if (itemsError) console.error('Error fetching low stock:', itemsError)
+      
+      const lowStockList = (items || []).filter(i => (i.stock_quantity || 0) <= (i.low_stock_threshold || 5))
 
-        const groupedLowStock = {}
-        lowStockList.forEach(i => {
-          const catName = i.category || 'Uncategorized'
-          if (!groupedLowStock[catName]) groupedLowStock[catName] = []
-          groupedLowStock[catName].push(i)
-        })
-        setLowStockItems(groupedLowStock)
+      const groupedLowStock = {}
+      lowStockList.forEach(i => {
+        const catName = i.category || 'Uncategorized'
+        if (!groupedLowStock[catName]) groupedLowStock[catName] = []
+        groupedLowStock[catName].push(i)
+      })
+      setLowStockItems(groupedLowStock)
 
-        // Open all categories by default
-        const initialOpen = {}
-        Object.keys(groupedLowStock).forEach(k => initialOpen[k] = true)
-        setOpenCategories(initialOpen)
+      // Open all categories by default
+      const initialOpen = {}
+      Object.keys(groupedLowStock).forEach(k => initialOpen[k] = true)
+      setOpenCategories(initialOpen)
 
-        let kQ = supabase.from('khata_ledger').select('type, amount, customers(id, name, mobile_number)')
-        if (branchId) kQ = kQ.eq('branch_id', branchId)
-        const { data: khataLedger } = await kQ
+      let kQ = supabase.from('khata_ledger').select('type, amount, customers(id, name, mobile_number)')
+      if (branchId) kQ = kQ.eq('branch_id', branchId)
+      const { data: khataLedger } = await kQ
 
-        let khataBalances = {}
-        let outKhataTotal = 0
-          ; (khataLedger || []).forEach(l => {
-            const amt = Number(l.amount)
-            const isCredit = l.type === 'CREDIT'
-            outKhataTotal += isCredit ? amt : -amt
+      let khataBalances = {}
+      let outKhataTotal = 0
+        ; (khataLedger || []).forEach(l => {
+          const amt = Number(l.amount)
+          const isCredit = l.type === 'CREDIT'
+          outKhataTotal += isCredit ? amt : -amt
 
-            if (l.customers) {
-              const cid = l.customers.id
-              if (!khataBalances[cid]) khataBalances[cid] = { customer: l.customers, balance: 0 }
-              khataBalances[cid].balance += isCredit ? amt : -amt
-            }
-          })
-        setKhataList(Object.values(khataBalances).filter(k => k.balance > 0).sort((a, b) => b.balance - a.balance))
-
-        let rCQ = supabase.from('customers').select('id, name, mobile_number, created_at').order('created_at', { ascending: false }).limit(20)
-        if (branchId) rCQ = rCQ.eq('branch_id', branchId)
-        const { data: recCust } = await rCQ
-        setRecentCustomers(recCust || [])
-
-        // Calculate Cash/Online — ONLY from non-cancelled orders
-        const activeOrders = (ordersWithPayments || []).filter(o => o.status !== 'cancelled')
-        let cashRev = 0; let onlineRev = 0;
-        activeOrders.forEach(o => {
-          (o.order_payments || []).forEach(p => {
-            if (p.mode === 'CASH') cashRev += Number(p.amount);
-            if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD', 'GPAY', 'PHONEPE', 'ONLINE'].includes(p.mode)) onlineRev += Number(p.amount);
-          })
-        })
-
-        setStats({
-          revenue: activeOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
-          cashRev, onlineRev,
-          orders: activeOrders.length,
-          customers: custCount || 0,
-          outKhata: outKhataTotal
-        })
-        setRecentOrders(activeOrders || [])
-        setTodayOrders(activeOrders || [])
-
-        // Fetch Recent Transfers for Super Admin
-        if (role === 'super_admin') {
-          const { data: transfers } = await supabase.from('branch_transfers')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5)
-          setRecentTransfers(transfers || [])
-        }
-
-        // Active occupied tables (bhat only)
-        if (branchId === 'bhat' || !branchId) {
-          const { data: tables } = await supabase
-            .from('cafe_tables')
-            .select('id, table_number, status, current_order_id')
-            .eq('branch_id', 'bhat')
-            .eq('status', 'occupied')
-          if (tables && tables.length > 0) {
-            const enriched = await Promise.all(tables.map(async t => {
-              if (!t.current_order_id) return { ...t, itemCount: 0, amount: 0 }
-              const { data: oi } = await supabase.from('order_items')
-                .select('quantity, price, items(name, variant), item_id').eq('order_id', t.current_order_id)
-              const itemCount = (oi || []).reduce((s, i) => s + i.quantity, 0)
-              const amount = (oi || []).reduce((s, i) => s + i.quantity * i.price, 0)
-              
-              const { data: ord } = await supabase.from('orders').select('status').eq('id', t.current_order_id).single()
-
-              return { ...t, itemCount, amount, orderStatus: ord?.status, orderItems: oi }
-            }))
-            setActiveTables(enriched)
-          } else {
-            setActiveTables([])
+          if (l.customers) {
+            const cid = l.customers.id
+            if (!khataBalances[cid]) khataBalances[cid] = { customer: l.customers, balance: 0 }
+            khataBalances[cid].balance += isCredit ? amt : -amt
           }
-        }
-
-        // Fetch Quick Attendance
-        const [wRes, sRes] = await Promise.all([
-          supabase.from('workers').select('id, name, branch_id').eq('is_active', true),
-          supabase.from('shifts').select('*').gte('clock_in', `${today}T00:00:00Z`)
-        ])
-        const branchWorkers = (wRes.data || []).filter(w => !branchId || w.branch_id === branchId)
-        const staffWithStatus = branchWorkers.map(w => {
-          const shift = (sRes.data || []).find(s => s.worker_id === w.id && !s.clock_out)
-          return { ...w, activeShift: shift }
         })
-        setStaffStatus(staffWithStatus)
+      setKhataList(Object.values(khataBalances).filter(k => k.balance > 0).sort((a, b) => b.balance - a.balance))
 
-      } catch (e) {
-        console.error(e)
-      } finally {
-        setLoading(false)
+      let rCQ = supabase.from('customers').select('id, name, mobile_number, created_at').order('created_at', { ascending: false }).limit(20)
+      if (branchId) rCQ = rCQ.eq('branch_id', branchId)
+      const { data: recCust } = await rCQ
+      setRecentCustomers(recCust || [])
+
+      // Calculate Cash/Online — ONLY from non-cancelled orders
+      const activeOrders = (ordersWithPayments || []).filter(o => o.status !== 'cancelled')
+      let cashRev = 0; let onlineRev = 0;
+      activeOrders.forEach(o => {
+        (o.order_payments || []).forEach(p => {
+          if (p.mode === 'CASH') cashRev += Number(p.amount);
+          if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD', 'GPAY', 'PHONEPE', 'ONLINE'].includes(p.mode)) onlineRev += Number(p.amount);
+        })
+      })
+
+      setStats({
+        revenue: activeOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
+        cashRev, onlineRev,
+        orders: activeOrders.length,
+        customers: custCount || 0,
+        outKhata: outKhataTotal
+      })
+      setRecentOrders(activeOrders || [])
+      setTodayOrders(activeOrders || [])
+
+      // Fetch Recent Transfers for Super Admin
+      if (role === 'super_admin') {
+        const { data: transfers } = await supabase.from('branch_transfers')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(5)
+        setRecentTransfers(transfers || [])
       }
+
+      // Active occupied tables (bhat only)
+      if (branchId === 'bhat' || !branchId) {
+        const { data: tables } = await supabase
+          .from('cafe_tables')
+          .select('id, table_number, status, current_order_id')
+          .eq('branch_id', 'bhat')
+          .eq('status', 'occupied')
+        if (tables && tables.length > 0) {
+          const enriched = await Promise.all(tables.map(async t => {
+            if (!t.current_order_id) return { ...t, itemCount: 0, amount: 0 }
+            const { data: oi } = await supabase.from('order_items')
+              .select('quantity, price, items(name, variant), item_id').eq('order_id', t.current_order_id)
+            const itemCount = (oi || []).reduce((s, i) => s + i.quantity, 0)
+            const amount = (oi || []).reduce((s, i) => s + i.quantity * i.price, 0)
+            
+            const { data: ord } = await supabase.from('orders').select('status').eq('id', t.current_order_id).single()
+
+            return { ...t, itemCount, amount, orderStatus: ord?.status, orderItems: oi }
+          }))
+          setActiveTables(enriched)
+        } else {
+          setActiveTables([])
+        }
+      }
+
+      // Fetch Quick Attendance
+      const [wRes, sRes] = await Promise.all([
+        supabase.from('workers').select('id, name, branch_id').eq('is_active', true),
+        supabase.from('shifts').select('*').gte('clock_in', `${today}T00:00:00Z`)
+      ])
+      const branchWorkers = (wRes.data || []).filter(w => !branchId || w.branch_id === branchId)
+      const staffWithStatus = branchWorkers.map(w => {
+        const shift = (sRes.data || []).find(s => s.worker_id === w.id && !s.clock_out)
+        return { ...w, activeShift: shift }
+      })
+      setStaffStatus(staffWithStatus)
+
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
     }
+  }, [branchId, role])
+
+  useEffect(() => {
     fetchStats()
 
-    // Real-time Sync
     const channel = supabase.channel('dashboard_sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchStats)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_payments' }, fetchStats)
@@ -181,7 +194,7 @@ export default function DashboardHome() {
       .subscribe()
 
     return () => supabase.removeChannel(channel)
-  }, [branchId])
+  }, [branchId, fetchStats]);
 
   async function startPreparing(table) {
     if (!table.current_order_id) return
@@ -242,14 +255,23 @@ export default function DashboardHome() {
   }
 
   async function handleQuickClock(workerId, activeShift) {
-    if (activeShift) {
-      await supabase.from('shifts').update({ clock_out: new Date().toISOString() }).eq('id', activeShift.id)
-    } else {
-      const todayStr = new Date().toISOString().split('T')[0]
-      const dayCode = todayStr.replace(/-/g, '').slice(-4)
-      await supabase.from('shifts').insert({
-        worker_id: workerId, branch_id: branchId || 'gurukul', day_code: dayCode, clock_in: new Date().toISOString()
-      })
+    try {
+      if (activeShift) {
+        const { error } = await supabase.from('shifts').update({ clock_out: new Date().toISOString() }).eq('id', activeShift.id)
+        if (error) throw error
+        toast.success('Clocked out successfully')
+      } else {
+        const todayStr = new Date().toISOString().split('T')[0]
+        const dayCode = todayStr.replace(/-/g, '').slice(-4)
+        const { error } = await supabase.from('shifts').insert({
+          worker_id: workerId, branch_id: branchId || 'gurukul', day_code: dayCode, clock_in: new Date().toISOString()
+        })
+        if (error) throw error
+        toast.success('Clocked in successfully')
+      }
+      await fetchStats() // Manual instant refresh
+    } catch (err) {
+      toast.error('Shift operation failed: ' + err.message)
     }
   }
 
@@ -263,16 +285,47 @@ export default function DashboardHome() {
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-ink-900 dark:text-white tracking-tight">Dashboard</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-ink-900 dark:text-white tracking-tight">Dashboard</h1>
+            {currentSession ? (
+              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-900/50">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live Session
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-zinc-500 bg-zinc-50 dark:bg-zinc-950/40 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800">
+                ● Shop Closed
+              </span>
+            )}
+          </div>
           <p className="text-sm text-ink-400 mt-0.5">
             {branchName} · {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <Link to="/admin/billing" className="btn-primary btn-sm hidden sm:flex">
-          + New Bill
-        </Link>
+        <div className="flex items-center gap-2">
+          {currentSession ? (
+            <button
+              onClick={() => navigate('/admin/sessions')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black uppercase bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/30 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-900/50 transition-colors shadow-sm"
+            >
+              <Square size={12} strokeWidth={3} />
+              Close Shop
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/admin/sessions')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black uppercase bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-900/50 transition-colors shadow-sm"
+            >
+              <Play size={12} strokeWidth={3} />
+              Open Shop
+            </button>
+          )}
+          <Link to="/admin/billing" className="btn-primary btn-sm">
+            + New Bill
+          </Link>
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -567,6 +620,47 @@ export default function DashboardHome() {
                     >
                       {staff.activeShift ? 'Clock Out' : 'Clock In'}
                     </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Khata Customers Widget */}
+        <div className="card flex flex-col h-full overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-ink-100 dark:border-ink-800 bg-red-50/50 dark:bg-red-900/10">
+            <h2 className="font-semibold text-red-700 dark:text-red-400 text-sm flex items-center gap-2">
+              <CreditCard size={16} /> Outstanding Khata (Levana)
+            </h2>
+            <Link to="/admin/customers?tab=khata" className="text-xs text-red-600 dark:text-red-400 hover:text-red-800 font-bold transition-colors">
+              Manage Khata
+            </Link>
+          </div>
+          <div className="flex-1 overflow-y-auto no-scrollbar max-h-[400px]">
+            {loading ? (
+              <div className="p-5 space-y-3">{Array(3).fill(0).map((_, i) => <div key={i} className="skeleton h-12 rounded-xl" />)}</div>
+            ) : khataList.length === 0 ? (
+              <p className="p-8 text-center text-ink-500">No outstanding khata balances.</p>
+            ) : (
+              <div className="divide-y divide-ink-100 dark:divide-ink-800">
+                {khataList.map(k => (
+                  <div key={k.customer.id} className="p-4 flex items-center justify-between hover:bg-ink-50 dark:hover:bg-ink-800/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center font-bold text-red-600 dark:text-red-400">
+                        {k.customer.name[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-bold text-ink-900 dark:text-white">{k.customer.name}</p>
+                        <p className="text-[10px] font-mono text-ink-400 mt-0.5">{k.customer.mobile_number}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-black text-red-500">₹{k.balance.toLocaleString('en-IN')}</p>
+                      <Link to={`/admin/customers?search=${k.customer.mobile_number}`} className="text-[9px] font-bold text-red-600 hover:underline">
+                        View Ledger
+                      </Link>
+                    </div>
                   </div>
                 ))}
               </div>

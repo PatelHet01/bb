@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Bombay Bethak",
+    "slug": "bombay-bethak",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#09090b",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bombaybethak.app"
+    },
+    "android": {
+      "package": "com.bombaybethak.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#09090b",
+        "foregroundImage": "./assets/icon.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -30,6 +30,38 @@ export default function OrdersPage() {
   const [allItems, setAllItems] = useState([])
   const [itemSearch, setItemSearch] = useState('')
 
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerResults, setCustomerResults] = useState([])
+  const [showAddCustomer, setShowAddCustomer] = useState(false)
+  const [newCustName, setNewCustName] = useState('')
+  const [newCustMobile, setNewCustMobile] = useState('')
+  const [isEditingCustomer, setIsEditingCustomer] = useState(false)
+  const [editCustName, setEditCustName] = useState('')
+  const [editCustMobile, setEditCustMobile] = useState('')
+
+  useEffect(() => {
+    if (customerSearch.trim().length < 2) {
+      setCustomerResults([])
+      return
+    }
+    const delayDebounceFn = setTimeout(async () => {
+      let q = supabase.from('customers').select('*')
+      const isNum = /^\d+$/.test(customerSearch)
+      if (isNum) {
+        q = q.ilike('mobile_number', `%${customerSearch}%`)
+      } else {
+        q = q.or(`name.ilike.%${customerSearch}%,username.ilike.%${customerSearch}%`)
+      }
+      if (branchId) {
+        q = q.or(`branch_id.eq.${branchId},branch_id.is.null`)
+      }
+      const { data } = await q.limit(10)
+      setCustomerResults(data || [])
+    }, 300)
+
+    return () => clearTimeout(delayDebounceFn)
+  }, [customerSearch, branchId])
+
   const isSuperAdmin = role === 'super_admin'
 
   useEffect(() => { 
@@ -85,6 +117,7 @@ export default function OrdersPage() {
       ...order,
       newStatus: order.status,
       newPaymentMode: (order.order_payments && order.order_payments.length > 0) ? order.order_payments[0].mode : 'CASH',
+      selectedCustomer: order.customers || null,
       editingItems: order.order_items.map(oi => ({
         id: oi.id, // existing order_item id
         item_id: oi.item_id,
@@ -96,6 +129,14 @@ export default function OrdersPage() {
       }))
     })
     setItemSearch('')
+    setCustomerSearch('')
+    setCustomerResults([])
+    setShowAddCustomer(false)
+    setNewCustName('')
+    setNewCustMobile('')
+    setIsEditingCustomer(false)
+    setEditCustName(order.customers?.name || '')
+    setEditCustMobile(order.customers?.mobile_number || '')
   }
 
   function addEditItem(item) {
@@ -148,6 +189,30 @@ export default function OrdersPage() {
         return handleCancel(editingOrder)
       }
 
+      let finalCustomerId = editingOrder.selectedCustomer?.id || null
+
+      if (showAddCustomer && newCustName.trim() && newCustMobile.trim().length === 10) {
+        const username = newCustName.split(' ')[0].toLowerCase() + Math.floor(Math.random() * 1000)
+        const { data: newCust, error: custErr } = await supabase.from('customers').insert({
+          name: newCustName,
+          mobile_number: newCustMobile,
+          username,
+          ghoda_coins: 0,
+          registration_type: 'admin',
+          branch_id: branchId || 'gurukul'
+        }).select().single()
+
+        if (custErr) throw custErr
+        if (newCust) finalCustomerId = newCust.id
+      } else if (isEditingCustomer && editingOrder.selectedCustomer?.id && editCustName.trim() && editCustMobile.trim().length === 10) {
+        const { error: editErr } = await supabase.from('customers').update({
+          name: editCustName,
+          mobile_number: editCustMobile
+        }).eq('id', editingOrder.selectedCustomer.id)
+
+        if (editErr) throw editErr
+      }
+
       // Calculate new totals
       const newSubtotal = editingOrder.editingItems.reduce((sum, i) => sum + (i.price * i.quantity), 0)
       const newTotal = newSubtotal - (editingOrder.discount || 0) // simplify tax for quick edit if needed, assuming total approx subtotal here
@@ -156,7 +221,8 @@ export default function OrdersPage() {
       await supabase.from('orders').update({ 
         status: editingOrder.newStatus,
         subtotal: newSubtotal,
-        total: newTotal
+        total: newTotal,
+        customer_id: finalCustomerId
       }).eq('id', editingOrder.id)
       
       // Update payments
@@ -527,6 +593,212 @@ export default function OrdersPage() {
                     <option value="ADVANCE">Advance</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Customer Info Card */}
+              <div className="pt-4 border-t border-ink-100 dark:border-ink-800">
+                <label className="label mb-2 flex justify-between items-center">
+                  <span>Customer Details</span>
+                  {editingOrder.selectedCustomer && !isEditingCustomer && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingCustomer(true)}
+                      className="text-xs text-blue-500 hover:text-blue-600 font-bold"
+                    >
+                      Edit Profile
+                    </button>
+                  )}
+                </label>
+
+                {editingOrder.selectedCustomer ? (
+                  <div className="p-3 bg-ink-50 dark:bg-ink-950/50 rounded-xl border border-ink-100 dark:border-ink-800 animate-fade-in">
+                    {isEditingCustomer ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] uppercase font-bold text-ink-400">Name</label>
+                            <input
+                              type="text"
+                              className="input text-xs w-full mt-1 bg-white dark:bg-ink-900"
+                              value={editCustName}
+                              onChange={e => setEditCustName(e.target.value)}
+                              placeholder="Name"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase font-bold text-ink-400">Mobile (10 digits)</label>
+                            <input
+                              type="tel"
+                              maxLength={10}
+                              className="input text-xs w-full mt-1 bg-white dark:bg-ink-900"
+                              value={editCustMobile}
+                              onChange={e => setEditCustMobile(e.target.value.replace(/\D/g, ''))}
+                              placeholder="Mobile"
+                              required
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingCustomer(false)
+                              setEditCustName(editingOrder.selectedCustomer.name)
+                              setEditCustMobile(editingOrder.selectedCustomer.mobile_number)
+                            }}
+                            className="px-2 py-1 text-[10px] font-bold text-ink-500 hover:text-ink-700 bg-ink-100 dark:bg-ink-800 rounded"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!editCustName.trim() || editCustMobile.length !== 10) {
+                                toast.error('Enter a valid name and 10-digit mobile number')
+                                return
+                              }
+                              setEditingOrder({
+                                ...editingOrder,
+                                selectedCustomer: {
+                                  ...editingOrder.selectedCustomer,
+                                  name: editCustName,
+                                  mobile_number: editCustMobile
+                                }
+                              })
+                              setIsEditingCustomer(false)
+                            }}
+                            className="px-2 py-1 text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 rounded"
+                          >
+                            Apply Changes
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-sm font-bold text-ink-900 dark:text-white">
+                            {editingOrder.selectedCustomer.name}
+                          </p>
+                          <p className="text-xs text-ink-500 font-mono">
+                            {editingOrder.selectedCustomer.mobile_number || 'No Phone'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingOrder({ ...editingOrder, selectedCustomer: null })
+                            setIsEditingCustomer(false)
+                            setEditCustName('')
+                            setEditCustMobile('')
+                          }}
+                          className="p-1 text-ink-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          title="Remove customer"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {showAddCustomer ? (
+                      <div className="p-3 bg-amber-50/50 dark:bg-ink-950/50 rounded-xl border border-amber-200 dark:border-ink-800 space-y-3 animate-fade-in">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-amber-600 dark:text-amber-400">Register New Customer</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowAddCustomer(false)}
+                            className="text-ink-400 hover:text-ink-600"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] uppercase font-bold text-ink-400">Full Name *</label>
+                            <input
+                              type="text"
+                              className="input text-xs w-full mt-1 bg-white dark:bg-ink-900"
+                              value={newCustName}
+                              onChange={e => setNewCustName(e.target.value)}
+                              placeholder="John Doe"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase font-bold text-ink-400">Mobile (10 digits) *</label>
+                            <input
+                              type="tel"
+                              maxLength={10}
+                              className="input text-xs w-full mt-1 bg-white dark:bg-ink-900"
+                              value={newCustMobile}
+                              onChange={e => setNewCustMobile(e.target.value.replace(/\D/g, ''))}
+                              placeholder="9876543210"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+                        <input
+                          type="text"
+                          className="input pl-9 text-xs w-full bg-white dark:bg-ink-900"
+                          placeholder="Search existing customer by name or mobile..."
+                          value={customerSearch}
+                          onChange={e => setCustomerSearch(e.target.value)}
+                        />
+                        {customerSearch.trim().length >= 2 && (
+                          <div className="absolute z-10 top-full mt-1 w-full bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-xl shadow-xl max-h-48 overflow-y-auto py-1">
+                            {customerResults.map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setEditingOrder({ ...editingOrder, selectedCustomer: c })
+                                  setEditCustName(c.name)
+                                  setEditCustMobile(c.mobile_number)
+                                  setCustomerSearch('')
+                                  setCustomerResults([])
+                                }}
+                                className="w-full text-left px-4 py-2 hover:bg-ink-50 dark:hover:bg-ink-800 flex justify-between items-center group"
+                              >
+                                <div>
+                                  <p className="text-xs font-bold text-ink-900 dark:text-white">{c.name}</p>
+                                  <p className="text-[10px] text-ink-500 font-mono">{c.mobile_number}</p>
+                                </div>
+                                <span className="text-[10px] bg-ink-100 dark:bg-ink-800 text-ink-600 px-1.5 py-0.5 rounded font-bold uppercase">
+                                  Select
+                                </span>
+                              </button>
+                            ))}
+                            {customerResults.length === 0 && (
+                              <div className="px-4 py-3 text-center text-xs text-ink-500">
+                                No matching customer found.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center mt-2 px-1">
+                          <span className="text-xs text-ink-400 italic">Order is currently marked as Guest.</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAddCustomer(true)
+                              setNewCustName('')
+                              setNewCustMobile(/^\d+$/.test(customerSearch) && customerSearch.length === 10 ? customerSearch : '')
+                            }}
+                            className="text-xs text-ember hover:underline font-bold flex items-center gap-1"
+                          >
+                            <Plus size={12} /> Create New Customer
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               
               <div className="pt-2 border-t border-ink-100 dark:border-ink-800">

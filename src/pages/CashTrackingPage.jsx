@@ -88,7 +88,7 @@ export default function CashTrackingPage() {
         total_amount: finalAmount,
         reason: reason,
         category: activeTab === 'withdrawal' ? category : null,
-        recorded_by: user?.id || null
+        recorded_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null
       }).select().single()
 
       if (error) throw error
@@ -100,7 +100,7 @@ export default function CashTrackingPage() {
           amount: finalAmount,
           category: category,
           description: reason || 'Cash Withdrawal',
-          created_by: user?.id || null,
+          created_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
           session_id: currentSession?.id || null,
         })
         if (expErr) console.error('Failed to log expense:', expErr)

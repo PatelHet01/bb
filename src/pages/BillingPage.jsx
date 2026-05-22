@@ -810,7 +810,7 @@ export default function BillingPage() {
       if (editingOrderId || selectedTable?.current_order_id || kitchenOrderId) {
         const orderIdToUpdate = editingOrderId || selectedTable?.current_order_id || kitchenOrderId
         const { data: updatedOrder, error } = await supabase.from('orders')
-          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id || null, session_id: currentSessionId })
+          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId })
           .eq('id', orderIdToUpdate)
           .select().single()
         if (error) throw error
@@ -829,7 +829,7 @@ export default function BillingPage() {
         const { data: newOrder, error } = await supabase.from('orders').insert({
           customer_id: customer?.id || null, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
           table_number: selectedTable?.table_number || null, order_type: orderType,
-          received_by: user?.id || null, session_id: currentSessionId
+          received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId
         }).select().single()
         if (error) throw error
         order = newOrder

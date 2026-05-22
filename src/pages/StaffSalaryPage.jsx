@@ -19,7 +19,12 @@ export default function StaffSalaryPage() {
   const setActiveTab = (tab) => setSearchParams({ tab })
   const [showWorkerForm, setShowWorkerForm] = useState(false)
   const [editingWorker, setEditingWorker] = useState(null)
-  const [workerForm, setWorkerForm] = useState({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true })
+  const [workerForm, setWorkerForm] = useState({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true, required_hours_per_day: 8 })
+
+  const [attendanceLogs, setAttendanceLogs] = useState([])
+  const [monthlyShifts, setMonthlyShifts] = useState([])
+  const [khataBalances, setKhataBalances] = useState({})
+  const [selectedWorkerDrilldown, setSelectedWorkerDrilldown] = useState(null)
 
   const [showUserForm, setShowUserForm] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
@@ -49,6 +54,35 @@ export default function StaffSalaryPage() {
         if (branchId) wQ = wQ.eq('branch_id', branchId)
         const { data: wData } = await wQ
         setWorkers(wData || [])
+
+        // Fetch Khata balances
+        const { data: khataData } = await supabase.from('staff_khata_ledger').select('worker_id, type, amount')
+        const balances = (khataData || []).reduce((acc, curr) => {
+          const amt = Number(curr.amount || 0)
+          const wId = curr.worker_id
+          if (!acc[wId]) acc[wId] = 0
+          if (curr.type === 'CREDIT') {
+            acc[wId] += amt
+          } else if (curr.type === 'PAYMENT') {
+            acc[wId] -= amt
+          }
+          return acc
+        }, {})
+        setKhataBalances(balances)
+
+        // Fetch monthly attendance logs
+        const { data: attLogs } = await supabase
+          .from('attendance_log')
+          .select('*')
+          .like('date', `${activeMonth}%`)
+        setAttendanceLogs(attLogs || [])
+
+        // Fetch shifts for the active month (used in ledger drilldown)
+        const { data: shiftLogs } = await supabase
+          .from('shifts')
+          .select('*')
+          .like('clock_in', `${activeMonth}%`)
+        setMonthlyShifts(shiftLogs || [])
 
         if (activeTab === 'salary') {
           let rQ = supabase.from('salary_records').select('*').eq('month_year', activeMonth)
@@ -91,7 +125,8 @@ export default function StaffSalaryPage() {
         role: workerForm.role,
         base_salary: parseFloat(workerForm.base_salary),
         branch_id: workerForm.branch_id,
-        is_active: workerForm.is_active
+        is_active: workerForm.is_active,
+        required_hours_per_day: parseFloat(workerForm.required_hours_per_day || 8)
       }
 
       if (editingWorker) {
@@ -99,6 +134,10 @@ export default function StaffSalaryPage() {
         if (error) throw error
         toast.success('Worker updated')
       } else {
+        const { count, error: countErr } = await supabase.from('workers').select('*', { count: 'exact', head: true })
+        if (countErr) throw countErr
+        payload.staff_code = `STF-${String((count || 0) + 1).padStart(4, '0')}`
+
         const { error } = await supabase.from('workers').insert(payload)
         if (error) throw error
         toast.success('Worker added')
@@ -106,7 +145,7 @@ export default function StaffSalaryPage() {
 
       setShowWorkerForm(false)
       setEditingWorker(null)
-      setWorkerForm({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true })
+      setWorkerForm({ name: '', role: 'Staff', base_salary: '', branch_id: branchId || 'gurukul', is_active: true, required_hours_per_day: 8 })
       fetchData()
     } catch (e) {
       toast.error(e.message)
@@ -162,6 +201,138 @@ export default function StaffSalaryPage() {
     const { error } = await supabase.from('users').delete().eq('id', id)
     if (error) toast.error(error.message)
     else { toast.success('User deleted'); fetchData() }
+  }
+
+  // Recalculation Flow & Attendance Helpers
+  async function recalculateSalary(workerId, monthYear, workerBaseSalary) {
+    try {
+      // 1. Sum up transactions for this month
+      const { data: txs, error: txErr } = await supabase
+        .from('staff_transactions')
+        .select('type, amount')
+        .eq('worker_id', workerId)
+        .like('created_at', `${monthYear}%`)
+      
+      if (txErr) throw txErr
+
+      let advance_taken = 0
+      let bonus = 0
+      let manual_deduction = 0
+
+      for (const t of (txs || [])) {
+        if (t.type === 'ADVANCE') advance_taken += Number(t.amount || 0)
+        else if (t.type === 'BONUS') bonus += Number(t.amount || 0)
+        else if (t.type === 'DEDUCTION') manual_deduction += Number(t.amount || 0)
+      }
+
+      // 2. Sum up attendance logs for this month
+      const { data: atts, error: attErr } = await supabase
+        .from('attendance_log')
+        .select('status')
+        .eq('worker_id', workerId)
+        .like('date', `${monthYear}%`)
+
+      if (attErr) throw attErr
+
+      let leaves_taken = 0
+      for (const a of (atts || [])) {
+        if (a.status === 'absent') leaves_taken += 1.0
+        else if (a.status === 'half_day') leaves_taken += 0.5
+      }
+
+      // 3. Compute attendance deduction
+      const parts = monthYear.split('-')
+      const year = parseInt(parts[0], 10)
+      const month = parseInt(parts[1], 10)
+      const daysInMonth = new Date(year, month, 0).getDate()
+
+      const salaryPerDay = workerBaseSalary / daysInMonth
+      const excessLeaves = Math.max(0, leaves_taken - 1)
+      const attendance_deduction = excessLeaves * salaryPerDay
+
+      // 4. Calculate Net Payable
+      const net_payable = workerBaseSalary + bonus - advance_taken - manual_deduction - attendance_deduction
+
+      // 5. Check if salary record already exists
+      const { data: existingRecord } = await supabase
+        .from('salary_records')
+        .select('id, status, payment_note')
+        .eq('worker_id', workerId)
+        .eq('month_year', monthYear)
+        .maybeSingle()
+
+      const recordPayload = {
+        worker_id: workerId,
+        month_year: monthYear,
+        base_salary: workerBaseSalary,
+        bonus: bonus,
+        advance_taken: advance_taken,
+        manual_deduction: manual_deduction,
+        attendance_deduction: attendance_deduction,
+        leaves_taken: Math.ceil(leaves_taken),
+        paid_leaves_allowed: 1,
+        net_payable: net_payable,
+        status: existingRecord?.status || 'unpaid',
+        payment_note: existingRecord?.payment_note || null,
+        updated_at: new Date().toISOString()
+      }
+
+      if (existingRecord) {
+        const { error: updErr } = await supabase.from('salary_records').update(recordPayload).eq('id', existingRecord.id)
+        if (updErr) throw updErr
+      } else {
+        const { error: insErr } = await supabase.from('salary_records').insert(recordPayload)
+        if (insErr) throw insErr
+      }
+    } catch (err) {
+      console.error("Error in recalculateSalary:", err)
+      toast.error("Recalculation error: " + err.message)
+    }
+  }
+
+  async function handleToggleAttendance(workerId, dateStr, newStatus) {
+    try {
+      const existing = attendanceLogs.find(l => l.worker_id === workerId && l.date === dateStr)
+      
+      const payload = {
+        worker_id: workerId,
+        date: dateStr,
+        status: newStatus,
+        branch_id: branchId || workers.find(w => w.id === workerId)?.branch_id || 'gurukul',
+        recorded_by: user.username
+      }
+
+      if (existing) {
+        const { error } = await supabase.from('attendance_log').update(payload).eq('id', existing.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('attendance_log').insert(payload)
+        if (error) throw error
+      }
+
+      // Re-fetch data and recalculate salary record
+      const selectedWorker = workers.find(w => w.id === workerId)
+      if (selectedWorker) {
+        await recalculateSalary(workerId, activeMonth, selectedWorker.base_salary)
+      }
+      
+      toast.success('Attendance updated')
+      fetchData()
+    } catch (e) {
+      toast.error('Failed to update attendance: ' + e.message)
+    }
+  }
+
+  const getDaysInMonthList = (monthYear) => {
+    if (!monthYear) return []
+    const [year, month] = monthYear.split('-').map(Number)
+    const date = new Date(year, month - 1, 1)
+    const days = []
+    while (date.getMonth() === month - 1) {
+      days.push(new Date(date))
+      date.setDate(date.getDate() + 1)
+    }
+    return days
   }
 
   // Salary Handlers

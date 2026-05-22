@@ -91,7 +91,7 @@ export default function InternalLedgerPage() {
         notes,
         branch_id: targetBranch,
         session_id: currentSession?.id || null,
-        created_by: user?.id || null
+        created_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null
       }
 
       if (activeForm === 'p2b') {
@@ -183,7 +183,7 @@ export default function InternalLedgerPage() {
     try {
       const { error } = await supabase
         .from('internal_ledger')
-        .update({ status: 'confirmed', approved_by: user?.id })
+        .update({ status: 'confirmed', approved_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null })
         .eq('id', id)
       if (error) throw error
       toast.success('Transaction approved!')

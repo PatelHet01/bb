@@ -137,7 +137,7 @@ export default function SessionPage() {
         .from('business_sessions')
         .insert({
           branch_id: branch,
-          opened_by: user?.id || null,
+          opened_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
           session_date: today,
           opening_balance: openingTotal,
           opening_cash_breakdown: {},
@@ -155,7 +155,7 @@ export default function SessionPage() {
         denominations: {},
         total_amount: openingTotal,
         reason: 'Session opened',
-        recorded_by: user?.id || null
+        recorded_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null
       })
       if (cErr) throw cErr
 
@@ -208,7 +208,7 @@ export default function SessionPage() {
           status: 'closed',
           closing_balance: closingTotal,
           closing_cash_breakdown: {},
-          closed_by: user?.id || null,
+          closed_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
           end_time: new Date().toISOString(),
           notes: closingNotes,
           total_revenue: sessionSummary?.revenue || 0,
@@ -230,7 +230,7 @@ export default function SessionPage() {
         denominations: {},
         total_amount: closingTotal,
         reason: closingNotes || 'End of day count',
-        recorded_by: user?.id || null
+        recorded_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null
       })
 
       clearSession()

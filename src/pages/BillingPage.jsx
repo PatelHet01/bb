@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import { playBell } from '../utils/bell'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -71,6 +71,116 @@ export default function BillingPage() {
     const now = new Date()
     const timeStr = now.toTimeString().split(' ')[0] // e.g. "12:18:10"
     return new Date(`${orderDate}T${timeStr}`).toISOString()
+  }
+
+  // Barcode Scanner
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false)
+  const [barcodeInput, setBarcodeInput] = useState('')
+  const [barcodeLoading, setBarcodeLoading] = useState(false)
+  const [barcodeResult, setBarcodeResult] = useState(null)
+  const [barcodeError, setBarcodeError] = useState(null)
+
+  // Camera scanning ref & state
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const scanIntervalRef = useRef(null)
+  const [scannerActive, setScannerActive] = useState(false)
+
+  // --- Barcode / OpenFoodFacts ---
+  async function lookupBarcode(code) {
+    if (!code.trim()) return
+    setBarcodeLoading(true)
+    setBarcodeResult(null)
+    setBarcodeError(null)
+    try {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code.trim()}.json`)
+      const data = await res.json()
+      if (data.status === 1) {
+        const p = data.product
+        const name = p.product_name
+        const brand = p.brands
+        const qty = p.quantity
+        setBarcodeResult({ name: name || 'Product found (no name)', brand, qty, found: true, code: code.trim() })
+      } else {
+        setBarcodeResult({ found: false, code: code.trim() })
+        setBarcodeError('Not found in OpenFoodFacts. Try entering the name manually.')
+      }
+    } catch (err) {
+      setBarcodeError('Network error. Check your connection.')
+    } finally {
+      setBarcodeLoading(false)
+    }
+  }
+
+  async function startCameraScanning() {
+    setBarcodeResult(null)
+    setBarcodeError(null)
+    if (!('mediaDevices' in navigator)) {
+      setBarcodeError('Camera not supported in this browser.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+      setScannerActive(true)
+      
+      // Start polling for barcodes every 500ms
+      scanIntervalRef.current = setInterval(async () => {
+        if (!videoRef.current || !streamRef.current) return
+        if (!('BarcodeDetector' in window)) {
+          setBarcodeError('Live scanning needs Chrome/Edge. Type the barcode below instead.')
+          stopCameraScanning()
+          return
+        }
+        try {
+          const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'] })
+          const codes = await detector.detect(videoRef.current)
+          if (codes && codes.length > 0) {
+            playBell() // Visual audio feedback
+            stopCameraScanning()
+            setBarcodeInput(codes[0].rawValue)
+            await lookupBarcode(codes[0].rawValue)
+          }
+        } catch (e) {
+          // Silent detector check
+        }
+      }, 500)
+    } catch (err) {
+      setBarcodeError('Camera access denied. Please allow camera permissions.')
+      setScannerActive(false)
+    }
+  }
+
+  function stopCameraScanning() {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current)
+      scanIntervalRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+    setScannerActive(false)
+  }
+
+  function closeBarcodeModal() {
+    stopCameraScanning()
+    setShowBarcodeModal(false)
+    setBarcodeInput('')
+    setBarcodeResult(null)
+    setBarcodeError(null)
+  }
+
+  function applyBarcodeResult(name) {
+    setItemSearch(name)
+    closeBarcodeModal()
+    toast.success(`Searching for "${name}"`)
   }
 
   useEffect(() => {
@@ -1208,16 +1318,26 @@ export default function BillingPage() {
           
           <div className="flex w-full gap-3">
             {/* 1. Menu Search */}
-            <div className="flex-1 relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-              <input 
-                type="text" 
-                placeholder="Search Cafe Menu..." 
-                className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none transition-all"
-                value={itemSearch}
-                onChange={e => setItemSearch(e.target.value)}
-              />
-              {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+            <div className="flex-1 relative flex gap-2">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+                <input 
+                  type="text" 
+                  placeholder="Search Cafe Menu..." 
+                  className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none transition-all"
+                  value={itemSearch}
+                  onChange={e => setItemSearch(e.target.value)}
+                />
+                {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+              </div>
+              <button
+                onClick={() => { setShowBarcodeModal(true); startCameraScanning(); }}
+                title="Scan Barcode to search product name"
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-ink-200 dark:border-ink-800 bg-ink-50 dark:bg-ink-950 text-ink-600 dark:text-ink-300 hover:border-ember hover:text-ember transition-all text-xs font-semibold shrink-0"
+              >
+                <ScanLine size={15} />
+                <span className="hidden sm:inline">Scan</span>
+              </button>
             </div>
 
             {/* 2. Customer Search / Selected Customer */}
@@ -1752,6 +1872,119 @@ export default function BillingPage() {
                  </div>
                ))
               }
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Barcode Scanner Modal */}
+      {showBarcodeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-700">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50 dark:bg-zinc-950/50">
+              <div>
+                <h3 className="font-black text-zinc-900 dark:text-white flex items-center gap-2"><ScanLine size={18} className="text-ember" /> Barcode Lookup</h3>
+                <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-widest mt-0.5">Powered by OpenFoodFacts</p>
+              </div>
+              <button onClick={closeBarcodeModal} className="text-zinc-400 hover:text-zinc-900 dark:hover:text-white"><X size={20} /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Camera View */}
+              <div className="relative bg-black rounded-xl overflow-hidden" style={{ aspectRatio: '4/3' }}>
+                {scannerActive ? (
+                  <>
+                    <video ref={videoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
+                    {/* Scan frame overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-48 h-32 border-2 border-ember rounded-lg relative">
+                        <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-ember rounded-tl" />
+                        <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-ember rounded-tr" />
+                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-ember rounded-bl" />
+                        <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-ember rounded-br" />
+                        <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-ember/60 animate-pulse" />
+                      </div>
+                    </div>
+                    <div className="absolute bottom-2 left-0 right-0 text-center">
+                      <span className="text-[10px] font-black text-white/80 uppercase tracking-widest bg-black/40 px-3 py-1 rounded-full">Point at barcode</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-zinc-400">
+                    <Camera size={40} className="opacity-30" />
+                    <p className="text-xs font-semibold">Camera not active</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Camera Controls */}
+              <div className="flex gap-2">
+                {!scannerActive ? (
+                  <button onClick={startCameraScanning} className="flex-1 flex items-center justify-center gap-2 bg-ember text-white font-bold py-2.5 rounded-xl hover:bg-ember/90 transition-all active:scale-95 text-sm">
+                    <Camera size={16} /> Start Camera Scan
+                  </button>
+                ) : (
+                  <button onClick={stopCameraScanning} className="flex-1 flex items-center justify-center gap-2 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold py-2.5 rounded-xl hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-all text-sm">
+                    <CameraOff size={16} /> Stop Camera
+                  </button>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Or type barcode</span>
+                <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+              </div>
+
+              {/* Manual Entry */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="input flex-1 font-mono tracking-wider bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-white px-3 py-2 rounded-xl text-sm focus:ring-2 focus:ring-ember outline-none"
+                  placeholder="e.g. 8901491108266"
+                  value={barcodeInput}
+                  onChange={e => setBarcodeInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && lookupBarcode(barcodeInput)}
+                  autoFocus={!scannerActive}
+                />
+                <button
+                  onClick={() => lookupBarcode(barcodeInput)}
+                  disabled={!barcodeInput.trim() || barcodeLoading}
+                  className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-bold rounded-xl hover:opacity-90 transition-all active:scale-95 disabled:opacity-40 text-sm"
+                >
+                  {barcodeLoading ? '…' : 'Lookup'}
+                </button>
+              </div>
+
+              {/* Error */}
+              {barcodeError && !barcodeResult && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-400 font-semibold">
+                  ⚠️ {barcodeError}
+                </div>
+              )}
+
+              {/* Result */}
+              {barcodeResult && (
+                <div className={`rounded-xl p-4 border ${barcodeResult.found ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'}`}>
+                  {barcodeResult.found ? (
+                    <>
+                      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Product Found</p>
+                      <p className="font-black text-zinc-900 dark:text-white text-base">{barcodeResult.name}</p>
+                      {barcodeResult.brand && <p className="text-xs text-zinc-500 mt-0.5">{barcodeResult.brand}{barcodeResult.qty ? ` · ${barcodeResult.qty}` : ''}</p>}
+                      <p className="text-[10px] text-zinc-400 font-mono mt-1">{barcodeResult.code}</p>
+                      <div className="flex gap-2 mt-3">
+                        <button onClick={() => applyBarcodeResult(barcodeResult.name)} className="flex-1 text-xs font-black bg-emerald-600 text-white py-2.5 rounded-lg hover:bg-emerald-700 transition-all active:scale-95">
+                          🔍 Search in Menu
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm font-bold text-red-600 dark:text-red-400">❌ Barcode <span className="font-mono">{barcodeResult.code}</span> not found in database.</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

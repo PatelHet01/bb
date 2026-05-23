@@ -922,8 +922,7 @@ export default function BillingPage() {
       const { error: paymentError } = await supabase.from('order_payments').insert(finalPayments.map(p => ({
           order_id: order.id, 
           mode: p.mode === 'ONLINE' ? (p.subtype || 'UPI') : p.mode, 
-          amount: parseFloat(p.amount),
-          created_at: order.created_at
+          amount: parseFloat(p.amount)
         })))
       if (paymentError) {
          console.error('Payment Error:', paymentError)

@@ -43,9 +43,42 @@ export default function LoginPage() {
     // Fallback to hardcoded defaults only if DB record doesn't exist
     const record = HARDCODED_USERS[u]
     if (record && record.password === password && !data) {
-      setAuth({ username: u, id: `hardcoded-${u}` }, record.role, record.branchId, record.branchName)
-      supabase.from('auth_logs').insert({ user_id: null, username: u, branch_id: record.branchId, event: 'LOGIN', user_agent: navigator.userAgent }).then()
-      toast.success(`Signed in as ${u}`)
+      // Generate a session UUID for device-specific testing
+      const deviceUuid = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') 
+        ? crypto.randomUUID() 
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+          })
+      
+      const deviceUsername = `${u}_device_${deviceUuid.slice(0, 8)}`
+      
+      try {
+        // Register this specific device in the database with its generated UUID and stating its role
+        await supabase.from('users').insert({
+          id: deviceUuid,
+          username: deviceUsername,
+          email: `${deviceUsername}@bombaybethak.com`,
+          role: record.role,
+          branch_id: record.branchId,
+          is_active: true,
+          password_hash: record.password
+        }).then()
+      } catch (err) {
+        console.error('Failed to register device in users table:', err)
+      }
+
+      setAuth({ username: deviceUsername, id: deviceUuid }, record.role, record.branchId, record.branchName)
+      
+      supabase.from('auth_logs').insert({ 
+        user_id: deviceUuid, 
+        username: deviceUsername, 
+        branch_id: record.branchId, 
+        event: 'LOGIN', 
+        user_agent: `${navigator.userAgent} [Role: ${record.role}]` 
+      }).then()
+      
+      toast.success(`Signed in as ${record.role} (Device: ${deviceUuid.slice(0, 8)})`)
       navigate('/admin/dashboard', { replace: true })
       setLoading(false)
       return

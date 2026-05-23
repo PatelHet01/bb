@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import { playBell } from '../utils/bell'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2 } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -58,6 +58,20 @@ export default function BillingPage() {
   const [editCustName, setEditCustName] = useState('')
   const [editCustMobile, setEditCustMobile] = useState('')
   const [savingCust, setSavingCust] = useState(false)
+
+  // Backdated POS order date support
+  const [orderDate, setOrderDate] = useState(() => new Date().toISOString().split('T')[0])
+
+  // Helper to construct a backdated timestamp preserving current entry time
+  const getOrderTimestamp = () => {
+    const todayStr = new Date().toISOString().split('T')[0]
+    if (orderDate === todayStr) {
+      return new Date().toISOString()
+    }
+    const now = new Date()
+    const timeStr = now.toTimeString().split(' ')[0] // e.g. "12:18:10"
+    return new Date(`${orderDate}T${timeStr}`).toISOString()
+  }
 
   useEffect(() => {
     if (customer) {
@@ -283,7 +297,8 @@ export default function BillingPage() {
           status: 'preparing',
           table_number: selectedTable?.table_number || null,
           order_type: orderType,
-          customer_id: customer?.id || null
+          customer_id: customer?.id || null,
+          created_at: getOrderTimestamp()
         }).select().single()
         if (error) throw error
         orderId = newOrder.id
@@ -350,7 +365,8 @@ export default function BillingPage() {
           status: 'preparing',
           table_number: selectedTable?.table_number || null,
           order_type: orderType,
-          customer_id: customer?.id || null
+          customer_id: customer?.id || null,
+          created_at: getOrderTimestamp()
         }).select().single()
         if (error) throw error
         orderId = newOrder.id
@@ -566,7 +582,8 @@ export default function BillingPage() {
       if (!realOrderId && ctx.cart.length > 0) {
         const { data: newOrder } = await supabase.from('orders').insert({
           branch_id: branchId || selectedBranch, subtotal: 0, total: 0, status: 'pending',
-          table_number: tableNumber, order_type: ctx.orderType
+          table_number: tableNumber, order_type: ctx.orderType,
+          created_at: getOrderTimestamp()
         }).select().single()
         if (newOrder) {
           realOrderId = newOrder.id
@@ -586,7 +603,7 @@ export default function BillingPage() {
         await supabase.from('orders').update({ subtotal: sub, total: sub }).eq('id', realOrderId)
       }
     }, 500),
-    [branchId, selectedBranch]
+    [branchId, selectedBranch, orderDate]
   )
 
   // ── Central Sync Effect ────────────────────────────────────────────────────
@@ -810,7 +827,7 @@ export default function BillingPage() {
       if (editingOrderId || selectedTable?.current_order_id || kitchenOrderId) {
         const orderIdToUpdate = editingOrderId || selectedTable?.current_order_id || kitchenOrderId
         const { data: updatedOrder, error } = await supabase.from('orders')
-          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId })
+          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId, created_at: getOrderTimestamp() })
           .eq('id', orderIdToUpdate)
           .select().single()
         if (error) throw error
@@ -829,7 +846,8 @@ export default function BillingPage() {
         const { data: newOrder, error } = await supabase.from('orders').insert({
           customer_id: customer?.id || null, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
           table_number: selectedTable?.table_number || null, order_type: orderType,
-          received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId
+          received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId,
+          created_at: getOrderTimestamp()
         }).select().single()
         if (error) throw error
         order = newOrder
@@ -902,10 +920,11 @@ export default function BillingPage() {
       }
 
       const { error: paymentError } = await supabase.from('order_payments').insert(finalPayments.map(p => ({
-        order_id: order.id, 
-        mode: p.mode === 'ONLINE' ? (p.subtype || 'UPI') : p.mode, 
-        amount: parseFloat(p.amount)
-      })))
+          order_id: order.id, 
+          mode: p.mode === 'ONLINE' ? (p.subtype || 'UPI') : p.mode, 
+          amount: parseFloat(p.amount),
+          created_at: order.created_at
+        })))
       if (paymentError) {
          console.error('Payment Error:', paymentError)
          throw paymentError
@@ -915,13 +934,15 @@ export default function BillingPage() {
         if (p.mode === 'KHATA') {
           await supabase.from('khata_ledger').insert({
             customer_id: customer.id, branch_id: target_branch, type: 'CREDIT', amount: parseFloat(p.amount),
-            reason: `Order #${order.order_number || order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username
+            reason: `Order #${order.order_number || order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username,
+            created_at: order.created_at
           })
         }
         if (p.mode === 'ADVANCE') {
           await supabase.from('advance_ledger').insert({
             customer_id: customer.id, branch_id: target_branch, type: 'DEDUCTION', amount: parseFloat(p.amount),
-            reason: `Order #${order.order_number || order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username
+            reason: `Order #${order.order_number || order.id.slice(0, 8)}`, order_id: order.id, recorded_by: user.username,
+            created_at: order.created_at
           })
         }
       }
@@ -963,6 +984,7 @@ export default function BillingPage() {
       setSentToKitchenQtys({})
       const wasEditing = editingOrderId
       setEditingOrderId(null)
+      setOrderDate(new Date().toISOString().split('T')[0])
       toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
     } catch (e) {
       toast.error('Failed: ' + e.message)
@@ -1164,6 +1186,26 @@ export default function BillingPage() {
           <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary w-full md:w-auto md:px-4 py-2.5 md:mr-2 shrink-0 border-ink-300 hover:bg-ink-100 flex items-center justify-center gap-2">
             <Receipt size={16}/> Manage Orders
           </button>
+          
+          {/* POS Date Selection */}
+          <div className="flex items-center gap-2 bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl px-3 py-2 shrink-0 relative transition-all duration-200 hover:border-ink-300 dark:hover:border-ink-700">
+            <Calendar 
+              size={16} 
+              className={orderDate === new Date().toISOString().split('T')[0] ? "text-ink-400" : "text-amber-500 animate-pulse"} 
+            />
+            <input 
+              type="date" 
+              className="bg-transparent border-none text-xs font-bold text-ink-700 dark:text-ink-300 outline-none cursor-pointer focus:ring-0"
+              value={orderDate}
+              onChange={e => setOrderDate(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
+            />
+            {orderDate !== new Date().toISOString().split('T')[0] && (
+              <span className="text-[10px] font-black text-white bg-amber-500 px-2 py-0.5 rounded-lg uppercase tracking-wider animate-bounce shadow-sm">
+                Backdated
+              </span>
+            )}
+          </div>
           
           <div className="flex w-full gap-3">
             {/* 1. Menu Search */}

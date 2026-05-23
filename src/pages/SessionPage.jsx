@@ -81,8 +81,23 @@ export default function SessionPage() {
   const [closingNotes, setClosingNotes] = useState('')
   const [sessionSummary, setSessionSummary] = useState(null)
 
+  // Denominations cash counting state
+  const [openingDenoms, setOpeningDenoms] = useState({})
+  const [closingDenoms, setClosingDenoms] = useState({})
+
   const openingTotal = Number(openingBalance) || 0
   const closingTotal = Number(closingBalance) || 0
+
+  // Sync denomination totals to numeric inputs
+  useEffect(() => {
+    const total = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
+    if (total > 0) setOpeningBalance(String(total))
+  }, [openingDenoms])
+
+  useEffect(() => {
+    const total = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
+    if (total > 0) setClosingBalance(String(total))
+  }, [closingDenoms])
 
   useEffect(() => { fetchSessions() }, [branchId])
 
@@ -140,7 +155,7 @@ export default function SessionPage() {
           opened_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
           session_date: today,
           opening_balance: openingTotal,
-          opening_cash_breakdown: {},
+          opening_cash_breakdown: openingDenoms,
           notes: openingNotes,
           status: 'open'
         })
@@ -152,7 +167,7 @@ export default function SessionPage() {
         business_session_id: newSession.id,
         branch_id: branch,
         type: 'OPENING',
-        denominations: {},
+        denominations: openingDenoms,
         total_amount: openingTotal,
         reason: 'Session opened',
         recorded_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null
@@ -207,7 +222,7 @@ export default function SessionPage() {
         .update({
           status: 'closed',
           closing_balance: closingTotal,
-          closing_cash_breakdown: {},
+          closing_cash_breakdown: closingDenoms,
           closed_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
           end_time: new Date().toISOString(),
           notes: closingNotes,
@@ -227,7 +242,7 @@ export default function SessionPage() {
         business_session_id: currentSession.id,
         branch_id: branch,
         type: 'CLOSING',
-        denominations: {},
+        denominations: closingDenoms,
         total_amount: closingTotal,
         reason: closingNotes || 'End of day count',
         recorded_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null

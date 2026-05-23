@@ -7,7 +7,7 @@ const TIMEOUT_MS = 60 * 60 * 1000  // 1 hour
 const WARNING_MS = 55 * 60 * 1000  // 55 min — warn 5 min before
 
 export function useAutoLogout() {
-  const { user, branchId, logout } = useAuthStore()
+  const { user, role, branchId, logout } = useAuthStore()
   const navigate = useNavigate()
   const timerRef = useRef(null)
   const warnRef = useRef(null)
@@ -29,13 +29,13 @@ export function useAutoLogout() {
         username: user?.username || null,
         branch_id: branchId || null,
         event: 'AUTO_LOGOUT',
-        reason: 'inactivity'
+        reason: `inactivity [Role: ${role}]`
       }).then()
 
       logout()
       navigate('/admin', { replace: true })
     }, TIMEOUT_MS)
-  }, [user, branchId, logout, navigate])
+  }, [user, role, branchId, logout, navigate])
 
   useEffect(() => {
     if (!user) return

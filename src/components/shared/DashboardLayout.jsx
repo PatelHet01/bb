@@ -10,7 +10,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import OrderNotificationOverlay from './OrderNotificationOverlay'
 import BBLogo from './BBLogo'
-import { useAutoLogout } from '../../hooks/useAutoLogout'
+
 
 const NAV_GROUPS = [
   {
@@ -70,7 +70,7 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [permissions, setPermissions] = useState(null)
   const [staffPerms, setStaffPerms] = useState(null)
-  const { showWarning, extendSession } = useAutoLogout()
+
 
   useEffect(() => {
     // Fetch feature permissions
@@ -85,6 +85,15 @@ export default function DashboardLayout() {
   }, [])
 
   function handleLogout() {
+    if (user) {
+      supabase.from('auth_logs').insert({
+        user_id: user.id,
+        username: user.username,
+        branch_id: branchId,
+        event: 'LOGOUT',
+        reason: `manual_signout [Role: ${role}]`
+      }).then()
+    }
     logout()
     navigate('/admin', { replace: true })
   }
@@ -242,20 +251,7 @@ export default function DashboardLayout() {
 
         <OrderNotificationOverlay />
 
-        {/* Auto-logout warning modal */}
-        {showWarning && (
-          <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center">
-            <div className="bg-white dark:bg-zinc-900 rounded-2xl p-8 max-w-sm w-full shadow-2xl text-center animate-scale-up">
-              <div className="text-4xl mb-4">⏱️</div>
-              <h2 className="font-bold text-lg mb-2 text-zinc-900 dark:text-white">Session Expiring Soon</h2>
-              <p className="text-zinc-500 text-sm mb-6">Your session will expire in 5 minutes due to inactivity.</p>
-              <div className="flex gap-3">
-                <button onClick={extendSession} className="btn-primary flex-1">Continue Session</button>
-                <button onClick={handleLogout} className="btn-secondary flex-1">Logout Now</button>
-              </div>
-            </div>
-          </div>
-        )}
+
       </div>
     </div>
   )

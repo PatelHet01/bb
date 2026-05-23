@@ -9,8 +9,11 @@ const NOTES = [2000, 500, 200, 100, 50, 20, 10]
 const COINS = [20, 10, 5, 2, 1]
 const ALL_DENOMS = [...NOTES, ...COINS]
 
-function DenomForm({ value, onChange, label }) {
-  const total = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(value[d] || 0)), 0)
+function DenomForm({ value, onChange }) {
+  const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(value[`note_${d}`] || 0)), 0)
+  const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(value[`coin_${d}`] || 0)), 0)
+  const total = totalNotes + totalCoins
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
@@ -23,12 +26,12 @@ function DenomForm({ value, onChange, label }) {
               <input
                 type="number" min="0"
                 className="input w-20 text-center font-bold py-1.5"
-                value={value[d] || ''}
-                onChange={e => onChange({ ...value, [d]: parseInt(e.target.value) || 0 })}
+                value={value[`note_${d}`] || ''}
+                onChange={e => onChange({ ...value, [`note_${d}`]: parseInt(e.target.value) || 0 })}
                 placeholder="0"
               />
               <span className="text-xs text-ink-500 w-16 text-right">
-                = ₹{(d * (parseInt(value[d] || 0))).toLocaleString('en-IN')}
+                = ₹{(d * (parseInt(value[`note_${d}`] || 0))).toLocaleString('en-IN')}
               </span>
             </div>
           ))}
@@ -42,12 +45,12 @@ function DenomForm({ value, onChange, label }) {
               <input
                 type="number" min="0"
                 className="input w-20 text-center font-bold py-1.5"
-                value={value[d] || ''}
-                onChange={e => onChange({ ...value, [d]: parseInt(e.target.value) || 0 })}
+                value={value[`coin_${d}`] || ''}
+                onChange={e => onChange({ ...value, [`coin_${d}`]: parseInt(e.target.value) || 0 })}
                 placeholder="0"
               />
               <span className="text-xs text-ink-500 w-16 text-right">
-                = ₹{(d * (parseInt(value[d] || 0))).toLocaleString('en-IN')}
+                = ₹{(d * (parseInt(value[`coin_${d}`] || 0))).toLocaleString('en-IN')}
               </span>
             </div>
           ))}
@@ -90,12 +93,16 @@ export default function SessionPage() {
 
   // Sync denomination totals to numeric inputs
   useEffect(() => {
-    const total = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
+    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(openingDenoms[`note_${d}`] || 0)), 0)
+    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(openingDenoms[`coin_${d}`] || 0)), 0)
+    const total = totalNotes + totalCoins
     if (total > 0) setOpeningBalance(String(total))
   }, [openingDenoms])
 
   useEffect(() => {
-    const total = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
+    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(closingDenoms[`note_${d}`] || 0)), 0)
+    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(closingDenoms[`coin_${d}`] || 0)), 0)
+    const total = totalNotes + totalCoins
     if (total > 0) setClosingBalance(String(total))
   }, [closingDenoms])
 

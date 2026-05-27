@@ -837,7 +837,9 @@ export default function BillingPage() {
       const idx = prev.findIndex(c => c.id === item.id)
       return idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty, isAddon: isNewAddon }, ...prev]
     })
-    setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - qty } : i))
+    // Pack mode: each unit added = units_per_box singles consumed from stock
+    const stockDecrement = wantPack ? qty * (item.units_per_box || 1) : qty
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - stockDecrement } : i))
   }
 
   function handleOfferTap(offer) {
@@ -849,28 +851,31 @@ export default function BillingPage() {
   }
 
   function updateQty(id, delta) {
+    const cartItem = cart.find(c => c.id === id)
+    const isPackItem = cartItem && packMode[id] && (cartItem.units_per_box || 1) > 1 && (cartItem.pack_price || 0) > 0
+    const stockDelta = isPackItem ? delta * (cartItem.units_per_box || 1) : delta
     setCart(prev => {
       const next = prev.map(c => c.id === id ? { ...c, quantity: c.quantity + delta } : c).filter(c => c.quantity > 0)
       return next
     })
-    setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - delta } : i))
+    setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - stockDelta } : i))
   }
   
   function setExactQty(id, qty) {
+    const cartItem = cart.find(c => c.id === id)
+    const isPackItem = cartItem && packMode[id] && (cartItem.units_per_box || 1) > 1 && (cartItem.pack_price || 0) > 0
+    const unitsPerBox = isPackItem ? (cartItem.units_per_box || 1) : 1
     if (qty <= 0) {
-      const itemInCart = cart.find(c => c.id === id)
-      if (itemInCart) {
-        setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity + itemInCart.quantity } : i))
+      if (cartItem) {
+        setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity + cartItem.quantity * unitsPerBox } : i))
       }
       setCart(prev => prev.filter(c => c.id !== id))
     } else {
       setCart(prev => {
-        const itemInCart = prev.find(c => c.id === id)
-        const oldQty = itemInCart ? itemInCart.quantity : 0
+        const oldQty = cartItem ? cartItem.quantity : 0
         const delta = qty - oldQty
-        setItems(itemsPrev => itemsPrev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - delta } : i))
-        
-        if (itemInCart) return prev.map(c => c.id === id ? { ...c, quantity: qty } : c)
+        setItems(itemsPrev => itemsPrev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - delta * unitsPerBox } : i))
+        if (cartItem) return prev.map(c => c.id === id ? { ...c, quantity: qty } : c)
         const dbItem = items.find(i => i.id === id)
         return [{ ...dbItem, quantity: qty }, ...prev]
       })
@@ -1127,7 +1132,10 @@ export default function BillingPage() {
   // Double tap handler
   let tapTimer = null
   function handleCardTap(item) {
-    if (!item.is_active || !item.price || item.stock_quantity <= 0) return
+    const wantPack = !!(cardPackMode[item.id] && (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0)
+    // Effective stock: for pack mode, need at least units_per_box singles
+    const effectiveStock = wantPack ? Math.floor(item.stock_quantity / (item.units_per_box || 1)) : item.stock_quantity
+    if (!item.is_active || !item.price || effectiveStock <= 0) return
     if (tapTimer) {
       clearTimeout(tapTimer)
       tapTimer = null
@@ -1528,8 +1536,12 @@ export default function BillingPage() {
                       {subItems.map(item => {
                         const inCart = cart.find(c => c.id === item.id)
                         const qty = inCart ? inCart.quantity : 0
-                        const isOut = item.stock_quantity <= 0
+                        const wantPack = !!(cardPackMode[item.id] && (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0)
+                        const availablePacks = wantPack ? Math.floor(item.stock_quantity / (item.units_per_box || 1)) : null
+                        // Out-of-stock check is pack-aware
+                        const isOut = wantPack ? availablePacks <= 0 : item.stock_quantity <= 0
                         const isInactive = !item.is_active || !item.price
+                        const packNotAvailable = (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0 && item.stock_quantity < (item.units_per_box || 1)
                         
                         return (
                           <button key={item.id} 
@@ -1575,11 +1587,20 @@ export default function BillingPage() {
                             {/* Pack toggle pill — only for pack-enabled non-BB-Cafe items */}
                             {(item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0 && item.category !== 'BB Cafe' && (
                               <div
-                                onClick={e => { e.stopPropagation(); setCardPackMode(p => ({ ...p, [item.id]: !p[item.id] })) }}
-                                className="mt-1 flex rounded overflow-hidden border border-ink-600 text-[8px] font-black cursor-pointer"
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  if (!cardPackMode[item.id] && packNotAvailable) return // can't switch to pack if not enough stock
+                                  setCardPackMode(p => ({ ...p, [item.id]: !p[item.id] }))
+                                }}
+                                className={`mt-1 flex rounded overflow-hidden border text-[8px] font-black ${
+                                  !cardPackMode[item.id] && packNotAvailable ? 'border-ink-700 opacity-50 cursor-not-allowed' : 'border-ink-600 cursor-pointer'
+                                }`}
+                                title={packNotAvailable ? `Need ≥${item.units_per_box} pcs in stock for pack` : ''}
                               >
                                 <span className={`px-1.5 py-0.5 transition-colors ${!cardPackMode[item.id] ? 'bg-white text-ink-900' : 'bg-transparent text-ink-400'}`}>1pc</span>
-                                <span className={`px-1.5 py-0.5 transition-colors ${cardPackMode[item.id] ? 'bg-indigo-500 text-white' : 'bg-transparent text-ink-400'}`}>📦bx</span>
+                                <span className={`px-1.5 py-0.5 transition-colors ${cardPackMode[item.id] ? 'bg-indigo-500 text-white' : 'bg-transparent text-ink-400'} ${packNotAvailable ? 'line-through' : ''}`}>
+                                  {availablePacks !== null ? `📦${availablePacks}` : '📦bx'}
+                                </span>
                               </div>
                             )}
                           </button>

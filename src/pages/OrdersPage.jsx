@@ -52,15 +52,12 @@ export default function OrdersPage() {
       } else {
         q = q.or(`name.ilike.%${customerSearch}%,username.ilike.%${customerSearch}%`)
       }
-      if (branchId) {
-        q = q.or(`branch_id.eq.${branchId},branch_id.is.null`)
-      }
       const { data } = await q.limit(10)
       setCustomerResults(data || [])
     }, 300)
 
     return () => clearTimeout(delayDebounceFn)
-  }, [customerSearch, branchId])
+  }, [customerSearch])
 
   const isSuperAdmin = role === 'super_admin'
 

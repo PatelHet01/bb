@@ -371,12 +371,11 @@ export default function BillingPage() {
     const t = setTimeout(async () => {
       let q = supabase.from('customers').select('*')
         .or(`username.ilike.%${customerSearch}%,mobile_number.ilike.%${customerSearch}%,name.ilike.%${customerSearch}%`)
-        .eq('branch_id', branchId || selectedBranch)
       const { data } = await q.limit(5)
       setCustomerResults(data || [])
     }, 250)
     return () => clearTimeout(t)
-  }, [customerSearch, branchId, selectedBranch])
+  }, [customerSearch])
 
   // ── Subscribe to order-ready broadcast (bell + toast) ───────────────────────
   useEffect(() => {

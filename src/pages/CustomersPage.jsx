@@ -87,10 +87,6 @@ export default function CustomersPage() {
       orders (id, created_at)
     `).order('name')
     
-    if (branchId) {
-      q = q.or(`branch_id.eq.${branchId},branch_id.is.null`)
-    }
-    
     const { data } = await q
     if (data) {
       // Pre-calculate balances for the list
@@ -128,7 +124,7 @@ export default function CustomersPage() {
       })
       .subscribe()
     return () => supabase.removeChannel(chan)
-  }, [branchId])
+  }, [])
 
   async function handleSave(e) {
     e.preventDefault()

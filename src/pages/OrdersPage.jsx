@@ -84,7 +84,7 @@ export default function OrdersPage() {
         id, order_number, created_at, total, subtotal, discount, status, table_number, order_type,
         branch_id,
         customers(id, name, mobile_number),
-        order_items(id, item_id, quantity, price, total, items(name, variant)),
+        order_items(id, item_id, quantity, price, total, sell_mode, items(name, variant, units_per_box, pack_price)),
         order_payments(id, mode, amount)
       `)
       .order('created_at', { ascending: false })
@@ -98,11 +98,16 @@ export default function OrdersPage() {
   async function handleCancel(order) {
     if (!window.confirm(`Cancel order ${order.order_number || '#' + order.id.slice(0,8).toUpperCase()}? This cannot be undone.`)) return
     setCancellingId(order.id)
-    // Restore stock for each item
-    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity').eq('order_id', order.id)
+    // Restore stock for each item — pack-aware with price-matching fallback
+    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity, price, sell_mode, items(units_per_box, pack_price)').eq('order_id', order.id)
     if (oldItems) {
       for (const oi of oldItems) {
-        await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -oi.quantity })
+        if (!oi.item_id) continue
+        const unitsPerBox = oi.items?.units_per_box || 1
+        const isPackPrice = unitsPerBox > 1 && oi.items?.pack_price && Math.abs(oi.price - oi.items.pack_price) < 0.01
+        const isPack = oi.sell_mode === 'pack' || isPackPrice
+        const restoreQty = isPack ? oi.quantity * unitsPerBox : oi.quantity
+        await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -restoreQty })
       }
     }
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
@@ -125,7 +130,10 @@ export default function OrdersPage() {
         variant: oi.items?.variant,
         price: oi.price,
         quantity: oi.quantity,
-        original_quantity: oi.quantity // to track stock diffs
+        original_quantity: oi.quantity, // to track stock diffs
+        sell_mode: oi.sell_mode,
+        units_per_box: oi.items?.units_per_box || 1,
+        pack_price: oi.items?.pack_price
       }))
     })
     setItemSearch('')
@@ -242,20 +250,30 @@ export default function OrdersPage() {
       // 1. Process removals and decrements (restore stock)
       for (const orig of editingOrder.order_items) {
         const curr = editingOrder.editingItems.find(i => i.item_id === orig.item_id)
+        const unitsPerBox = orig.items?.units_per_box || 1
+        const isPackPrice = unitsPerBox > 1 && orig.items?.pack_price && Math.abs(orig.price - orig.items.pack_price) < 0.01
+        const isPack = orig.sell_mode === 'pack' || isPackPrice
+        const multiplier = isPack ? unitsPerBox : 1
+
         if (!curr) {
           // Item completely removed
           await supabase.from('order_items').delete().eq('id', orig.id)
-          await supabase.rpc('decrement_stock', { p_item_id: orig.item_id, p_amount: -orig.quantity })
+          await supabase.rpc('decrement_stock', { p_item_id: orig.item_id, p_amount: -orig.quantity * multiplier })
         } else if (curr.quantity < orig.quantity) {
           // Quantity decreased
           const diff = orig.quantity - curr.quantity
           await supabase.from('order_items').update({ quantity: curr.quantity, total: curr.price * curr.quantity }).eq('id', orig.id)
-          await supabase.rpc('decrement_stock', { p_item_id: orig.item_id, p_amount: -diff })
+          await supabase.rpc('decrement_stock', { p_item_id: orig.item_id, p_amount: -diff * multiplier })
         }
       }
 
       // 2. Process additions and increments (deduct stock)
       for (const curr of editingOrder.editingItems) {
+        const unitsPerBox = curr.units_per_box || 1
+        const isPackPrice = unitsPerBox > 1 && curr.pack_price && Math.abs(curr.price - curr.pack_price) < 0.01
+        const isPack = curr.sell_mode === 'pack' || isPackPrice
+        const multiplier = isPack ? unitsPerBox : 1
+
         if (!curr.id) {
           // Brand new item added
           await supabase.from('order_items').insert({
@@ -263,14 +281,15 @@ export default function OrdersPage() {
             item_id: curr.item_id,
             quantity: curr.quantity,
             price: curr.price,
-            total: curr.price * curr.quantity
+            total: curr.price * curr.quantity,
+            sell_mode: 'single'
           })
           await supabase.rpc('decrement_stock', { p_item_id: curr.item_id, p_amount: curr.quantity })
         } else if (curr.quantity > curr.original_quantity) {
           // Quantity increased
           const diff = curr.quantity - curr.original_quantity
           await supabase.from('order_items').update({ quantity: curr.quantity, total: curr.price * curr.quantity }).eq('id', curr.id)
-          await supabase.rpc('decrement_stock', { p_item_id: curr.item_id, p_amount: diff })
+          await supabase.rpc('decrement_stock', { p_item_id: curr.item_id, p_amount: diff * multiplier })
         }
       }
 

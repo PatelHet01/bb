@@ -416,7 +416,19 @@ export default function BillingPage() {
         setKitchenOrderId(orderId)
 
         await supabase.from('order_items').insert(
-          cart.map(c => ({ order_id: orderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
+          cart.map(c => {
+            const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+            const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+            return {
+              order_id: orderId,
+              item_id: c.isOffer ? null : c.id,
+              offer_id: c.isOffer ? c.id : null,
+              quantity: c.quantity,
+              price: linePrice,
+              total: linePrice * c.quantity,
+              sell_mode: cIsPack ? 'pack' : 'single'
+            }
+          })
         )
         if (selectedTable) {
           await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: orderId }).eq('id', selectedTable.id)
@@ -428,7 +440,19 @@ export default function BillingPage() {
         await supabase.from('orders').update({ status: 'preparing', subtotal, total, customer_id: customer?.id || null }).eq('id', orderId)
         await supabase.from('order_items').delete().eq('order_id', orderId)
         await supabase.from('order_items').insert(
-          cart.map(c => ({ order_id: orderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
+          cart.map(c => {
+            const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+            const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+            return {
+              order_id: orderId,
+              item_id: c.isOffer ? null : c.id,
+              offer_id: c.isOffer ? c.id : null,
+              quantity: c.quantity,
+              price: linePrice,
+              total: linePrice * c.quantity,
+              sell_mode: cIsPack ? 'pack' : 'single'
+            }
+          })
         )
       }
 
@@ -485,14 +509,19 @@ export default function BillingPage() {
 
         // Insert all current cart items into order_items so the order is complete
         await supabase.from('order_items').insert(
-          cart.map(c => ({
-            order_id: orderId,
-            item_id: c.isOffer ? null : c.id,
-            offer_id: c.isOffer ? c.id : null,
-            quantity: c.quantity,
-            price: c.price,
-            total: c.price * c.quantity
-          }))
+          cart.map(c => {
+            const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+            const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+            return {
+              order_id: orderId,
+              item_id: c.isOffer ? null : c.id,
+              offer_id: c.isOffer ? c.id : null,
+              quantity: c.quantity,
+              price: linePrice,
+              total: linePrice * c.quantity,
+              sell_mode: cIsPack ? 'pack' : 'single'
+            }
+          })
         )
         if (selectedTable) {
           await supabase.from('cafe_tables').update({ status: 'occupied', current_order_id: orderId }).eq('id', selectedTable.id)
@@ -505,14 +534,19 @@ export default function BillingPage() {
         
         await supabase.from('order_items').delete().eq('order_id', orderId)
         await supabase.from('order_items').insert(
-          cart.map(c => ({
-            order_id: orderId,
-            item_id: c.isOffer ? null : c.id,
-            offer_id: c.isOffer ? c.id : null,
-            quantity: c.quantity,
-            price: c.price,
-            total: c.price * c.quantity
-          }))
+          cart.map(c => {
+            const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+            const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+            return {
+              order_id: orderId,
+              item_id: c.isOffer ? null : c.id,
+              offer_id: c.isOffer ? c.id : null,
+              quantity: c.quantity,
+              price: linePrice,
+              total: linePrice * c.quantity,
+              sell_mode: cIsPack ? 'pack' : 'single'
+            }
+          })
         )
       }
 
@@ -621,7 +655,14 @@ export default function BillingPage() {
       })
     }
     setSentToKitchenQtys(qtys)
-    const cartItems = (orderItems || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
+    const loadedPackMode = {}
+    const cartItems = (orderItems || []).map(oi => {
+      if (oi.sell_mode === 'pack') {
+        loadedPackMode[oi.item_id] = true
+      }
+      return { ...oi.items, quantity: oi.quantity, price: oi.price }
+    })
+    setPackMode(prev => ({ ...prev, ...loadedPackMode }))
     setCart(cartItems)
     setEditingOrderId(order.id)
     setOrderType(order.order_type || 'Dine-in')
@@ -652,12 +693,14 @@ export default function BillingPage() {
   async function cancelOrder(orderId) {
     if (!window.confirm('Are you sure you want to cancel this order?')) return
     // restore stock — pack-aware: if sold as pack, restore qty × units_per_box singles
-    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity, sell_mode, items(units_per_box)').eq('order_id', orderId)
+    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity, price, sell_mode, items(units_per_box, pack_price)').eq('order_id', orderId)
     if (oldItems) {
        for (const oi of oldItems) {
           if (!oi.item_id) continue
           const unitsPerBox = oi.items?.units_per_box || 1
-          const restoreQty = oi.sell_mode === 'pack' ? oi.quantity * unitsPerBox : oi.quantity
+          const isPackPrice = unitsPerBox > 1 && oi.items?.pack_price && Math.abs(oi.price - oi.items.pack_price) < 0.01
+          const isPack = oi.sell_mode === 'pack' || isPackPrice
+          const restoreQty = isPack ? oi.quantity * unitsPerBox : oi.quantity
           await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -restoreQty })
        }
     }
@@ -710,14 +753,30 @@ export default function BillingPage() {
         await supabase.from('order_items').delete().eq('order_id', realOrderId)
         if (ctx.cart.length > 0) {
           await supabase.from('order_items').insert(
-            ctx.cart.map(c => ({ order_id: realOrderId, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.price * c.quantity }))
+            ctx.cart.map(c => {
+              const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+              const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+              return {
+                order_id: realOrderId,
+                item_id: c.isOffer ? null : c.id,
+                offer_id: c.isOffer ? c.id : null,
+                quantity: c.quantity,
+                price: linePrice,
+                total: linePrice * c.quantity,
+                sell_mode: cIsPack ? 'pack' : 'single'
+              }
+            })
           )
         }
-        const sub = ctx.cart.reduce((s, c) => s + c.price * c.quantity, 0)
+        const sub = ctx.cart.reduce((s, c) => {
+          const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+          const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+          return s + linePrice * c.quantity
+        }, 0)
         await supabase.from('orders').update({ subtotal: sub, total: sub }).eq('id', realOrderId)
       }
     }, 500),
-    [branchId, selectedBranch, orderDate]
+    [branchId, selectedBranch, orderDate, packMode]
   )
 
   // ── Central Sync Effect ────────────────────────────────────────────────────
@@ -759,7 +818,14 @@ export default function BillingPage() {
         supabase.from('orders').select('customer_id, customers(*), order_type, status').eq('id', table.current_order_id).single(),
         supabase.from('kds_items').select('item_id, quantity').eq('order_id', table.current_order_id)
       ])
-      const cartItems = (ois || []).map(oi => ({ ...oi.items, quantity: oi.quantity, price: oi.price }))
+      const loadedPackMode = {}
+      const cartItems = (ois || []).map(oi => {
+        if (oi.sell_mode === 'pack') {
+          loadedPackMode[oi.item_id] = true
+        }
+        return { ...oi.items, quantity: oi.quantity, price: oi.price }
+      })
+      setPackMode(prev => ({ ...prev, ...loadedPackMode }))
       const qtys = {}
       if (kds) {
         kds.forEach(k => {
@@ -825,20 +891,23 @@ export default function BillingPage() {
   }
 
   function addToCart(item, qty = 1) {
-    if (!item.is_active || !item.price || item.stock_quantity <= 0) return
+    const currentItem = items.find(i => i.id === item.id) || item
+    const wantPack = !!(cardPackMode[item.id] && (currentItem.units_per_box || 1) > 1 && (currentItem.pack_price || 0) > 0)
+    const stockDecrement = wantPack ? qty * (currentItem.units_per_box || 1) : qty
+    if (!currentItem.is_active || !currentItem.price || currentItem.stock_quantity < stockDecrement) {
+      toast.error(`Not enough stock. Available: ${currentItem.stock_quantity}`)
+      return
+    }
     const alreadyInCart = cart.some(c => c.id === item.id)
     const isNewAddon = isKitchenSent && !sentToKitchenIds.includes(item.id) && !alreadyInCart
     // Inherit cardPackMode selection when adding to cart
-    const wantPack = !!(cardPackMode[item.id] && (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0)
     if (!alreadyInCart) {
       setPackMode(prev => ({ ...prev, [item.id]: wantPack }))
     }
     setCart(prev => {
       const idx = prev.findIndex(c => c.id === item.id)
-      return idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty, isAddon: isNewAddon }, ...prev]
+      return idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...currentItem, quantity: qty, isAddon: isNewAddon }, ...prev]
     })
-    // Pack mode: each unit added = units_per_box singles consumed from stock
-    const stockDecrement = wantPack ? qty * (item.units_per_box || 1) : qty
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: i.stock_quantity - stockDecrement } : i))
   }
 
@@ -852,8 +921,18 @@ export default function BillingPage() {
 
   function updateQty(id, delta) {
     const cartItem = cart.find(c => c.id === id)
-    const isPackItem = cartItem && packMode[id] && (cartItem.units_per_box || 1) > 1 && (cartItem.pack_price || 0) > 0
+    if (!cartItem) return
+    const isPackItem = packMode[id] && (cartItem.units_per_box || 1) > 1 && (cartItem.pack_price || 0) > 0
     const stockDelta = isPackItem ? delta * (cartItem.units_per_box || 1) : delta
+
+    if (delta > 0) {
+      const dbItem = items.find(i => i.id === id)
+      if (!dbItem || dbItem.stock_quantity < stockDelta) {
+        toast.error("Not enough stock available!")
+        return
+      }
+    }
+
     setCart(prev => {
       const next = prev.map(c => c.id === id ? { ...c, quantity: c.quantity + delta } : c).filter(c => c.quantity > 0)
       return next
@@ -863,22 +942,24 @@ export default function BillingPage() {
   
   function setExactQty(id, qty) {
     const cartItem = cart.find(c => c.id === id)
-    const isPackItem = cartItem && packMode[id] && (cartItem.units_per_box || 1) > 1 && (cartItem.pack_price || 0) > 0
+    if (!cartItem) return
+    const isPackItem = packMode[id] && (cartItem.units_per_box || 1) > 1 && (cartItem.pack_price || 0) > 0
     const unitsPerBox = isPackItem ? (cartItem.units_per_box || 1) : 1
     if (qty <= 0) {
-      if (cartItem) {
-        setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity + cartItem.quantity * unitsPerBox } : i))
-      }
+      setItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity + cartItem.quantity * unitsPerBox } : i))
       setCart(prev => prev.filter(c => c.id !== id))
     } else {
-      setCart(prev => {
-        const oldQty = cartItem ? cartItem.quantity : 0
-        const delta = qty - oldQty
-        setItems(itemsPrev => itemsPrev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - delta * unitsPerBox } : i))
-        if (cartItem) return prev.map(c => c.id === id ? { ...c, quantity: qty } : c)
+      const oldQty = cartItem.quantity
+      const delta = qty - oldQty
+      if (delta > 0) {
         const dbItem = items.find(i => i.id === id)
-        return [{ ...dbItem, quantity: qty }, ...prev]
-      })
+        if (!dbItem || dbItem.stock_quantity < delta * unitsPerBox) {
+          toast.error("Not enough stock available!")
+          return
+        }
+      }
+      setItems(itemsPrev => itemsPrev.map(i => i.id === id ? { ...i, stock_quantity: i.stock_quantity - delta * unitsPerBox } : i))
+      setCart(prev => prev.map(c => c.id === id ? { ...c, quantity: qty } : c))
     }
   }
 
@@ -938,10 +1019,15 @@ export default function BillingPage() {
       
       // If editing an order, restore stock for old items first
       if (editingOrderId) {
-        const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity').eq('order_id', editingOrderId)
+        const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity, price, sell_mode, items(units_per_box, pack_price)').eq('order_id', editingOrderId)
         if (oldItems) {
            for (const oi of oldItems) {
-              await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -oi.quantity })
+              if (!oi.item_id) continue
+              const unitsPerBox = oi.items?.units_per_box || 1
+              const isPackPrice = unitsPerBox > 1 && oi.items?.pack_price && Math.abs(oi.price - oi.items.pack_price) < 0.01
+              const isPack = oi.sell_mode === 'pack' || isPackPrice
+              const restoreQty = isPack ? oi.quantity * unitsPerBox : oi.quantity
+              await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -restoreQty })
            }
         }
       }
@@ -963,9 +1049,19 @@ export default function BillingPage() {
         await supabase.from('order_payments').delete().eq('order_id', order.id)
 
         // Replace order items with final cart
-        await supabase.from('order_items').insert(cart.map(c => ({
-          order_id: order.id, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.quantity * c.price
-        })))
+        await supabase.from('order_items').insert(cart.map(c => {
+          const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+          const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+          return {
+            order_id: order.id,
+            item_id: c.isOffer ? null : c.id,
+            offer_id: c.isOffer ? c.id : null,
+            quantity: c.quantity,
+            price: linePrice,
+            total: c.quantity * linePrice,
+            sell_mode: cIsPack ? 'pack' : 'single'
+          }
+        }))
       } else {
         const { data: newOrder, error } = await supabase.from('orders').insert({
           customer_id: customer?.id || null, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
@@ -1132,18 +1228,19 @@ export default function BillingPage() {
   // Double tap handler
   let tapTimer = null
   function handleCardTap(item) {
-    const wantPack = !!(cardPackMode[item.id] && (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0)
+    const dbItem = items.find(i => i.id === item.id) || item
+    const wantPack = !!(cardPackMode[dbItem.id] && (dbItem.units_per_box || 1) > 1 && (dbItem.pack_price || 0) > 0)
     // Effective stock: for pack mode, need at least units_per_box singles
-    const effectiveStock = wantPack ? Math.floor(item.stock_quantity / (item.units_per_box || 1)) : item.stock_quantity
-    if (!item.is_active || !item.price || effectiveStock <= 0) return
+    const effectiveStock = wantPack ? Math.floor(dbItem.stock_quantity / (dbItem.units_per_box || 1)) : dbItem.stock_quantity
+    if (!dbItem.is_active || !dbItem.price || effectiveStock <= 0) return
     if (tapTimer) {
       clearTimeout(tapTimer)
       tapTimer = null
-      setQtyEditor(item) // Double tap
+      setQtyEditor(dbItem) // Double tap
     } else {
       tapTimer = setTimeout(() => {
         tapTimer = null
-        addToCart(item, 1) // Single tap
+        addToCart(dbItem, 1) // Single tap
       }, 250)
     }
   }

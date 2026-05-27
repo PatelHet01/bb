@@ -204,9 +204,9 @@ export default function CustomersPage() {
     setActiveTab('profile')
     
     const [khataRes, advRes, orderRes, ghodaRes] = await Promise.all([
-      supabase.from('khata_ledger').select('*').eq('customer_id', c.id).order('created_at', { ascending: false }),
-      supabase.from('advance_ledger').select('*').eq('customer_id', c.id).order('created_at', { ascending: false }),
-      supabase.from('orders').select('*, order_payments(mode, amount)').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('orders').select('*, order_payments(mode, amount), order_items(quantity, price, items(name, variant))').eq('customer_id', c.id).order('created_at', { ascending: false }),
       supabase.from('ghoda_transactions').select('*').eq('customer_id', c.id).order('created_at', { ascending: false })
     ])
     
@@ -567,7 +567,33 @@ export default function CustomersPage() {
                             </div>
                           </div>
                         </div>
-                        <p className="text-xs text-ink-500 mt-1">{l.reason}</p>
+
+                        {/* Order Items display for order transactions */}
+                        {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+                            {l.orders.order_items.map((oi, i) => (
+                              <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
+                                {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Compulsory remark/reason display */}
+                        {l.reason ? (
+                          <p className={`text-xs text-ink-500 mt-2 ${l.order_id ? 'truncate' : 'bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal'}`}>
+                            {!l.order_id && <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>}
+                            {l.reason}
+                          </p>
+                        ) : (
+                          !l.order_id && (
+                            <p className="text-xs text-ink-500 mt-2 bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal">
+                              <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>
+                              Manual transaction recorded by {l.recorded_by || 'staff'}
+                            </p>
+                          )
+                        )}
+
                         <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()} {l.recorded_by && `· by ${l.recorded_by}`}</p>
                       </div>
                     </div>
@@ -594,7 +620,33 @@ export default function CustomersPage() {
                             </div>
                           </div>
                         </div>
-                        <p className="text-xs text-ink-500 mt-1">{l.reason}</p>
+
+                        {/* Order Items display for order transactions */}
+                        {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+                            {l.orders.order_items.map((oi, i) => (
+                              <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
+                                {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Compulsory remark/reason display */}
+                        {l.reason ? (
+                          <p className={`text-xs text-ink-500 mt-2 ${l.order_id ? 'truncate' : 'bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal'}`}>
+                            {!l.order_id && <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>}
+                            {l.reason}
+                          </p>
+                        ) : (
+                          !l.order_id && (
+                            <p className="text-xs text-ink-500 mt-2 bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal">
+                              <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>
+                              Manual transaction recorded by {l.recorded_by || 'staff'}
+                            </p>
+                          )
+                        )}
+
                         <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()} {l.recorded_by && `· by ${l.recorded_by}`}</p>
                       </div>
                     </div>
@@ -635,6 +687,22 @@ export default function CustomersPage() {
                         <p className={`font-mono text-xs font-bold ${isKhata ? 'text-red-500/70' : 'text-ink-500'}`}>#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
                         <p className={`font-black text-lg ${textClass}`}>₹{o.total}</p>
                       </div>
+
+                      {/* Render order items */}
+                      {o.order_items && o.order_items.length > 0 && (
+                        <div className={`flex flex-col gap-1.5 border-b pb-2 mb-2 ${borderClass}`}>
+                          {o.order_items.map((oi, i) => (
+                            <div key={i} className="flex justify-between items-center text-xs text-ink-600 dark:text-ink-400">
+                              <span>
+                                <span className="font-bold text-ink-800 dark:text-ink-200">{oi.quantity}x</span>{' '}
+                                {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''}
+                              </span>
+                              <span className="font-semibold text-ink-700 dark:text-ink-300">₹{oi.price * oi.quantity}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <div className="flex justify-between items-end text-xs">
                         <div>
                           <p className={`font-bold uppercase ${isKhata ? 'text-red-600/60' : 'text-ink-500'}`}>{new Date(o.created_at).toLocaleString()}</p>
@@ -642,7 +710,7 @@ export default function CustomersPage() {
                             {(o.order_payments || []).map((p,i) => <span key={i} className={`${tagClass} px-1.5 py-0.5 rounded font-bold text-[9px] uppercase`}>{p.mode}</span>)}
                           </p>
                         </div>
-                        <span className={`font-bold px-2 py-1 rounded uppercase tracking-wider text-[10px] ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{o.status}</span>
+                        <span className={`font-bold px-2 py-1 rounded uppercase tracking-wider text-[10px] ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : o.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{o.status}</span>
                       </div>
                     </div>
                   )

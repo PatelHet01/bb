@@ -10,7 +10,7 @@ export default function DashboardHome() {
   const { role, branchId, branchName } = useAuthStore()
   const { currentSession, setSession, clearSession } = useSessionStore()
   const navigate = useNavigate()
-  const [stats, setStats] = useState({ revenue: 0, cashRev: 0, onlineRev: 0, orders: 0, customers: 0, outKhata: 0 })
+  const [stats, setStats] = useState({ revenue: 0, cashRev: 0, onlineRev: 0, khataRev: 0, advanceRev: 0, orders: 0, customers: 0, outKhata: 0 })
   const [lowStockItems, setLowStockItems] = useState({}) // Grouped by category
   const [openCategories, setOpenCategories] = useState({}) // Accordion state
   const [loading, setLoading] = useState(true)
@@ -109,19 +109,22 @@ export default function DashboardHome() {
       const { data: recCust } = await rCQ
       setRecentCustomers(recCust || [])
 
-      // Calculate Cash/Online — ONLY from non-cancelled orders
+      // Calculate Cash/Online/Khata/Advance — ONLY from non-cancelled orders
       const activeOrders = (ordersWithPayments || []).filter(o => o.status !== 'cancelled')
-      let cashRev = 0; let onlineRev = 0;
+      let cashRev = 0; let onlineRev = 0; let khataRev = 0; let advanceRev = 0;
       activeOrders.forEach(o => {
         (o.order_payments || []).forEach(p => {
-          if (p.mode === 'CASH') cashRev += Number(p.amount);
-          if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD', 'GPAY', 'PHONEPE', 'ONLINE'].includes(p.mode)) onlineRev += Number(p.amount);
+          const amt = Number(p.amount);
+          if (p.mode === 'CASH') cashRev += amt;
+          else if (['UPI', 'CREDIT_CARD', 'DEBIT_CARD', 'GPAY', 'PHONEPE', 'ONLINE'].includes(p.mode)) onlineRev += amt;
+          else if (p.mode === 'KHATA') khataRev += amt;
+          else if (p.mode === 'ADVANCE') advanceRev += amt;
         })
       })
 
       setStats({
         revenue: activeOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
-        cashRev, onlineRev,
+        cashRev, onlineRev, khataRev, advanceRev,
         orders: activeOrders.length,
         customers: custCount || 0,
         outKhata: outKhataTotal
@@ -276,7 +279,7 @@ export default function DashboardHome() {
   }
 
   const STATS = [
-    { id: 'revenue', label: "Today's Revenue", value: `₹${stats.revenue.toLocaleString('en-IN')}`, icon: TrendingUp, trend: '+', subtext: `Cash: ₹${stats.cashRev.toLocaleString('en-IN')} | UPI: ₹${stats.onlineRev.toLocaleString('en-IN')}` },
+    { id: 'revenue', label: "Today's Revenue", value: `₹${stats.revenue.toLocaleString('en-IN')}`, icon: TrendingUp, trend: '+', subtext: `Cash: ₹${stats.cashRev.toLocaleString('en-IN')} | UPI: ₹${stats.onlineRev.toLocaleString('en-IN')} | Khata: ₹${stats.khataRev.toLocaleString('en-IN')}` },
     { id: 'khata', label: 'Out. Khata (Levana)', value: `₹${stats.outKhata.toLocaleString('en-IN')}`, icon: CreditCard, trend: null, color: 'text-red-500' },
     { id: 'orders', label: 'Orders Today', value: stats.orders, icon: ShoppingCart, trend: null },
     { id: 'customers', label: 'Customers', value: stats.customers, icon: Users, trend: null },
@@ -685,17 +688,29 @@ export default function DashboardHome() {
 
             <div className="p-6 overflow-y-auto no-scrollbar">
               {activeModal === 'revenue' && (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/30 rounded-xl">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center p-3.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/30 rounded-xl">
                     <span className="font-bold text-emerald-700 dark:text-emerald-400">Cash Collections</span>
-                    <span className="text-xl font-black text-emerald-700 dark:text-emerald-400">₹{stats.cashRev.toLocaleString('en-IN')}</span>
+                    <span className="text-lg font-black text-emerald-700 dark:text-emerald-400">₹{stats.cashRev.toLocaleString('en-IN')}</span>
                   </div>
-                  <div className="flex justify-between items-center p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30 rounded-xl">
+                  <div className="flex justify-between items-center p-3.5 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30 rounded-xl">
                     <span className="font-bold text-indigo-700 dark:text-indigo-400">Online (UPI) Collections</span>
-                    <span className="text-xl font-black text-indigo-700 dark:text-indigo-400">₹{stats.onlineRev.toLocaleString('en-IN')}</span>
+                    <span className="text-lg font-black text-indigo-700 dark:text-indigo-400">₹{stats.onlineRev.toLocaleString('en-IN')}</span>
                   </div>
-                  <div className="text-center pt-4">
-                    <p className="text-sm text-ink-500">Total: <span className="font-bold text-ink-900 dark:text-white">₹{stats.revenue.toLocaleString('en-IN')}</span></p>
+                  <div className="flex justify-between items-center p-3.5 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800/30 rounded-xl">
+                    <span className="font-bold text-red-700 dark:text-red-400">Khata Sales (Credit)</span>
+                    <span className="text-lg font-black text-red-700 dark:text-red-400">₹{stats.khataRev.toLocaleString('en-IN')}</span>
+                  </div>
+                  {stats.advanceRev > 0 && (
+                    <div className="flex justify-between items-center p-3.5 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800/30 rounded-xl">
+                      <span className="font-bold text-amber-700 dark:text-amber-400">Used Advance Balance</span>
+                      <span className="text-lg font-black text-amber-700 dark:text-amber-400">₹{stats.advanceRev.toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                  <div className="text-center pt-4 border-t border-ink-100 dark:border-ink-800">
+                    <p className="text-sm font-semibold text-ink-500">
+                      Total Calculated Revenue: <span className="font-black text-ink-900 dark:text-white text-base">₹{stats.revenue.toLocaleString('en-IN')}</span>
+                    </p>
                   </div>
                 </div>
               )}

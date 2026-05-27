@@ -39,7 +39,8 @@ export default function BillingPage() {
 
   const [cartExpanded, setCartExpanded] = useState(false)
   const [qtyEditor, setQtyEditor] = useState(null)
-  const [packMode, setPackMode] = useState({}) // { [item_id]: true = pack mode }
+  const [packMode, setPackMode] = useState({}) // { [item_id]: true = pack mode (in cart) }
+  const [cardPackMode, setCardPackMode] = useState({}) // { [item_id]: true = pack selected on item card (before add) }
 
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerResults, setCustomerResults] = useState([])
@@ -650,11 +651,14 @@ export default function BillingPage() {
 
   async function cancelOrder(orderId) {
     if (!window.confirm('Are you sure you want to cancel this order?')) return
-    // restore stock
-    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity').eq('order_id', orderId)
+    // restore stock — pack-aware: if sold as pack, restore qty × units_per_box singles
+    const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity, sell_mode, items(units_per_box)').eq('order_id', orderId)
     if (oldItems) {
        for (const oi of oldItems) {
-          await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -oi.quantity })
+          if (!oi.item_id) continue
+          const unitsPerBox = oi.items?.units_per_box || 1
+          const restoreQty = oi.sell_mode === 'pack' ? oi.quantity * unitsPerBox : oi.quantity
+          await supabase.rpc('decrement_stock', { p_item_id: oi.item_id, p_amount: -restoreQty })
        }
     }
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId)
@@ -824,6 +828,11 @@ export default function BillingPage() {
     if (!item.is_active || !item.price || item.stock_quantity <= 0) return
     const alreadyInCart = cart.some(c => c.id === item.id)
     const isNewAddon = isKitchenSent && !sentToKitchenIds.includes(item.id) && !alreadyInCart
+    // Inherit cardPackMode selection when adding to cart
+    const wantPack = !!(cardPackMode[item.id] && (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0)
+    if (!alreadyInCart) {
+      setPackMode(prev => ({ ...prev, [item.id]: wantPack }))
+    }
     setCart(prev => {
       const idx = prev.findIndex(c => c.id === item.id)
       return idx >= 0 ? prev.map((c, i) => i === idx ? { ...c, quantity: c.quantity + qty } : c) : [{ ...item, quantity: qty, isAddon: isNewAddon }, ...prev]
@@ -961,9 +970,19 @@ export default function BillingPage() {
         }).select().single()
         if (error) throw error
         order = newOrder
-        await supabase.from('order_items').insert(cart.map(c => ({
-          order_id: order.id, item_id: c.isOffer ? null : c.id, offer_id: c.isOffer ? c.id : null, quantity: c.quantity, price: c.price, total: c.quantity * c.price
-        })))
+        await supabase.from('order_items').insert(cart.map(c => {
+          const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+          const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+          return {
+            order_id: order.id,
+            item_id: c.isOffer ? null : c.id,
+            offer_id: c.isOffer ? c.id : null,
+            quantity: c.quantity,
+            price: linePrice,
+            total: c.quantity * linePrice,
+            sell_mode: cIsPack ? 'pack' : 'single'
+          }
+        }))
       }
       
       // Real DB Stock deduction & Disposables Logic
@@ -986,7 +1005,10 @@ export default function BillingPage() {
             }
           }
         } else {
-          await supabase.rpc('decrement_stock', { p_item_id: c.id, p_amount: c.quantity })
+          // Pack-aware stock deduction: selling a pack deducts qty × units_per_box singles
+          const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+          const stockDeduction = cIsPack ? c.quantity * (c.units_per_box || 1) : c.quantity
+          await supabase.rpc('decrement_stock', { p_item_id: c.id, p_amount: stockDeduction })
           
           // Dynamic Recipe Ingredient Deduction
           const { data: ingredients } = await supabase.from('item_ingredients')
@@ -1121,9 +1143,12 @@ export default function BillingPage() {
   function printBillPDF(r) {
     const isBhat = (branchId || selectedBranch) === 'bhat'
     if (!isBhat) return
-    const rows = r.cart.map(c =>
-      `<tr><td>${c.name}${c.variant ? ' <small>('+c.variant+')</small>' : ''}</td><td style="text-align:center">${c.quantity}</td><td style="text-align:right">₹${(c.price*c.quantity).toLocaleString('en-IN')}</td></tr>`
-    ).join('')
+    const rows = r.cart.map(c => {
+      const cIsPack = packMode[c.id] && (c.units_per_box || 1) > 1 && (c.pack_price || 0) > 0
+      const linePrice = cIsPack ? (c.pack_price || c.price) : c.price
+      const label = `${c.name}${c.variant ? ' <small>('+c.variant+')</small>' : ''}${cIsPack ? ` <small style="color:#6366f1">[Pack ×${c.units_per_box}pcs]</small>` : ''}`
+      return `<tr><td>${label}</td><td style="text-align:center">${c.quantity}</td><td style="text-align:right">₹${(linePrice*c.quantity).toLocaleString('en-IN')}</td></tr>`
+    }).join('')
     const payRows = r.payments.map(p =>
       `<tr><td>${p.mode}${p.subtype ? ' - '+p.subtype : ''}</td><td style="text-align:right">₹${parseFloat(p.amount).toLocaleString('en-IN')}</td></tr>`
     ).join('')
@@ -1537,12 +1562,26 @@ export default function BillingPage() {
                             
                             <div className="flex justify-between items-end">
                               <div className={`font-black text-sm tracking-tight ${qty > 0 ? 'text-white' : isInactive ? 'text-ink-500' : 'text-emerald-400'}`}>
-                                {isInactive ? 'NO PRICE' : `₹${item.price}`}
+                                {isInactive ? 'NO PRICE' : (() => {
+                                  const wantPack = cardPackMode[item.id] && (item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0
+                                  return wantPack ? `₹${item.pack_price}` : `₹${item.price}`
+                                })()}
                               </div>
                               {isOut && qty === 0 && !isInactive && (
                                 <div className="text-[9px] font-bold text-red-400 uppercase bg-red-950/50 px-1 rounded">Out</div>
                               )}
                             </div>
+
+                            {/* Pack toggle pill — only for pack-enabled non-BB-Cafe items */}
+                            {(item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0 && item.category !== 'BB Cafe' && (
+                              <div
+                                onClick={e => { e.stopPropagation(); setCardPackMode(p => ({ ...p, [item.id]: !p[item.id] })) }}
+                                className="mt-1 flex rounded overflow-hidden border border-ink-600 text-[8px] font-black cursor-pointer"
+                              >
+                                <span className={`px-1.5 py-0.5 transition-colors ${!cardPackMode[item.id] ? 'bg-white text-ink-900' : 'bg-transparent text-ink-400'}`}>1pc</span>
+                                <span className={`px-1.5 py-0.5 transition-colors ${cardPackMode[item.id] ? 'bg-indigo-500 text-white' : 'bg-transparent text-ink-400'}`}>📦bx</span>
+                              </div>
+                            )}
                           </button>
                         )
                       })}

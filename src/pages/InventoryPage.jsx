@@ -31,7 +31,7 @@ export default function InventoryPage() {
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
+  const [form, setForm] = useState({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
   const [saving, setSaving] = useState(false)
 
   // Inline Editing
@@ -229,6 +229,7 @@ export default function InventoryPage() {
         stock_quantity: parseInt(form.stock_quantity) || 0,
         low_stock_threshold: parseInt(form.low_stock_threshold) || 5,
         units_per_box: parseInt(form.units_per_box) || 1,
+        pack_price: parseInt(form.units_per_box) > 1 ? (parseFloat(form.pack_price) || 0) : 0,
         branch_id: form.branch_id, 
         is_active: form.is_active,
         item_type: form.item_type || 'SELLABLE',
@@ -236,7 +237,7 @@ export default function InventoryPage() {
       })
       if (error) throw error
       toast.success('Item added')
-      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
+      setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
       setShowForm(false)
       fetchItems()
     } catch (e) { 
@@ -322,7 +323,9 @@ export default function InventoryPage() {
   }
   async function saveInlineEdit() {
     if (!editForm.name || !editForm.category) return
-    const { id, branch_id, pack_price, ...updates } = editForm
+    const { id, branch_id, ...updates } = editForm
+    // Ensure pack_price is saved correctly (0 if no pack)
+    updates.pack_price = (updates.units_per_box || 1) > 1 ? (parseFloat(updates.pack_price) || 0) : 0
     await supabase.from('items').update(updates).eq('id', id)
     setItems(p => p.map(i => i.id === id ? { ...i, ...updates } : i))
     setEditingRow(null)
@@ -744,13 +747,22 @@ export default function InventoryPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Units per Box/Pack</label>
-                <input className="input w-full" type="number" min="1" step="1" value={form.units_per_box} onChange={e => setForm(p => ({ ...p, units_per_box: e.target.value }))} title="e.g. 12 means 1 box = 12 cigarettes. Set to 1 for no pack logic." />
+                <label className="label">Units per Box/Pack <span className="text-zinc-400 font-normal">(1 = no pack)</span></label>
+                <input className="input w-full" type="number" min="1" step="1" value={form.units_per_box} onChange={e => setForm(p => ({ ...p, units_per_box: e.target.value }))} title="e.g. 20 means 1 box = 20 cigarettes. Set to 1 for no pack selling." />
                 {parseInt(form.units_per_box) > 1 && <p className="text-[10px] text-amber-600 mt-1">1 box = {form.units_per_box} {form.unit}s</p>}
               </div>
-              {parseInt(form.units_per_box) > 1 && form.item_type !== 'RAW_MATERIAL' && (
+              {parseInt(form.units_per_box) > 1 && form.item_type !== 'RAW_MATERIAL' && form.category !== 'BB Cafe' && (
                 <div>
-                  <p className="text-[10px] text-zinc-400 mt-1">Staff can toggle Single/Pack in cart</p>
+                  <label className="label">Pack / Box Price (₹) <span className="text-emerald-600 font-bold text-[10px]">REQUIRED for pack selling</span></label>
+                  <input className="input w-full font-bold text-indigo-600" type="number" min="0" step="0.5" value={form.pack_price} onChange={e => setForm(p => ({ ...p, pack_price: e.target.value }))} placeholder="e.g. 240" />
+                  {form.price && form.pack_price && (
+                    <p className="text-[10px] text-zinc-400 mt-1">
+                      Single ₹{form.price} · Pack ₹{form.pack_price} ({form.units_per_box} pcs)
+                      {parseFloat(form.pack_price) > 0 && parseFloat(form.price) > 0 && (
+                        <span className="ml-1 text-emerald-600">· ₹{(parseFloat(form.pack_price) / parseInt(form.units_per_box)).toFixed(2)}/pc in pack</span>
+                      )}
+                    </p>
+                  )}
                 </div>
               )}
               <div className="flex items-end">
@@ -807,6 +819,7 @@ export default function InventoryPage() {
                 <th className="tbl-head">Category & Sub</th>
                 <th className="tbl-head w-20 text-center">Stock</th>
                 {mainTab !== 'Disposables' && <th className="tbl-head text-right w-24">MRP (₹)</th>}
+                {mainTab !== 'Disposables' && <th className="tbl-head text-right w-28">Pack (₹)</th>}
                 {isAdmin && <th className="tbl-head text-right w-24">Value (₹)</th>}
                 <th className="tbl-head text-center w-24">Status</th>
                 {canDefineItems && <th className="tbl-head text-right w-24">Actions</th>}
@@ -858,8 +871,11 @@ export default function InventoryPage() {
                             <input type="number" min="1" step="1" className="input w-full text-sm py-1.5" value={editForm.units_per_box || 1} onChange={e=>setEditForm({...editForm, units_per_box:parseInt(e.target.value)||1})}/>
                             {(editForm.units_per_box||1) > 1 && <p className="text-[9px] text-amber-600 mt-0.5">1 box = {editForm.units_per_box} {editForm.unit}s</p>}
                           </div>
-                          {(editForm.units_per_box||1) > 1 && editForm.item_type !== 'RAW_MATERIAL' && (
+                          {(editForm.units_per_box||1) > 1 && editForm.item_type !== 'RAW_MATERIAL' && editForm.category !== 'BB Cafe' && (
                             <div className="w-28">
+                              <label className="text-[10px] uppercase font-bold text-indigo-500 mb-1 block">Pack Price (₹)</label>
+                              <input type="number" min="0" step="0.5" className="input w-full text-sm py-1.5 text-indigo-600 font-bold" value={editForm.pack_price || ''} onChange={e=>setEditForm({...editForm, pack_price:e.target.value})} placeholder="e.g. 240"/>
+                              {(editForm.pack_price || 0) > 0 && <p className="text-[9px] text-zinc-400 mt-0.5">₹{(parseFloat(editForm.pack_price)/parseInt(editForm.units_per_box||1)).toFixed(2)}/pc</p>}
                             </div>
                           )}
                           <div className="flex gap-2 justify-end ml-auto">
@@ -1008,6 +1024,18 @@ export default function InventoryPage() {
                       {mainTab !== 'Disposables' && (
                         <td className="tbl-cell text-right font-black text-zinc-900 dark:text-white">
                           {item.price > 0 ? `₹${item.price}` : <span className="text-red-400 text-xs uppercase">No Price</span>}
+                        </td>
+                      )}
+                      {mainTab !== 'Disposables' && (
+                        <td className="tbl-cell text-right">
+                          {(item.units_per_box || 1) > 1 && (item.pack_price || 0) > 0 ? (
+                            <div>
+                              <span className="font-black text-indigo-600 dark:text-indigo-400">₹{item.pack_price}</span>
+                              <span className="text-[9px] text-zinc-400 block">📦 {item.units_per_box}pcs</span>
+                            </div>
+                          ) : (
+                            <span className="text-zinc-300 dark:text-zinc-700 text-xs">—</span>
+                          )}
                         </td>
                       )}
                       {isAdmin && (

@@ -31,13 +31,12 @@ export default function MyBethakDashboard() {
     if (!customer) { navigate('/my-bethak'); return }
     async function fetch() {
       const [kRes, aRes, oRes] = await Promise.all([
-        supabase.from('khata_ledger').select('*').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(30),
-        supabase.from('advance_ledger').select('*').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(30),
-        supabase.from('orders').select('*, order_items(quantity, unit_price, items(name)), order_payments(mode, amount)').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(20),
+        supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(30),
+        supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(30),
+        supabase.from('orders').select('*, order_items(quantity, price, items(name, variant)), order_payments(mode, amount)').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(20),
       ])
       setKhataLedger(kRes.data || [])
       setAdvLedger(aRes.data || [])
-      setOrders(oRes.data || [])
       setOrders(oRes.data || [])
       setLoading(false)
     }
@@ -247,8 +246,54 @@ function LedgerList({ entries, type }) {
                   {style.prefix}₹{l.amount}
                 </p>
               </div>
-              {l.reason && <p style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.35)', marginTop: '0.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.reason}</p>}
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.3rem' }}>
+              
+              {/* Order Items display for order transactions */}
+              {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem', marginBottom: '0.2rem' }}>
+                  {l.orders.order_items.map((oi, i) => (
+                    <span key={i} style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.06)', padding: '0.15rem 0.4rem', borderRadius: '3px' }}>
+                      {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Compulsory remark/reason display */}
+              {l.reason ? (
+                <p style={{ 
+                  fontSize: '0.72rem', 
+                  color: 'rgba(255,255,255,0.45)', 
+                  marginTop: '0.35rem', 
+                  whiteSpace: l.order_id ? 'nowrap' : 'normal', 
+                  overflow: l.order_id ? 'hidden' : 'visible', 
+                  textOverflow: l.order_id ? 'ellipsis' : 'clip',
+                  background: l.order_id ? 'none' : 'rgba(255,255,255,0.03)',
+                  padding: l.order_id ? '0' : '0.4rem 0.6rem',
+                  borderLeft: l.order_id ? 'none' : '2px solid rgba(255,255,255,0.15)',
+                  lineHeight: 1.3
+                }}>
+                  {!l.order_id && <strong style={{ color: 'rgba(255,255,255,0.65)' }}>Remark: </strong>}
+                  {l.reason}
+                </p>
+              ) : (
+                !l.order_id && (
+                  <p style={{ 
+                    fontSize: '0.72rem', 
+                    color: 'rgba(255,255,255,0.45)', 
+                    marginTop: '0.35rem', 
+                    whiteSpace: 'normal',
+                    background: 'rgba(255,255,255,0.03)',
+                    padding: '0.4rem 0.6rem',
+                    borderLeft: '2px solid rgba(255,255,255,0.15)',
+                    lineHeight: 1.3
+                  }}>
+                    <strong style={{ color: 'rgba(255,255,255,0.65)' }}>Remark: </strong>
+                    Manual transaction recorded by {l.recorded_by || 'staff'}
+                  </p>
+                )
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.4rem' }}>
                 <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)' }}>{new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
                 <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Bal: ₹{l.runningBal.toFixed(0)}</p>
               </div>

@@ -248,3 +248,46 @@ ALTER TABLE order_items ADD COLUMN IF NOT EXISTS offer_id UUID REFERENCES offers
 ALTER TABLE order_items ALTER COLUMN item_id DROP NOT NULL;
 
 NOTIFY pgrst, 'reload schema';
+
+-- 25. EXPENSES PAYMENT MODE
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT 'CASH';
+ALTER TABLE business_sessions ADD COLUMN IF NOT EXISTS total_cash_expenses NUMERIC(10,2) DEFAULT 0;
+
+NOTIFY pgrst, 'reload schema';
+
+-- 26. CUSTOMIZED BRANCH-WISE DAILY SEQUENTIAL ORDER NUMBERS
+CREATE OR REPLACE FUNCTION generate_order_number()
+RETURNS TRIGGER AS $$
+DECLARE
+  branch_char TEXT;
+  date_str TEXT;
+  seq_num INT;
+BEGIN
+  -- Get first character of branch_id
+  IF NEW.branch_id IS NOT NULL THEN
+    branch_char := UPPER(SUBSTRING(NEW.branch_id FROM 1 FOR 1));
+  ELSE
+    branch_char := 'X';
+  END IF;
+
+  -- Get date string in DDMM format in Asia/Kolkata timezone
+  date_str := to_char(COALESCE(NEW.created_at, now()) AT TIME ZONE 'Asia/Kolkata', 'DDMM');
+
+  -- Count how many orders exist for this branch on this local date
+  SELECT COALESCE(COUNT(*), 0) + 1 INTO seq_num
+  FROM orders
+  WHERE branch_id = NEW.branch_id
+    AND (created_at AT TIME ZONE 'Asia/Kolkata')::DATE = (COALESCE(NEW.created_at, now()) AT TIME ZONE 'Asia/Kolkata')::DATE;
+
+  -- Set order_number: BB + branch_char + - + date_str + - + 3-digit sequence (e.g. BBB-3005-001)
+  IF NEW.order_number IS NULL THEN
+    NEW.order_number := 'BB' || branch_char || '-' || date_str || '-' || lpad(seq_num::TEXT, 3, '0');
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+NOTIFY pgrst, 'reload schema';
+
+

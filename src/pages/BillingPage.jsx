@@ -964,10 +964,29 @@ export default function BillingPage() {
 
   // Payment UI
   function addPaymentSplit() {
-    setPayments(p => [...p, { mode: 'ONLINE', subtype: 'UPI', amount: Math.max(0, total - totalPaid) }])
+    const half = Math.round(total / 2)
+    setPayments(p => {
+      if (p.length === 1) {
+        return [
+          { ...p[0], amount: half },
+          { mode: 'ONLINE', subtype: 'UPI', amount: total - half }
+        ]
+      } else {
+        return [...p, { mode: 'ONLINE', subtype: 'UPI', amount: Math.max(0, total - totalPaid) }]
+      }
+    })
   }
   function updatePayment(index, field, val) {
-    setPayments(p => p.map((pay, i) => i === index ? { ...pay, [field]: val } : pay))
+    setPayments(prev => {
+      let next = prev.map((pay, i) => i === index ? { ...pay, [field]: val } : pay)
+      if (next.length === 2 && field === 'amount') {
+        const otherIndex = index === 0 ? 1 : 0
+        const parsedVal = parseFloat(val) || 0
+        const remainder = Math.max(0, total - parsedVal)
+        next[otherIndex] = { ...next[otherIndex], amount: remainder }
+      }
+      return next
+    })
   }
   function removePayment(index) {
     setPayments(p => p.filter((_, i) => i !== index))
@@ -1280,10 +1299,14 @@ export default function BillingPage() {
       <div class="footer">Thank you for visiting Bombay Bethak!<br>bombay-bethak.vercel.app</div>
     </body></html>`
     const w = window.open('', '_blank', 'width=400,height=600')
+    if (!w) {
+      toast.error('Popup blocked! Please allow popups for this site to print receipts.', { id: 'popup-blocked' })
+      return
+    }
     w.document.write(html)
     w.document.close()
     w.focus()
-    setTimeout(() => { w.print(); w.close() }, 400)
+    setTimeout(() => { if (w) { w.print(); w.close() } }, 400)
   }
 
   const activeSubcategories = useMemo(() => {

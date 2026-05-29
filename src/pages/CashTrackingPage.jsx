@@ -100,6 +100,7 @@ export default function CashTrackingPage() {
           amount: finalAmount,
           category: category,
           description: reason || 'Cash Withdrawal',
+          payment_mode: 'CASH',
           created_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
           session_id: currentSession?.id || null,
         })

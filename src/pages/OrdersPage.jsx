@@ -230,12 +230,9 @@ export default function OrdersPage() {
         customer_id: finalCustomerId
       }).eq('id', editingOrder.id)
       
-      // Update payments
-      if (editingOrder.order_payments && editingOrder.order_payments.length > 0) {
-        await supabase.from('order_payments')
-          .update({ mode: editingOrder.newPaymentMode, amount: newTotal })
-          .eq('id', editingOrder.order_payments[0].id)
-      } else if (editingOrder.newPaymentMode) {
+      // Update payments: clear old payments and insert single new payment mode
+      await supabase.from('order_payments').delete().eq('order_id', editingOrder.id)
+      if (editingOrder.newPaymentMode) {
         await supabase.from('order_payments').insert({
            order_id: editingOrder.id,
            mode: editingOrder.newPaymentMode,
@@ -313,7 +310,7 @@ export default function OrdersPage() {
         o.customers?.name || 'Guest',
         o.customers?.mobile_number || '',
         items,
-        o.total,
+        o.activeAmount,
         payments,
         o.status
       ])
@@ -340,7 +337,7 @@ export default function OrdersPage() {
     } else if (payFilter !== 'All') {
       result = result.filter(o =>
         (o.order_payments || []).some(p =>
-          p.mode === payFilter || (payFilter === 'ONLINE' && ['UPI','GPAY','PHONEPE','CREDIT_CARD','DEBIT_CARD'].includes(p.mode))
+          p.mode === payFilter || (payFilter === 'ONLINE' && ['UPI','GPAY','PHONEPE','CREDIT_CARD','DEBIT_CARD','ONLINE'].includes(p.mode))
         )
       )
     }
@@ -356,18 +353,30 @@ export default function OrdersPage() {
       )
     }
     
-    // Sort
-    if (sortBy === 'Newest') result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    else if (sortBy === 'Oldest') result.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    else if (sortBy === 'Highest Amount') result.sort((a, b) => b.total - a.total)
-    else if (sortBy === 'Lowest Amount') result.sort((a, b) => a.total - b.total)
+    // Map dynamic activeAmount based on payFilter
+    const mapped = result.map(o => {
+      let activeAmount = Number(o.total)
+      if (payFilter !== 'All' && payFilter !== 'Cancelled') {
+        const matches = (o.order_payments || []).filter(p =>
+          p.mode === payFilter || (payFilter === 'ONLINE' && ['UPI','GPAY','PHONEPE','CREDIT_CARD','DEBIT_CARD','ONLINE'].includes(p.mode))
+        )
+        activeAmount = matches.reduce((sum, p) => sum + Number(p.amount), 0)
+      }
+      return { ...o, activeAmount }
+    })
     
-    return result
+    // Sort
+    if (sortBy === 'Newest') mapped.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    else if (sortBy === 'Oldest') mapped.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    else if (sortBy === 'Highest Amount') mapped.sort((a, b) => b.activeAmount - a.activeAmount)
+    else if (sortBy === 'Lowest Amount') mapped.sort((a, b) => a.activeAmount - b.activeAmount)
+    
+    return mapped
   }, [orders, search, payFilter, sortBy, dateFrom, dateTo])
 
-  // Revenue = only non-cancelled orders
+  // Revenue = only non-cancelled orders active sum
   const totalRevenue = useMemo(() =>
-    filteredOrders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + Number(o.total), 0)
+    filteredOrders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + Number(o.activeAmount), 0)
   , [filteredOrders])
 
   const orderCount = filteredOrders.filter(o => o.status !== 'cancelled').length
@@ -491,7 +500,10 @@ export default function OrdersPage() {
                     </td>
                     {/* Total */}
                     <td className="tbl-cell font-black text-base text-ink-900 dark:text-white whitespace-nowrap">
-                      ₹{Number(order.total).toLocaleString('en-IN')}
+                      ₹{Number(order.activeAmount).toLocaleString('en-IN')}
+                      {order.activeAmount !== Number(order.total) && (
+                        <div className="text-[10px] text-ink-400 font-normal">of ₹{Number(order.total).toLocaleString('en-IN')}</div>
+                      )}
                     </td>
                     {/* Payment */}
                     <td className="tbl-cell">

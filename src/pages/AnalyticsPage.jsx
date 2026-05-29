@@ -319,7 +319,8 @@ export default function AnalyticsPage() {
                       { label: 'Closing Balance Counted', val: selectedSession.closing_balance ?? 'N/A', color: 'text-indigo-600' },
                       { label: 'Revenue Generated', val: selectedSession.total_revenue, color: 'text-emerald-600' },
                       { label: 'Recorded Expenses', val: selectedSession.total_expenses, color: 'text-red-600' },
-                      { label: 'Expected Final Cash', val: Number(selectedSession.opening_balance) + Number(selectedSession.total_cash) - Number(selectedSession.total_expenses), color: 'text-ink-900 dark:text-white' },
+                      { label: 'Recorded Cash Expenses', val: selectedSession.total_cash_expenses ?? selectedSession.total_expenses, color: 'text-orange-600' },
+                      { label: 'Expected Final Cash', val: Number(selectedSession.opening_balance) + Number(selectedSession.total_cash) - Number(selectedSession.total_cash_expenses ?? selectedSession.total_expenses), color: 'text-ink-900 dark:text-white' },
                     ].map(card => (
                       <div key={card.label} className="bg-ink-50 dark:bg-ink-950 p-4 rounded-2xl border border-ink-100 dark:border-ink-800">
                         <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest leading-none block">{card.label}</span>
@@ -332,13 +333,13 @@ export default function AnalyticsPage() {
                     {/* Discrepancy Card */}
                     {selectedSession.closing_balance !== null && (
                       <div className={`p-4 rounded-2xl border ${
-                        Math.abs(Number(selectedSession.closing_balance) - (Number(selectedSession.opening_balance) + Number(selectedSession.total_cash) - Number(selectedSession.total_expenses))) > 0
+                        Math.abs(Number(selectedSession.closing_balance) - (Number(selectedSession.opening_balance) + Number(selectedSession.total_cash) - Number(selectedSession.total_cash_expenses ?? selectedSession.total_expenses))) > 0
                           ? 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-600'
                           : 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-600'
                       }`}>
                         <span className="text-[10px] font-black uppercase tracking-widest leading-none block">Discrepancy</span>
                         <span className="font-black text-xl block mt-2">
-                          ₹{Number(selectedSession.closing_balance) - (Number(selectedSession.opening_balance) + Number(selectedSession.total_cash) - Number(selectedSession.total_expenses))}
+                          ₹{(Number(selectedSession.closing_balance) - (Number(selectedSession.opening_balance) + Number(selectedSession.total_cash) - Number(selectedSession.total_cash_expenses ?? selectedSession.total_expenses))).toLocaleString('en-IN')}
                         </span>
                       </div>
                     )}

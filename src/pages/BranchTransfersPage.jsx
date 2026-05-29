@@ -95,6 +95,7 @@ export default function BranchTransfersPage() {
         category: 'Internal Transfer Out',
         description: `Transfer to ${branchName(t.to_branch_id)}: ${t.quantity}x ${t.item_name}`,
         amount: totalVal,
+        payment_mode: 'CASH',
         created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
         recorded_by: user.username
       })

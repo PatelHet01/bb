@@ -10,7 +10,7 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
-  const [form, setForm] = useState({ category: 'Supplies', amount: '', description: '', expense_date: new Date().toISOString().split('T')[0] })
+  const [form, setForm] = useState({ category: 'Supplies', amount: '', description: '', payment_mode: 'CASH', expense_date: new Date().toISOString().split('T')[0] })
   const categories = ['Rent', 'Utilities', 'Supplies', 'Salaries', 'Maintenance', 'Misc']
 
   useEffect(() => { fetchExpenses() }, [branchId])
@@ -30,6 +30,7 @@ export default function ExpensesPage() {
       category: form.category,
       amount: parseFloat(form.amount),
       description: form.description,
+      payment_mode: form.payment_mode || 'CASH',
       expense_date: form.expense_date,
       logged_by: String(user.id).startsWith('hardcoded') ? null : user.id,
       recorded_by: user.username
@@ -48,7 +49,7 @@ export default function ExpensesPage() {
     toast.success(editingId ? 'Expense updated' : 'Expense logged')
     setShowForm(false)
     setEditingId(null)
-    setForm({ category: 'Supplies', amount: '', description: '', expense_date: new Date().toISOString().split('T')[0] })
+    setForm({ category: 'Supplies', amount: '', description: '', payment_mode: 'CASH', expense_date: new Date().toISOString().split('T')[0] })
     fetchExpenses()
   }
 
@@ -63,14 +64,14 @@ export default function ExpensesPage() {
     <div className="max-w-4xl mx-auto space-y-6 pb-20 animate-fade-in">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-dash-text dark:text-dash-textDark">Expenses</h1>
-        <button className="btn-primary btn-sm" onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ category: 'Supplies', amount: '', description: '', expense_date: new Date().toISOString().split('T')[0] }); }}>
+        <button className="btn-primary btn-sm" onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ category: 'Supplies', amount: '', description: '', payment_mode: 'CASH', expense_date: new Date().toISOString().split('T')[0] }); }}>
           <Plus size={16} /> Log Expense
         </button>
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="card p-5 animate-slide-up bg-white dark:bg-zinc-900 border-2 border-ember/20 shadow-xl">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
             <div className="w-full">
               <span className="label">Date</span>
               <input type="date" className="input" value={form.expense_date} onChange={e=>setForm({...form, expense_date: e.target.value})} required />
@@ -84,6 +85,13 @@ export default function ExpensesPage() {
             <div className="w-full">
               <span className="label">Amount (₹)</span>
               <input required type="number" step="0.01" className="input font-bold" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})} placeholder="0.00" />
+            </div>
+            <div className="w-full">
+              <span className="label">Payment Mode</span>
+              <select className="input" value={form.payment_mode || 'CASH'} onChange={e=>setForm({...form, payment_mode: e.target.value})}>
+                <option value="CASH">💵 Cash</option>
+                <option value="ONLINE">🌐 Online</option>
+              </select>
             </div>
             <div className="w-full">
               <span className="label">Description</span>
@@ -104,19 +112,29 @@ export default function ExpensesPage() {
               <th className="tbl-head">Date</th>
               <th className="tbl-head">Category</th>
               <th className="tbl-head">Description</th>
+              <th className="tbl-head text-center">Mode</th>
               <th className="tbl-head text-right">Amount</th>
               <th className="tbl-head text-right">Action</th>
             </tr>
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan="5" className="tbl-cell text-center">Loading...</td></tr> : 
-             expenses.length === 0 ? <tr><td colSpan="5" className="tbl-cell text-center text-dash-muted">No expenses found</td></tr> :
+            {loading ? <tr><td colSpan="6" className="tbl-cell text-center">Loading...</td></tr> : 
+             expenses.length === 0 ? <tr><td colSpan="6" className="tbl-cell text-center text-dash-muted">No expenses found</td></tr> :
              expenses.map(exp => (
                <tr key={exp.id} className="tbl-row">
-                 <td className="tbl-cell font-medium">{new Date(exp.expense_date).toLocaleDateString()}</td>
+                 <td className="tbl-cell font-medium">{new Date(exp.expense_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                  <td className="tbl-cell"><span className="badge-default">{exp.category}</span></td>
                  <td className="tbl-cell text-dash-muted">{exp.description || '-'}</td>
-                 <td className="tbl-cell text-right text-red-600 font-bold">₹{exp.amount.toLocaleString()}</td>
+                 <td className="tbl-cell text-center">
+                   <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                     exp.payment_mode === 'ONLINE'
+                       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                       : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                   }`}>
+                     {exp.payment_mode || 'CASH'}
+                   </span>
+                 </td>
+                 <td className="tbl-cell text-right text-red-600 font-bold">₹{exp.amount.toLocaleString('en-IN')}</td>
                  <td className="tbl-cell text-right">
                    <div className="flex justify-end gap-1">
                      <button className="btn-ghost p-1.5 text-ink-400 hover:text-ember" onClick={() => { setEditingId(exp.id); setForm({ ...exp }); setShowForm(true); }}><Edit2 size={14} /></button>
@@ -131,3 +149,4 @@ export default function ExpensesPage() {
     </div>
   )
 }
+

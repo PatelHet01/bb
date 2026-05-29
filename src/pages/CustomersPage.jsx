@@ -51,6 +51,21 @@ export default function CustomersPage() {
 
   const isAdmin = role === 'admin' || role === 'super_admin'
 
+  const [branches, setBranches] = useState([])
+
+  useEffect(() => {
+    async function loadBranches() {
+      const { data } = await supabase.from('branches').select('id, name')
+      if (data) setBranches(data)
+    }
+    loadBranches()
+  }, [])
+
+  const canModify = (entryBranchId) => {
+    if (role === 'super_admin') return true
+    return entryBranchId === branchId
+  }
+
   function exportCSV() {
     const rows = [['Name','Username','Mobile','DOB','Branch','Registration Type','Khata Balance','Advance Balance','GHODA Coins','Total Orders','Registration Date']]
     filtered.forEach(c => {
@@ -204,9 +219,9 @@ export default function CustomersPage() {
     setActiveTab('profile')
     
     const [khataRes, advRes, orderRes, ghodaRes] = await Promise.all([
-      supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
-      supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
-      supabase.from('orders').select('*, order_payments(mode, amount), order_items(quantity, price, items(name, variant))').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, sell_mode, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, sell_mode, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('orders').select('*, order_payments(mode, amount), order_items(quantity, price, sell_mode, items(name, variant))').eq('customer_id', c.id).order('created_at', { ascending: false }),
       supabase.from('ghoda_transactions').select('*').eq('customer_id', c.id).order('created_at', { ascending: false })
     ])
     
@@ -231,7 +246,7 @@ export default function CustomersPage() {
     try {
       await supabase.from('khata_ledger').insert({
         customer_id: selected.id,
-        branch_id: selected.branch_id || branchId || 'gurukul',
+        branch_id: branchId || selected.branch_id || 'gurukul',
         type: 'CREDIT',
         amount: X,
         reason: txForm.reason || 'Manual Khata Credit',
@@ -259,7 +274,7 @@ export default function CustomersPage() {
 
     setSaving(true)
     try {
-      const branch = selected.branch_id || branchId || 'gurukul'
+      const branch = branchId || selected.branch_id || 'gurukul'
       const note   = txForm.reason || `Payment via ${txForm.mode}`
 
       if (X <= displayKhata) {
@@ -302,7 +317,7 @@ export default function CustomersPage() {
     try {
       await supabase.from('advance_ledger').insert({
         customer_id: selected.id,
-        branch_id: selected.branch_id || branchId || 'gurukul',
+        branch_id: branchId || selected.branch_id || 'gurukul',
         type: 'TOPUP',
         amount: X,
         reason: txForm.reason || `Advance via ${txForm.mode}`,
@@ -324,6 +339,10 @@ export default function CustomersPage() {
 
   async function handleUpdateLedger(e) {
     e.preventDefault()
+    if (!canModify(editingLedgerEntry.branch_id)) {
+      toast.error('You do not have permission to modify transactions for this branch')
+      return
+    }
     setSaving(true)
     try {
       const { table, id, amount, type, reason, created_at } = editingLedgerEntry
@@ -344,6 +363,10 @@ export default function CustomersPage() {
   }
 
   async function handleDeleteLedger(entry, table) {
+    if (!canModify(entry.branch_id)) {
+      toast.error('You do not have permission to delete transactions for this branch')
+      return
+    }
     if (!confirm('Delete this ledger transaction? This will affect the customer balance.')) return
     try {
       const { error } = await supabase.from(table).delete().eq('id', entry.id)
@@ -359,6 +382,54 @@ export default function CustomersPage() {
     (c.username || '').toLowerCase().includes(search.toLowerCase()) ||
     (c.mobile_number || '').includes(search)
   )
+
+  const branchBalances = useMemo(() => {
+    const allBranchIds = new Set([
+      ...khataLedger.map(l => l.branch_id),
+      ...advanceLedger.map(l => l.branch_id)
+    ])
+
+    const list = []
+    allBranchIds.forEach(bid => {
+      const branchObj = branches.find(b => b.id === bid)
+      const branchName = branchObj ? branchObj.name : (bid ? (bid.charAt(0).toUpperCase() + bid.slice(1)) : 'Global')
+      const kList = khataLedger.filter(l => l.branch_id === bid)
+      const aList = advanceLedger.filter(l => l.branch_id === bid)
+      const kRaw = kList.reduce((s, l) => s + (l.type === 'CREDIT' ? +l.amount : -l.amount), 0)
+      const aRaw = aList.reduce((s, l) => s + (l.type === 'TOPUP' ? +l.amount : -l.amount), 0)
+      const net = kRaw - aRaw
+      
+      const khataVal = Math.max(0, net)
+      const advVal = Math.max(0, -net)
+      
+      if (khataVal > 0 || advVal > 0 || kList.length > 0 || aList.length > 0) {
+        list.push({
+          id: bid || 'global',
+          name: branchName,
+          khata: khataVal,
+          advance: advVal
+        })
+      }
+    })
+    return list
+  }, [khataLedger, advanceLedger, branches])
+
+  const ordersByBranch = useMemo(() => {
+    const groups = {}
+    ordersHistory.forEach(o => {
+      const bid = o.branch_id || 'global'
+      if (!groups[bid]) {
+        const branchObj = branches.find(b => b.id === bid)
+        const branchName = branchObj ? branchObj.name : (bid === 'global' ? 'Global' : (bid.charAt(0).toUpperCase() + bid.slice(1)))
+        groups[bid] = {
+          name: branchName,
+          orders: []
+        }
+      }
+      groups[bid].orders.push(o)
+    })
+    return Object.values(groups)
+  }, [ordersHistory, branches])
 
   return (
     <div className="flex flex-col md:flex-row gap-4 h-[calc(100vh-6rem)]">
@@ -410,9 +481,17 @@ export default function CustomersPage() {
                 <div className="sm:col-span-2">
                   <label className="label">Branch *</label>
                   <select className="input" value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}>
-                    <option value="gurukul">Gurukul</option>
-                    <option value="bhat">Bhat</option>
-                    <option value="visat">Visat</option>
+                    {branches.length > 0 ? (
+                      branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="gurukul">Gurukul</option>
+                        <option value="bhat">Bhat</option>
+                        <option value="visat">Visat</option>
+                      </>
+                    )}
                   </select>
                 </div>
               )}
@@ -546,6 +625,26 @@ export default function CustomersPage() {
                     <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Reg Type</span> <span className="font-semibold capitalize">{selected.registration_type || 'Admin'}</span></div>
                   </div>
                 </div>
+
+                {branchBalances.length > 0 && (
+                  <div className="bg-white dark:bg-ink-900 p-5 rounded-xl border border-ink-200 dark:border-ink-800 space-y-3">
+                    <h3 className="font-black text-sm uppercase text-ink-900 dark:text-white border-b border-ink-100 dark:border-ink-800 pb-2">Branch-Wise Balance Breakdown</h3>
+                    <div className="divide-y divide-ink-100 dark:divide-ink-800/60">
+                      {branchBalances.map(bb => (
+                        <div key={bb.id} className="py-2.5 flex items-center justify-between text-sm">
+                          <div>
+                            <span className="font-bold text-ink-900 dark:text-white">{bb.name}</span>
+                          </div>
+                          <div className="flex gap-2 text-xs font-bold">
+                            {bb.khata > 0 && <span className="text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded">Khata: ₹{bb.khata}</span>}
+                            {bb.advance > 0 && <span className="text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded">Adv: ₹{bb.advance}</span>}
+                            {bb.khata === 0 && bb.advance === 0 && <span className="text-ink-400 bg-ink-50 dark:bg-ink-800/40 px-2 py-0.5 rounded">Cleared</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -561,10 +660,12 @@ export default function CustomersPage() {
                           <p className={`font-bold text-sm ${style.color}`}>{style.label}</p>
                           <div className="flex items-center gap-3">
                             <p className={`font-black text-base tabular-nums ${style.color}`}>{style.prefix}₹{l.amount}</p>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => openEditLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
-                              <button onClick={() => handleDeleteLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
-                            </div>
+                            {canModify(l.branch_id) && (
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => openEditLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
+                                <button onClick={() => handleDeleteLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -574,6 +675,7 @@ export default function CustomersPage() {
                             {l.orders.order_items.map((oi, i) => (
                               <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
                                 {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
+                                {oi.sell_mode === 'pack' && <span className="ml-1 text-[8px] bg-ember-100 text-ember-700 px-1 rounded font-bold uppercase">Pack</span>}
                               </span>
                             ))}
                           </div>
@@ -614,10 +716,12 @@ export default function CustomersPage() {
                           <p className={`font-bold text-sm ${style.color}`}>{style.label}</p>
                           <div className="flex items-center gap-3">
                             <p className={`font-black text-base tabular-nums ${style.color}`}>{style.prefix}₹{l.amount}</p>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => openEditLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
-                              <button onClick={() => handleDeleteLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
-                            </div>
+                            {canModify(l.branch_id) && (
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => openEditLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
+                                <button onClick={() => handleDeleteLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -627,6 +731,7 @@ export default function CustomersPage() {
                             {l.orders.order_items.map((oi, i) => (
                               <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
                                 {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
+                                {oi.sell_mode === 'pack' && <span className="ml-1 text-[8px] bg-ember-100 text-ember-700 px-1 rounded font-bold uppercase">Pack</span>}
                               </span>
                             ))}
                           </div>
@@ -657,64 +762,72 @@ export default function CustomersPage() {
 
             {activeTab === 'orders' && (
               ordersHistory.length === 0 ? <p className="text-sm font-semibold text-ink-400 text-center py-10">No Orders History</p> :
-              <div className="space-y-2">
-                {ordersHistory.map(o => {
-                  const isKhata = (o.order_payments || []).some(p => p.mode === 'KHATA')
-                  const isCancelled = o.status === 'cancelled'
-                  
-                  let cardClass = "bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800"
-                  let borderClass = "border-ink-100 dark:border-ink-800"
-                  let textClass = "text-ink-900 dark:text-white"
-                  let tagClass = "bg-ink-100 dark:bg-ink-800"
-                  
-                  if (isCancelled) {
-                    // default ink theme
-                  } else if (isKhata) {
-                    cardClass = "bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-200 dark:border-red-900/30"
-                    borderClass = "border-red-200 dark:border-red-900/30"
-                    textClass = "text-red-700 dark:text-red-400"
-                    tagClass = "bg-red-200/50 dark:bg-red-900/50 text-red-800 dark:text-red-300"
-                  } else {
-                    cardClass = "bg-emerald-50 dark:bg-emerald-900/10 p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/30"
-                    borderClass = "border-emerald-200 dark:border-emerald-900/30"
-                    textClass = "text-emerald-700 dark:text-emerald-400"
-                    tagClass = "bg-emerald-200/50 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300"
-                  }
+              <div className="space-y-6">
+                {ordersByBranch.map(group => (
+                  <div key={group.name} className="space-y-3">
+                    <h3 className="text-xs font-black uppercase text-ink-500 tracking-wider sticky top-0 bg-ink-50 dark:bg-ink-950 py-1 z-10">{group.name} Branch ({group.orders.length})</h3>
+                    <div className="space-y-2">
+                      {group.orders.map(o => {
+                        const isKhata = (o.order_payments || []).some(p => p.mode === 'KHATA')
+                        const isCancelled = o.status === 'cancelled'
+                        
+                        let cardClass = "bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800"
+                        let borderClass = "border-ink-100 dark:border-ink-800"
+                        let textClass = "text-ink-900 dark:text-white"
+                        let tagClass = "bg-ink-100 dark:bg-ink-800"
+                        
+                        if (isCancelled) {
+                          // default ink theme
+                        } else if (isKhata) {
+                          cardClass = "bg-red-50/50 dark:bg-red-900/10 p-4 rounded-xl border border-red-200 dark:border-red-900/30"
+                          borderClass = "border-red-200 dark:border-red-900/30"
+                          textClass = "text-red-700 dark:text-red-400"
+                          tagClass = "bg-red-200/50 dark:bg-red-900/50 text-red-800 dark:text-red-300"
+                        } else {
+                          cardClass = "bg-emerald-50/50 dark:bg-emerald-900/10 p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/30"
+                          borderClass = "border-emerald-200 dark:border-emerald-900/30"
+                          textClass = "text-emerald-700 dark:text-emerald-400"
+                          tagClass = "bg-emerald-200/50 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300"
+                        }
 
-                  return (
-                    <div key={o.id} className={cardClass}>
-                      <div className={`flex justify-between items-center border-b pb-2 mb-2 ${borderClass}`}>
-                        <p className={`font-mono text-xs font-bold ${isKhata ? 'text-red-500/70' : 'text-ink-500'}`}>#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
-                        <p className={`font-black text-lg ${textClass}`}>₹{o.total}</p>
-                      </div>
-
-                      {/* Render order items */}
-                      {o.order_items && o.order_items.length > 0 && (
-                        <div className={`flex flex-col gap-1.5 border-b pb-2 mb-2 ${borderClass}`}>
-                          {o.order_items.map((oi, i) => (
-                            <div key={i} className="flex justify-between items-center text-xs text-ink-600 dark:text-ink-400">
-                              <span>
-                                <span className="font-bold text-ink-800 dark:text-ink-200">{oi.quantity}x</span>{' '}
-                                {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''}
-                              </span>
-                              <span className="font-semibold text-ink-700 dark:text-ink-300">₹{oi.price * oi.quantity}</span>
+                        return (
+                          <div key={o.id} className={cardClass}>
+                            <div className={`flex justify-between items-center border-b pb-2 mb-2 ${borderClass}`}>
+                              <p className={`font-mono text-xs font-bold ${isKhata ? 'text-red-500/70' : 'text-ink-500'}`}>#{o.order_number || o.id.slice(0,8).toUpperCase()}</p>
+                              <p className={`font-black text-lg ${textClass}`}>₹{o.total}</p>
                             </div>
-                          ))}
-                        </div>
-                      )}
 
-                      <div className="flex justify-between items-end text-xs">
-                        <div>
-                          <p className={`font-bold uppercase ${isKhata ? 'text-red-600/60' : 'text-ink-500'}`}>{new Date(o.created_at).toLocaleString()}</p>
-                          <p className="mt-1 flex gap-1">
-                            {(o.order_payments || []).map((p,i) => <span key={i} className={`${tagClass} px-1.5 py-0.5 rounded font-bold text-[9px] uppercase`}>{p.mode}</span>)}
-                          </p>
-                        </div>
-                        <span className={`font-bold px-2 py-1 rounded uppercase tracking-wider text-[10px] ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : o.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{o.status}</span>
-                      </div>
+                            {/* Render order items */}
+                            {o.order_items && o.order_items.length > 0 && (
+                              <div className={`flex flex-col gap-1.5 border-b pb-2 mb-2 ${borderClass}`}>
+                                {o.order_items.map((oi, i) => (
+                                  <div key={i} className="flex justify-between items-center text-xs text-ink-600 dark:text-ink-400">
+                                    <span>
+                                      <span className="font-bold text-ink-800 dark:text-ink-200">{oi.quantity}x</span>{' '}
+                                      {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''}
+                                      {oi.sell_mode === 'pack' && <span className="ml-1 text-[8px] bg-ember-100 text-ember-700 px-1 rounded font-bold uppercase">Pack</span>}
+                                    </span>
+                                    <span className="font-semibold text-ink-700 dark:text-ink-300">₹{oi.price * oi.quantity}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex justify-between items-end text-xs">
+                              <div>
+                                <p className={`font-bold uppercase ${isKhata ? 'text-red-600/60' : 'text-ink-500'}`}>{new Date(o.created_at).toLocaleString()}</p>
+                                <p className="mt-1 flex gap-1">
+                                  {(o.order_payments || []).map((p,i) => <span key={i} className={`${tagClass} px-1.5 py-0.5 rounded font-bold text-[9px] uppercase`}>{p.mode}</span>)}
+                                </p>
+                              </div>
+                              <span className={`font-bold px-2 py-1 rounded uppercase tracking-wider text-[10px] ${o.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : o.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{o.status}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             )}
 

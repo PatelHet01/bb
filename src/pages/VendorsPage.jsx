@@ -35,7 +35,7 @@ export default function VendorsPage() {
 
   // Payment recording form (replaces ledger entry form)
   const [showPaymentForm, setShowPaymentForm] = useState(false)
-  const [paymentForm, setPaymentForm] = useState({ amount: '', mode: 'CASH', remarks: '', created_at: '' })
+  const [paymentForm, setPaymentForm] = useState({ amount: '', mode: 'CASH', remarks: '', created_at: '', amount_cash: '', amount_upi: '' })
   const [editingLedgerId, setEditingLedgerId] = useState(null)
 
   // Items tagged to vendor
@@ -46,11 +46,12 @@ export default function VendorsPage() {
   const [allItems, setAllItems] = useState([]) // all inventory items for this branch
   const [showPOForm, setShowPOForm] = useState(false)
   const [editingPO, setEditingPO] = useState(null) // PO being edited (draft only)
-  const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '' })
+  const [poForm, setPOForm] = useState({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '', amount_paid_cash: '', amount_paid_upi: '' })
   const [poLines, setPOLines] = useState([{ item_id: '', quantity: '', unit_price: '', searchText: '' }])
   const [activeLineSearchIdx, setActiveLineSearchIdx] = useState(null)
 
   const [expandedPO, setExpandedPO] = useState(null)
+  const [roundOff, setRoundOff] = useState(true)
 
   // Link items to vendor
   const [showLinkItem, setShowLinkItem] = useState(false)
@@ -168,14 +169,18 @@ export default function VendorsPage() {
       amount: String(l.amount),
       mode: parsedMode,
       remarks: parsedRemarks,
-      created_at: localDateStr
+      created_at: localDateStr,
+      amount_cash: '',
+      amount_upi: ''
     })
     setShowPaymentForm(true)
   }
 
   async function handleAddPayment(e) {
     e.preventDefault()
-    const amt = parseFloat(paymentForm.amount)
+    const amt = paymentForm.mode === 'SPLIT'
+      ? (parseFloat(paymentForm.amount_cash) || 0) + (parseFloat(paymentForm.amount_upi) || 0)
+      : parseFloat(paymentForm.amount)
     if (!amt || amt <= 0) return toast.error('Enter valid amount')
 
     const currentPaymentAmt = editingLedgerId ? Number(ledger.find(l => l.id === editingLedgerId)?.amount || 0) : 0
@@ -187,38 +192,71 @@ export default function VendorsPage() {
 
     setSaving(true)
     try {
-      const refString = paymentForm.remarks.trim()
-        ? `${paymentForm.mode} - ${paymentForm.remarks.trim()}`
-        : paymentForm.mode
-
-      const payload = {
+      const payloadBase = {
         vendor_id: selectedVendor.id,
         branch_id: branchId || selectedVendor.branch_id,
         type: 'PAYMENT',
-        amount: amt,
-        reference: refString,
         created_by: String(user.id).startsWith('hardcoded') ? null : user.id,
         recorded_by: user.username
       }
       if (paymentForm.created_at) {
-        payload.created_at = new Date(paymentForm.created_at).toISOString()
+        payloadBase.created_at = new Date(paymentForm.created_at).toISOString()
       }
 
-      if (editingLedgerId) {
-        const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', editingLedgerId).select().single()
-        if (error) throw error
-        setLedger(prev => prev.map(l => l.id === editingLedgerId ? data : l))
-        toast.success('Payment updated')
+      if (paymentForm.mode === 'SPLIT') {
+        const cashAmt = parseFloat(paymentForm.amount_cash) || 0
+        const upiAmt = parseFloat(paymentForm.amount_upi) || 0
+
+        if (cashAmt > 0) {
+          const refString = paymentForm.remarks.trim() ? `CASH - ${paymentForm.remarks.trim()}` : 'CASH'
+          const { data, error } = await supabase.from('vendor_ledger').insert({
+            ...payloadBase,
+            amount: cashAmt,
+            reference: refString
+          }).select().single()
+          if (error) throw error
+          setLedger(prev => [data, ...prev])
+        }
+
+        if (upiAmt > 0) {
+          const refString = paymentForm.remarks.trim() ? `UPI - ${paymentForm.remarks.trim()}` : 'UPI'
+          const { data, error } = await supabase.from('vendor_ledger').insert({
+            ...payloadBase,
+            amount: upiAmt,
+            reference: refString
+          }).select().single()
+          if (error) throw error
+          setLedger(prev => [data, ...prev])
+        }
+
+        toast.success('Payments recorded')
       } else {
-        const { data, error } = await supabase.from('vendor_ledger').insert(payload).select().single()
-        if (error) throw error
-        setLedger(prev => [data, ...prev])
-        toast.success('Payment recorded')
+        const refString = paymentForm.remarks.trim()
+          ? `${paymentForm.mode} - ${paymentForm.remarks.trim()}`
+          : paymentForm.mode
+
+        const payload = {
+          ...payloadBase,
+          amount: amt,
+          reference: refString
+        }
+
+        if (editingLedgerId) {
+          const { data, error } = await supabase.from('vendor_ledger').update(payload).eq('id', editingLedgerId).select().single()
+          if (error) throw error
+          setLedger(prev => prev.map(l => l.id === editingLedgerId ? data : l))
+          toast.success('Payment updated')
+        } else {
+          const { data, error } = await supabase.from('vendor_ledger').insert(payload).select().single()
+          if (error) throw error
+          setLedger(prev => [data, ...prev])
+          toast.success('Payment recorded')
+        }
       }
 
       setShowPaymentForm(false)
       setEditingLedgerId(null)
-      setPaymentForm({ amount: '', mode: 'CASH', remarks: '', created_at: '' })
+      setPaymentForm({ amount: '', mode: 'CASH', remarks: '', created_at: '', amount_cash: '', amount_upi: '' })
     } catch (e) { toast.error(e.message) }
     finally { setSaving(false) }
   }
@@ -289,8 +327,13 @@ export default function VendorsPage() {
       toast.error('Remarks are required')
       return
     }
-    const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
-    const amtPaid = poForm.payment_mode === 'CREDIT' ? 0 : (parseFloat(poForm.amount_paid) || 0)
+    const subtotal = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+    const total = roundOff ? Math.round(subtotal) : subtotal
+    const amtPaid = poForm.payment_mode === 'CREDIT'
+      ? 0
+      : poForm.payment_mode === 'SPLIT'
+        ? (parseFloat(poForm.amount_paid_cash) || 0) + (parseFloat(poForm.amount_paid_upi) || 0)
+        : (parseFloat(poForm.amount_paid) || 0)
     if (poForm.payment_mode !== 'CREDIT' && amtPaid > total) {
       toast.error('Amount paid cannot exceed total amount')
       return
@@ -331,15 +374,54 @@ export default function VendorsPage() {
           await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
         }
         // Auto vendor ledger entries
-        await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PURCHASE', amount: total, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
-        if (amtPaid > 0) {
-          await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PAYMENT', amount: amtPaid, reference: poForm.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
+        const remarksSuffix = poForm.notes ? ` - ${poForm.notes.trim()}` : ''
+        const poRef = poForm.invoice_ref ? `PO ${po.id.slice(0,8)} (${poForm.invoice_ref})` : `PO ${po.id.slice(0,8)}`
+        const purchaseRef = `${poRef}${remarksSuffix}`
+        await supabase.from('vendor_ledger').insert({ vendor_id: selectedVendor.id, branch_id: po.branch_id, type: 'PURCHASE', amount: total, reference: purchaseRef, recorded_by: user.username, ...(customDate && { created_at: customDate }) })
+        
+        if (poForm.payment_mode === 'SPLIT') {
+          const cashAmt = parseFloat(poForm.amount_paid_cash) || 0
+          const upiAmt = parseFloat(poForm.amount_paid_upi) || 0
+          if (cashAmt > 0) {
+            await supabase.from('vendor_ledger').insert({
+              vendor_id: selectedVendor.id,
+              branch_id: po.branch_id,
+              type: 'PAYMENT',
+              amount: cashAmt,
+              reference: poForm.invoice_ref ? `CASH - ${poForm.invoice_ref}` : `CASH - PO ${po.id.slice(0,8)}`,
+              recorded_by: user.username,
+              ...(customDate && { created_at: customDate })
+            })
+          }
+          if (upiAmt > 0) {
+            await supabase.from('vendor_ledger').insert({
+              vendor_id: selectedVendor.id,
+              branch_id: po.branch_id,
+              type: 'PAYMENT',
+              amount: upiAmt,
+              reference: poForm.invoice_ref ? `UPI - ${poForm.invoice_ref}` : `UPI - PO ${po.id.slice(0,8)}`,
+              recorded_by: user.username,
+              ...(customDate && { created_at: customDate })
+            })
+          }
+        } else {
+          if (amtPaid > 0) {
+            await supabase.from('vendor_ledger').insert({
+              vendor_id: selectedVendor.id,
+              branch_id: po.branch_id,
+              type: 'PAYMENT',
+              amount: amtPaid,
+              reference: poForm.invoice_ref ? `${poForm.payment_mode} - ${poForm.invoice_ref}` : `${poForm.payment_mode} - PO ${po.id.slice(0,8)}`,
+              recorded_by: user.username,
+              ...(customDate && { created_at: customDate })
+            })
+          }
         }
       }
 
       toast.success(receiveNow ? 'Purchase received & stock updated!' : 'Draft purchase order saved')
       setShowPOForm(false)
-      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' })
+      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '', amount_paid_cash: '', amount_paid_upi: '' })
       setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }])
       await refreshVendorData()
     } catch (err) { toast.error(err.message) }
@@ -361,9 +443,25 @@ export default function VendorsPage() {
         await supabase.from('inventory_log').insert({ item_id: l.item_id, branch_id: po.branch_id, action: 'PURCHASE_IN', qty_before: qBefore, qty_change: qChange, qty_after: qBefore + qChange, reference_type: 'vendor_purchase_order', reference_id: po.id, recorded_by: user.username })
       }
       await supabase.from('vendor_purchase_orders').update({ status: 'received', received_at: new Date().toISOString() }).eq('id', po.id)
-      await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PURCHASE', amount: po.total_amount, reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
-      if (po.amount_paid > 0) {
-        await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PAYMENT', amount: po.amount_paid, reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+      
+      const remarksSuffix = po.notes ? ` - ${po.notes.trim()}` : ''
+      const poRef = po.invoice_ref ? `PO ${po.id.slice(0,8)} (${po.invoice_ref})` : `PO ${po.id.slice(0,8)}`
+      const purchaseRef = `${poRef}${remarksSuffix}`
+      await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PURCHASE', amount: po.total_amount, reference: purchaseRef, recorded_by: user.username })
+      
+      if (po.payment_mode === 'SPLIT') {
+        if (po.amount_paid > 0) {
+          await supabase.from('vendor_ledger').insert({
+            vendor_id: po.vendor_id, branch_id: po.branch_id,
+            type: 'PAYMENT', amount: po.amount_paid,
+            reference: po.invoice_ref ? `SPLIT - ${po.invoice_ref}` : `SPLIT - PO ${po.id.slice(0,8)}`,
+            recorded_by: user.username
+          })
+        }
+      } else {
+        if (po.amount_paid > 0) {
+          await supabase.from('vendor_ledger').insert({ vendor_id: po.vendor_id, branch_id: po.branch_id, type: 'PAYMENT', amount: po.amount_paid, reference: po.invoice_ref ? `${po.payment_mode} - ${po.invoice_ref}` : `${po.payment_mode} - PO ${po.id.slice(0,8)}`, recorded_by: user.username })
+        }
       }
       toast.success('Stock updated & ledger entries created!')
       await refreshVendorData()
@@ -420,19 +518,33 @@ export default function VendorsPage() {
   async function syncPOLedger(po) {
     setSaving(true)
     try {
+      const remarksSuffix = po.notes ? ` - ${po.notes.trim()}` : ''
+      const poRef = po.invoice_ref ? `PO ${po.id.slice(0,8)} (${po.invoice_ref})` : `PO ${po.id.slice(0,8)}`
+      const purchaseRef = `${poRef}${remarksSuffix}`
       await supabase.from('vendor_ledger').insert({
         vendor_id: po.vendor_id, branch_id: po.branch_id,
         type: 'PURCHASE', amount: po.total_amount,
-        reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`,
+        reference: purchaseRef,
         recorded_by: user.username
       })
-      if (po.amount_paid > 0) {
-        await supabase.from('vendor_ledger').insert({
-          vendor_id: po.vendor_id, branch_id: po.branch_id,
-          type: 'PAYMENT', amount: po.amount_paid,
-          reference: po.invoice_ref || `PO ${po.id.slice(0,8)}`,
-          recorded_by: user.username
-        })
+      if (po.payment_mode === 'SPLIT') {
+        if (po.amount_paid > 0) {
+          await supabase.from('vendor_ledger').insert({
+            vendor_id: po.vendor_id, branch_id: po.branch_id,
+            type: 'PAYMENT', amount: po.amount_paid,
+            reference: po.invoice_ref ? `SPLIT - ${po.invoice_ref}` : `SPLIT - PO ${po.id.slice(0,8)}`,
+            recorded_by: user.username
+          })
+        }
+      } else {
+        if (po.amount_paid > 0) {
+          await supabase.from('vendor_ledger').insert({
+            vendor_id: po.vendor_id, branch_id: po.branch_id,
+            type: 'PAYMENT', amount: po.amount_paid,
+            reference: po.invoice_ref ? `${po.payment_mode} - ${po.invoice_ref}` : `${po.payment_mode} - PO ${po.id.slice(0,8)}`,
+            recorded_by: user.username
+          })
+        }
       }
       toast.success('Ledger entries created')
       await refreshVendorData()
@@ -443,7 +555,16 @@ export default function VendorsPage() {
   function startEditPO(po) {
     setEditingPO(po)
     const localDateStr = po.created_at ? new Date(new Date(po.created_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''
-    setPOForm({ invoice_ref: po.invoice_ref || '', payment_mode: po.payment_mode || 'CREDIT', amount_paid: po.amount_paid || '', notes: po.notes || '', created_at: localDateStr })
+    const isSplit = po.payment_mode === 'SPLIT'
+    setPOForm({
+      invoice_ref: po.invoice_ref || '',
+      payment_mode: po.payment_mode || 'CREDIT',
+      amount_paid: po.amount_paid || '',
+      notes: po.notes || '',
+      created_at: localDateStr,
+      amount_paid_cash: isSplit ? String(Number(po.amount_paid) / 2) : '',
+      amount_paid_upi: isSplit ? String(Number(po.amount_paid) / 2) : ''
+    })
     setPOLines((po.vendor_purchase_items || []).map(li => ({
       id: li.id,
       item_id: li.item_id,
@@ -463,8 +584,13 @@ export default function VendorsPage() {
       toast.error('Remarks are required')
       return
     }
-    const total = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
-    const amtPaid = poForm.payment_mode === 'CREDIT' ? 0 : (parseFloat(poForm.amount_paid) || 0)
+    const subtotal = validLines.reduce((s, l) => s + (parseFloat(l.quantity)||0)*(parseFloat(l.unit_price)||0), 0)
+    const total = roundOff ? Math.round(subtotal) : subtotal
+    const amtPaid = poForm.payment_mode === 'CREDIT'
+      ? 0
+      : poForm.payment_mode === 'SPLIT'
+        ? (parseFloat(poForm.amount_paid_cash) || 0) + (parseFloat(poForm.amount_paid_upi) || 0)
+        : (parseFloat(poForm.amount_paid) || 0)
     if (poForm.payment_mode !== 'CREDIT' && amtPaid > total) {
       toast.error('Amount paid cannot exceed total amount')
       return
@@ -488,7 +614,7 @@ export default function VendorsPage() {
       toast.success('Purchase order updated')
       setShowPOForm(false)
       setEditingPO(null)
-      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '' })
+      setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '', amount_paid_cash: '', amount_paid_upi: '' })
       setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }])
       await refreshVendorData()
     } catch (err) { toast.error(err.message) }
@@ -685,12 +811,12 @@ export default function VendorsPage() {
               </button>
             ))}
             {isAdmin && ledgerTab === 'ledger' && vendorBalance > 0 && (
-              <button onClick={() => { setEditingLedgerId(null); setPaymentForm({ amount: '', mode: 'CASH', remarks: '', created_at: '' }); setShowPaymentForm(!showPaymentForm); }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
+              <button onClick={() => { setEditingLedgerId(null); setPaymentForm({ amount: '', mode: 'CASH', remarks: '', created_at: '', amount_cash: '', amount_upi: '' }); setShowPaymentForm(!showPaymentForm); }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
                 Record Payment
               </button>
             )}
             {isAdmin && ledgerTab === 'orders' && (
-              <button onClick={() => { setShowPOForm(p => !p); setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }]); setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '' }) }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
+              <button onClick={() => { setShowPOForm(p => !p); setPOLines([{ item_id: '', quantity: '', unit_price: '', searchText: '' }]); setPOForm({ invoice_ref: '', payment_mode: 'CREDIT', amount_paid: '', notes: '', created_at: '', amount_paid_cash: '', amount_paid_upi: '' }) }} className="ml-auto px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors">
                 + New Purchase
               </button>
             )}
@@ -703,15 +829,29 @@ export default function VendorsPage() {
                 {editingLedgerId ? 'Edit Payment' : 'Record Payment'}
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Amount (₹) *</label>
-                  <input type="number" min="0.01" step="0.01" required className="input text-sm font-bold" value={paymentForm.amount} onChange={e => setPaymentForm(p => ({...p, amount: e.target.value}))} placeholder="0.00" />
-                </div>
+                {paymentForm.mode === 'SPLIT' ? (
+                  <>
+                    <div>
+                      <label className="label">Amount Cash (₹) *</label>
+                      <input type="number" min="0.01" step="0.01" required className="input text-sm font-bold" value={paymentForm.amount_cash} onChange={e => setPaymentForm(p => ({...p, amount_cash: e.target.value}))} placeholder="0.00" />
+                    </div>
+                    <div>
+                      <label className="label">Amount UPI / Online (₹) *</label>
+                      <input type="number" min="0.01" step="0.01" required className="input text-sm font-bold" value={paymentForm.amount_upi} onChange={e => setPaymentForm(p => ({...p, amount_upi: e.target.value}))} placeholder="0.00" />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="label">Amount (₹) *</label>
+                    <input type="number" min="0.01" step="0.01" required className="input text-sm font-bold" value={paymentForm.amount} onChange={e => setPaymentForm(p => ({...p, amount: e.target.value}))} placeholder="0.00" />
+                  </div>
+                )}
                 <div>
                   <label className="label">Payment Mode *</label>
                   <select className="input text-sm" value={paymentForm.mode} onChange={e => setPaymentForm(p => ({...p, mode: e.target.value}))}>
                     <option value="CASH">Cash</option>
                     <option value="UPI">UPI</option>
+                    {!editingLedgerId && <option value="SPLIT">Split (Cash + UPI)</option>}
                   </select>
                 </div>
                 <div>
@@ -748,6 +888,36 @@ export default function VendorsPage() {
                         }`}>{l.type}</span>
                         {l.reference && <span className="text-xs text-ink-500 font-medium">{l.reference}</span>}
                       </div>
+
+                      {/* Remarks Display */}
+                      {(() => {
+                        let remarkText = ''
+                        if (l.type === 'PURCHASE') {
+                          // Try to find PO notes matching this PO reference
+                          const poShortId = l.reference?.match(/PO\s+([a-f0-9]{8})/i)?.[1]
+                          const match = poShortId ? purchaseOrders.find(po => po.id.slice(0,8) === poShortId) : null
+                          remarkText = match?.notes || ''
+                          
+                          // Fallback to text after " - " if stored in reference
+                          if (!remarkText && l.reference?.includes(' - ')) {
+                            remarkText = l.reference.split(' - ').slice(1).join(' - ')
+                          }
+                        } else if (l.type === 'PAYMENT') {
+                          if (l.reference?.includes(' - ')) {
+                            remarkText = l.reference.split(' - ').slice(1).join(' - ')
+                          } else {
+                            remarkText = l.reference || ''
+                          }
+                        }
+                        
+                        return remarkText ? (
+                          <p className="text-xs text-ink-500 mt-2 bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal">
+                            <strong className="text-ink-600 dark:text-ink-400">Remarks: </strong>
+                            {remarkText}
+                          </p>
+                        ) : null
+                      })()}
+
                       <div className="text-[10px] text-ink-400 mt-1 font-bold">{new Date(l.created_at).toLocaleString('en-IN')}</div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -793,12 +963,37 @@ export default function VendorsPage() {
                           <option value="PARTIAL">Partial (Part-Pay)</option>
                           <option value="CASH">Cash (Paid Now)</option>
                           <option value="UPI">UPI (Paid Now)</option>
+                          <option value="SPLIT">Split (Cash + UPI)</option>
                         </select>
                       </div>
-                      {poForm.payment_mode !== 'CREDIT' && (
+                      {poForm.payment_mode !== 'CREDIT' && poForm.payment_mode !== 'SPLIT' && (
                         <div>
                           <label className="label">Amount Paid (₹)</label>
-                          <input type="number" min="0" step="0.01" className="input text-sm" value={poForm.amount_paid} onChange={e => setPOForm(p => ({...p, amount_paid: e.target.value}))} placeholder="0.00" />
+                          <input type="number" min="0" step="0.01" className="input text-sm font-bold" value={poForm.amount_paid} onChange={e => setPOForm(p => ({...p, amount_paid: e.target.value}))} placeholder="0.00" />
+                        </div>
+                      )}
+                      {poForm.payment_mode === 'SPLIT' && (
+                        <>
+                          <div>
+                            <label className="label">Amount Paid Cash (₹)</label>
+                            <input type="number" min="0" step="0.01" className="input text-sm font-bold" value={poForm.amount_paid_cash || ''} onChange={e => setPOForm(p => ({...p, amount_paid_cash: e.target.value}))} placeholder="0.00" />
+                          </div>
+                          <div>
+                            <label className="label">Amount Paid UPI (₹)</label>
+                            <input type="number" min="0" step="0.01" className="input text-sm font-bold" value={poForm.amount_paid_upi || ''} onChange={e => setPOForm(p => ({...p, amount_paid_upi: e.target.value}))} placeholder="0.00" />
+                          </div>
+                        </>
+                      )}
+                      {poForm.payment_mode === 'PARTIAL' && (
+                        <div className="col-span-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 p-2.5 rounded-xl text-xs text-amber-800 dark:text-amber-300 font-bold">
+                          Outstanding Credit (Owed to Vendor): ₹{((roundOff ? Math.round(poTotal) : poTotal) - (parseFloat(poForm.amount_paid) || 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}
+                        </div>
+                      )}
+                      {poForm.payment_mode === 'SPLIT' && (
+                        <div className="col-span-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 p-2.5 rounded-xl text-xs text-amber-800 dark:text-amber-300 font-bold">
+                          Total Paid: ₹{((parseFloat(poForm.amount_paid_cash) || 0) + (parseFloat(poForm.amount_paid_upi) || 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}
+                          <br />
+                          Outstanding Credit (Owed to Vendor): ₹{((roundOff ? Math.round(poTotal) : poTotal) - ((parseFloat(poForm.amount_paid_cash) || 0) + (parseFloat(poForm.amount_paid_upi) || 0))).toLocaleString('en-IN', {minimumFractionDigits: 2})}
                         </div>
                       )}
                       {poForm.payment_mode === 'PARTIAL' && (
@@ -928,17 +1123,35 @@ export default function VendorsPage() {
                       <button onClick={addPOLine} className="text-xs text-emerald-600 font-bold hover:underline">+ Add item</button>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t border-ink-100 dark:border-ink-800">
-                      <span className="font-black text-ink-900 dark:text-white">Total: ₹{poTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
-                      <div className="flex gap-2">
-                        {editingPO ? (
-                          <button type="button" onClick={handleUpdatePO} disabled={saving} className="btn-primary text-xs">{saving ? '…' : 'Update Order'}</button>
-                        ) : (
-                          <>
-                            <button type="button" onClick={e => handleCreatePO(e, false)} disabled={saving} className="btn-secondary text-xs">{saving ? '…' : 'Save Draft'}</button>
-                            <button type="button" onClick={e => handleCreatePO(e, true)} disabled={saving} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">{saving ? '…' : '✓ Receive Now'}</button>
-                          </>
-                        )}
+                      <div className="flex flex-col gap-0.5">
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-ink-600 dark:text-ink-400">
+                          <input
+                            type="checkbox"
+                            className="rounded border-ink-300 text-ember focus:ring-ember"
+                            checked={roundOff}
+                            onChange={e => setRoundOff(e.target.checked)}
+                          />
+                          Smart Round Off
+                        </label>
+                        {roundOff ? (
+                          <div className="text-[10px] text-ink-400">
+                            Subtotal: ₹{poTotal.toFixed(2)} · Diff: ₹{(Math.round(poTotal) - poTotal).toFixed(2)}
+                          </div>
+                        ) : null}
                       </div>
+                      <span className="font-black text-ink-900 dark:text-white">
+                        Total: ₹{(roundOff ? Math.round(poTotal) : poTotal).toLocaleString('en-IN', {minimumFractionDigits: 2})}
+                      </span>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2 border-t border-ink-100 dark:border-ink-800">
+                      {editingPO ? (
+                        <button type="button" onClick={handleUpdatePO} disabled={saving} className="btn-primary text-xs">{saving ? '…' : 'Update Order'}</button>
+                      ) : (
+                        <>
+                          <button type="button" onClick={e => handleCreatePO(e, false)} disabled={saving} className="btn-secondary text-xs">{saving ? '…' : 'Save Draft'}</button>
+                          <button type="button" onClick={e => handleCreatePO(e, true)} disabled={saving} className="btn-primary text-xs bg-emerald-600 hover:bg-emerald-700">{saving ? '…' : '✓ Receive Now'}</button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

@@ -201,7 +201,7 @@ export default function SessionPage() {
       .neq('status', 'cancelled')
     const { data: expenses } = await supabase
       .from('expenses')
-      .select('amount')
+      .select('amount, payment_mode')
       .eq('session_id', currentSession.id)
 
     const revenue = (orders || []).reduce((s, o) => s + Number(o.total), 0)
@@ -212,8 +212,9 @@ export default function SessionPage() {
       })
     )
     const totalExp = (expenses || []).reduce((s, e) => s + Number(e.amount), 0)
+    const cashExpenses = (expenses || []).filter(e => e.payment_mode !== 'ONLINE').reduce((s, e) => s + Number(e.amount), 0)
 
-    setSessionSummary({ revenue, orders: orders?.length || 0, byMode, expenses: totalExp })
+    setSessionSummary({ revenue, orders: orders?.length || 0, byMode, expenses: totalExp, cashExpenses })
     setClosingBalance('')
     setClosingNotes('')
     setCloseModal(true)
@@ -241,6 +242,7 @@ export default function SessionPage() {
           total_khata: sessionSummary?.byMode?.KHATA || 0,
           total_advance: sessionSummary?.byMode?.ADVANCE || 0,
           total_expenses: sessionSummary?.expenses || 0,
+          total_cash_expenses: sessionSummary?.cashExpenses || 0,
         })
         .eq('id', currentSession.id)
       if (sErr) throw sErr
@@ -428,8 +430,8 @@ export default function SessionPage() {
               {sessionSummary && (
                 <div className="p-3 bg-ink-50 dark:bg-ink-900/50 rounded-xl border border-ink-200 dark:border-ink-800 text-sm">
                   <div className="flex justify-between font-bold">
-                    <span className="text-ink-500">Expected cash (opening + cash sales - expenses):</span>
-                    <span className="text-ink-900 dark:text-white">₹{(Number(currentSession.opening_balance) + (sessionSummary.byMode?.CASH || 0) - sessionSummary.expenses).toLocaleString('en-IN')}</span>
+                    <span className="text-ink-500">Expected cash (opening + cash sales - cash expenses):</span>
+                    <span className="text-ink-900 dark:text-white">₹{(Number(currentSession.opening_balance) + (sessionSummary.byMode?.CASH || 0) - sessionSummary.cashExpenses).toLocaleString('en-IN')}</span>
                   </div>
                   <div className="flex justify-between font-bold mt-1">
                     <span className="text-ink-500">Actual count:</span>

@@ -64,6 +64,13 @@ export default function OrdersPage() {
   useEffect(() => { 
     fetchOrders()
     fetchAllItems()
+
+    const filter = branchId ? `branch_id=eq.${branchId}` : undefined
+    const ch = supabase.channel('orders_page')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter }, () => fetchOrders())
+      .subscribe()
+
+    return () => supabase.removeChannel(ch)
   }, [branchId])
 
   async function fetchAllItems() {

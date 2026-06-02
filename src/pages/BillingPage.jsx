@@ -303,6 +303,9 @@ export default function BillingPage() {
     const ch = supabase.channel('billing_items')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter }, () => fetchInventory())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'offers', filter }, () => fetchInventory())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'customers' }, (payload) => {
+        setCustomer(prev => (prev?.id === payload.new.id) ? { ...prev, ...payload.new } : prev)
+      })
       .subscribe()
 
     return () => supabase.removeChannel(ch)

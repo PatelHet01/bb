@@ -71,6 +71,10 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [permissions, setPermissions] = useState(null)
   const [staffPerms, setStaffPerms] = useState(null)
+  const [showProfileModal, setShowProfileModal] = useState(false)
+  const [profileUsername, setProfileUsername] = useState('')
+  const [profilePassword, setProfilePassword] = useState('')
+  const [profileLoading, setProfileLoading] = useState(false)
 
 
   useEffect(() => {
@@ -113,6 +117,38 @@ export default function DashboardLayout() {
     }
     logout()
     navigate('/admin', { replace: true })
+  }
+
+  async function handleProfileSave(e) {
+    e.preventDefault()
+    if (!profileUsername.trim()) return toast.error('Username cannot be empty')
+    if (profileUsername.length < 3) return toast.error('Username too short')
+    
+    setProfileLoading(true)
+    try {
+      const updates = { username: profileUsername.trim().toLowerCase() }
+      if (profilePassword.trim()) {
+        updates.password_hash = profilePassword.trim()
+      }
+      
+      const { error } = await supabase.from('users').update(updates).eq('id', user.id)
+      if (error) {
+        if (error.code === '23505') throw new Error('Username already taken')
+        throw error
+      }
+      
+      // Update local state
+      const { setAuth } = useAuthStore.getState()
+      setAuth({ username: updates.username, id: user.id }, role, branchId, branchName)
+      
+      toast.success('Profile updated successfully')
+      setShowProfileModal(false)
+      setProfilePassword('')
+    } catch (err) {
+      toast.error(err.message || 'Failed to update profile')
+    } finally {
+      setProfileLoading(false)
+    }
   }
 
   const renderNavGroups = () => {
@@ -201,6 +237,18 @@ export default function DashboardLayout() {
           </div>
         </div>
         <button
+          onClick={() => {
+            setProfileUsername(user?.username || '')
+            setProfilePassword('')
+            setShowProfileModal(true)
+            setSidebarOpen(false)
+          }}
+          className="nav-link w-full text-dash-text dark:text-dash-textDark hover:bg-dash-border dark:hover:bg-dash-borderDark"
+        >
+          <Settings size={15} />
+          Edit Profile
+        </button>
+        <button
           onClick={handleLogout}
           className="nav-link w-full text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 hover:text-red-600"
           id="btn-logout"
@@ -262,13 +310,55 @@ export default function DashboardLayout() {
         </header>
 
         {/* Page */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          <Outlet />
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-dash-bg dark:bg-dash-bgDark">
+          <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto min-h-full">
+            <Outlet />
+          </div>
         </main>
 
+        {/* Profile Modal */}
+        {showProfileModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+            <form onSubmit={handleProfileSave} className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-sm shadow-xl overflow-hidden animate-slide-up">
+              <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
+                <h3 className="font-bold text-zinc-900 dark:text-white">Edit Profile</h3>
+                <button type="button" onClick={() => setShowProfileModal(false)} className="text-zinc-400 hover:text-zinc-600">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="label">Username</label>
+                  <input 
+                    type="text" 
+                    className="input" 
+                    value={profileUsername} 
+                    onChange={e => setProfileUsername(e.target.value)} 
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">New Password</label>
+                  <input 
+                    type="password" 
+                    className="input" 
+                    placeholder="Leave blank to keep same"
+                    value={profilePassword} 
+                    onChange={e => setProfilePassword(e.target.value)} 
+                  />
+                </div>
+              </div>
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-950/50 flex justify-end gap-3 border-t border-zinc-100 dark:border-zinc-800">
+                <button type="button" onClick={() => setShowProfileModal(false)} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={profileLoading} className="btn-primary">
+                  {profileLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         <OrderNotificationOverlay />
-
-
       </div>
     </div>
   )

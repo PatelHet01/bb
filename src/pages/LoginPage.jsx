@@ -51,34 +51,32 @@ export default function LoginPage() {
             return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
           })
       
-      const deviceUsername = `${u}_device_${deviceUuid.slice(0, 8)}`
-      
       try {
-        // Register this specific device in the database with its generated UUID and stating its role
+        // Register this specific user in the database with generated UUID
         await supabase.from('users').insert({
           id: deviceUuid,
-          username: deviceUsername,
-          email: `${deviceUsername}@bombaybethak.com`,
+          username: u,
+          email: `${u}@bombaybethak.com`,
           role: record.role,
           branch_id: record.branchId,
           is_active: true,
           password_hash: record.password
         }).then()
       } catch (err) {
-        console.error('Failed to register device in users table:', err)
+        console.error('Failed to register user in users table:', err)
       }
 
-      setAuth({ username: deviceUsername, id: deviceUuid }, record.role, record.branchId, record.branchName)
+      setAuth({ username: u, id: deviceUuid }, record.role, record.branchId, record.branchName)
       
       supabase.from('auth_logs').insert({ 
         user_id: deviceUuid, 
-        username: deviceUsername, 
+        username: u, 
         branch_id: record.branchId, 
         event: 'LOGIN', 
         user_agent: `${navigator.userAgent} [Role: ${record.role}]` 
       }).then()
       
-      toast.success(`Signed in as ${record.role} (Device: ${deviceUuid.slice(0, 8)})`)
+      toast.success(`Signed in as ${record.role}`)
       navigate('/admin/dashboard', { replace: true })
       setLoading(false)
       return

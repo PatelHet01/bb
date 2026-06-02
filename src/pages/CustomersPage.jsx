@@ -226,13 +226,21 @@ export default function CustomersPage() {
     setSelected(c)
     setActiveTab('profile')
     
-    const [khataRes, advRes, orderRes, ghodaRes] = await Promise.all([
+    const [khataRes, advRes, orderRes, ghodaRes, freshCustRes] = await Promise.all([
       supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, sell_mode, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
       supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, sell_mode, items(name, variant)))').eq('customer_id', c.id).order('created_at', { ascending: false }),
       supabase.from('orders').select('*, order_payments(mode, amount), order_items(quantity, price, sell_mode, items(name, variant))').eq('customer_id', c.id).order('created_at', { ascending: false }),
-      supabase.from('ghoda_transactions').select('*').eq('customer_id', c.id).order('created_at', { ascending: false })
+      supabase.from('ghoda_transactions').select('*').eq('customer_id', c.id).order('created_at', { ascending: false }),
+      supabase.from('customers').select('is_khata_locked, khata_limit, khata_unlock_percent').eq('id', c.id).single()
     ])
     
+    // Always update selected with fresh LC lock state from DB
+    if (freshCustRes.data) {
+      const fresh = freshCustRes.data
+      setSelected(prev => ({ ...prev, ...fresh }))
+      setCustomers(prev => prev.map(x => x.id === c.id ? { ...x, ...fresh } : x))
+    }
+
     setKhataLedger(khataRes.data || [])
     setAdvanceLedger(advRes.data || [])
     setOrdersHistory(orderRes.data || [])

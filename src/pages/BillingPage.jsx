@@ -711,8 +711,31 @@ export default function BillingPage() {
        }
     }
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', orderId)
-    await supabase.from('khata_ledger').delete().eq('order_id', orderId)
-    await supabase.from('advance_ledger').delete().eq('order_id', orderId)
+
+    // Reverse KHATA / ADVANCE ledger (audit trail — adds reversal row, keeps history)
+    const { data: orderPmts } = await supabase.from('order_payments').select('mode, amount').eq('order_id', orderId)
+    const { data: orderMeta } = await supabase.from('orders').select('branch_id, customer_id, order_number, customers(id)').eq('id', orderId).single()
+    if (orderPmts && orderMeta?.customer_id) {
+      for (const p of orderPmts) {
+        const amt = Number(p.amount)
+        if (amt <= 0) continue
+        if (p.mode === 'KHATA') {
+          await supabase.from('khata_ledger').insert({
+            customer_id: orderMeta.customer_id, branch_id: orderMeta.branch_id, type: 'PAYMENT', amount: amt,
+            reason: `Order #${orderMeta.order_number || orderId.slice(0,8)} — Cancellation Reversal`,
+            order_id: orderId, recorded_by: user?.username || 'system'
+          })
+        }
+        if (p.mode === 'ADVANCE') {
+          await supabase.from('advance_ledger').insert({
+            customer_id: orderMeta.customer_id, branch_id: orderMeta.branch_id, type: 'TOPUP', amount: amt,
+            reason: `Order #${orderMeta.order_number || orderId.slice(0,8)} — Cancellation Reversal`,
+            order_id: orderId, recorded_by: user?.username || 'system'
+          })
+        }
+      }
+    }
+
     toast.success('Order cancelled & stock restored')
     fetchRecentOrders()
   }
@@ -1249,6 +1272,14 @@ export default function BillingPage() {
       const wasEditing = editingOrderId
       setEditingOrderId(null)
       setOrderDate(new Date().toISOString().split('T')[0])
+
+      // Re-fetch customer lock state if a KHATA payment was made
+      const hadKhata = finalPayments.some(p => p.mode === 'KHATA')
+      if (hadKhata && customer?.id) {
+        const { data: freshCust } = await supabase.from('customers').select('is_khata_locked, khata_limit, khata_unlock_percent').eq('id', customer.id).single()
+        if (freshCust) setCustomer(prev => ({ ...prev, ...freshCust }))
+      }
+
       toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
     } catch (e) {
       toast.error('Failed: ' + e.message)

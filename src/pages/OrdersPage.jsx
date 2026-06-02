@@ -108,6 +108,36 @@ export default function OrdersPage() {
       }
     }
     await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
+
+    // Reverse any KHATA / ADVANCE ledger entries for this order (audit trail — adds reversal row)
+    const payments = order.order_payments || []
+    for (const p of payments) {
+      const amt = Number(p.amount)
+      if (amt <= 0) continue
+      if (p.mode === 'KHATA' && order.customers?.id) {
+        await supabase.from('khata_ledger').insert({
+          customer_id: order.customers.id,
+          branch_id: order.branch_id,
+          type: 'PAYMENT',
+          amount: amt,
+          reason: `Order #${order.order_number || order.id.slice(0,8)} — Cancellation Reversal`,
+          order_id: order.id,
+          recorded_by: 'system'
+        })
+      }
+      if (p.mode === 'ADVANCE' && order.customers?.id) {
+        await supabase.from('advance_ledger').insert({
+          customer_id: order.customers.id,
+          branch_id: order.branch_id,
+          type: 'TOPUP',
+          amount: amt,
+          reason: `Order #${order.order_number || order.id.slice(0,8)} — Cancellation Reversal`,
+          order_id: order.id,
+          recorded_by: 'system'
+        })
+      }
+    }
+
     // Optimistic update
     setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'cancelled' } : o))
     toast.success('Order cancelled & stock restored')
@@ -230,7 +260,7 @@ export default function OrdersPage() {
         customer_id: finalCustomerId
       }).eq('id', editingOrder.id)
       
-      // Update payments: clear old payments and insert single new payment mode
+      // Clear old payments
       await supabase.from('order_payments').delete().eq('order_id', editingOrder.id)
       if (editingOrder.newPaymentMode) {
         await supabase.from('order_payments').insert({
@@ -238,6 +268,65 @@ export default function OrdersPage() {
            mode: editingOrder.newPaymentMode,
            amount: newTotal
         })
+      }
+
+      // Reconcile khata / advance ledger when payment mode changes
+      const oldPayments = editingOrder.order_payments || []
+      const oldHadKhata = oldPayments.some(p => p.mode === 'KHATA')
+      const oldHadAdvance = oldPayments.some(p => p.mode === 'ADVANCE')
+      const newIsKhata = editingOrder.newPaymentMode === 'KHATA'
+      const newIsAdvance = editingOrder.newPaymentMode === 'ADVANCE'
+      const custId = finalCustomerId || editingOrder.customers?.id
+
+      if (custId) {
+        // Remove old KHATA entry if payment mode changed away from KHATA
+        if (oldHadKhata && !newIsKhata) {
+          // Add reversal
+          const oldKhataAmt = oldPayments.filter(p => p.mode === 'KHATA').reduce((s, p) => s + Number(p.amount), 0)
+          await supabase.from('khata_ledger').insert({
+            customer_id: custId, branch_id: editingOrder.branch_id, type: 'PAYMENT', amount: oldKhataAmt,
+            reason: `Order #${editingOrder.order_number || editingOrder.id.slice(0,8)} — Payment Mode Changed`,
+            order_id: editingOrder.id, recorded_by: 'system'
+          })
+        }
+        // Add new KHATA entry if mode changed to KHATA
+        if (newIsKhata && !oldHadKhata) {
+          await supabase.from('khata_ledger').insert({
+            customer_id: custId, branch_id: editingOrder.branch_id, type: 'CREDIT', amount: newTotal,
+            reason: `Order #${editingOrder.order_number || editingOrder.id.slice(0,8)}`,
+            order_id: editingOrder.id, recorded_by: 'system'
+          })
+        }
+        // Update amount if still KHATA but total changed
+        if (oldHadKhata && newIsKhata) {
+          const oldAmt = oldPayments.filter(p => p.mode === 'KHATA').reduce((s, p) => s + Number(p.amount), 0)
+          if (Math.abs(oldAmt - newTotal) > 0.01) {
+            // Reverse old, insert new
+            await supabase.from('khata_ledger').insert([
+              { customer_id: custId, branch_id: editingOrder.branch_id, type: 'PAYMENT', amount: oldAmt,
+                reason: `Order #${editingOrder.order_number} — Amount Correction (old)`, order_id: editingOrder.id, recorded_by: 'system' },
+              { customer_id: custId, branch_id: editingOrder.branch_id, type: 'CREDIT', amount: newTotal,
+                reason: `Order #${editingOrder.order_number} — Amount Correction (new)`, order_id: editingOrder.id, recorded_by: 'system' }
+            ])
+          }
+        }
+        // Reverse ADVANCE if mode changed away
+        if (oldHadAdvance && !newIsAdvance) {
+          const oldAdvAmt = oldPayments.filter(p => p.mode === 'ADVANCE').reduce((s, p) => s + Number(p.amount), 0)
+          await supabase.from('advance_ledger').insert({
+            customer_id: custId, branch_id: editingOrder.branch_id, type: 'TOPUP', amount: oldAdvAmt,
+            reason: `Order #${editingOrder.order_number || editingOrder.id.slice(0,8)} — Payment Mode Changed`,
+            order_id: editingOrder.id, recorded_by: 'system'
+          })
+        }
+        // Add ADVANCE entry if mode changed to ADVANCE
+        if (newIsAdvance && !oldHadAdvance) {
+          await supabase.from('advance_ledger').insert({
+            customer_id: custId, branch_id: editingOrder.branch_id, type: 'DEDUCTION', amount: newTotal,
+            reason: `Order #${editingOrder.order_number || editingOrder.id.slice(0,8)}`,
+            order_id: editingOrder.id, recorded_by: 'system'
+          })
+        }
       }
 
       // Handle Items & Stock

@@ -55,6 +55,12 @@ CREATE TABLE customers (
   branch_id TEXT REFERENCES branches(id), -- Origin branch
   ghoda_coins INT DEFAULT 0,
   registration_type TEXT DEFAULT 'admin', -- 'self', 'admin'
+  password_hash TEXT,
+  is_temp_password BOOLEAN DEFAULT false,
+  avatar_url TEXT,
+  khata_limit NUMERIC(10,2) DEFAULT NULL,       -- NULL = unlimited
+  khata_unlock_percent NUMERIC(5,2) DEFAULT 30.00, -- % of limit to repay before unlocking
+  is_khata_locked BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

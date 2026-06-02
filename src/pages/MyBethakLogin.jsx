@@ -16,13 +16,16 @@ const STYLES = {
 }
 
 export default function MyBethakLogin() {
-  const [step, setStep] = useState('mobile') // mobile → otp → done
+  const [step, setStep] = useState('mobile') // mobile | signup_form | enter_password | create_password | reset_temp_password
   const [mobile, setMobile] = useState('')
-  const [otp, setOtp] = useState('')
-  const [generatedOtp, setGeneratedOtp] = useState('')
   const [loading, setLoading] = useState(false)
-  const [mode, setMode] = useState('login') // login | signup
-  const [signupForm, setSignupForm] = useState({ name: '', username: '', dob: '' })
+  const [signupForm, setSignupForm] = useState({ name: '', username: '', dob: '', password: '' })
+  const [tempCustomer, setTempCustomer] = useState(null)
+  
+  // Password inputs for verification/creation steps
+  const [passwordInput, setPasswordInput] = useState('')
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('')
+  
   const { setCustomer } = useCustomerStore()
   const navigate = useNavigate()
 
@@ -33,15 +36,24 @@ export default function MyBethakLogin() {
     try {
       const { data: existing } = await supabase.from('customers').select('*').eq('mobile_number', mobile).single()
       if (existing) {
-        setCustomer(existing)
-        toast.success(`Welcome back, ${existing.name}!`)
-        navigate('/my-bethak/dashboard')
+        setTempCustomer(existing)
+        setPasswordInput('')
+        setConfirmPasswordInput('')
+        if (!existing.password_hash) {
+          // Legacy user without a password
+          setStep('create_password')
+        } else {
+          // User with a password
+          setStep('enter_password')
+        }
       } else {
-        setMode('signup')
+        setSignupForm({ name: '', username: '', dob: '', password: '' })
         setStep('signup_form')
       }
-    } catch (e) {
-      toast.error('Something went wrong')
+    } catch (err) {
+      // If single() fails because no record is found, Supabase returns error. That's fine, go to signup
+      setSignupForm({ name: '', username: '', dob: '', password: '' })
+      setStep('signup_form')
     } finally {
       setLoading(false)
     }
@@ -49,14 +61,30 @@ export default function MyBethakLogin() {
 
   async function handleSignupSubmit(e) {
     e.preventDefault()
+    if (!signupForm.name || !signupForm.username || !signupForm.dob || !signupForm.password) { 
+      toast.error('Fill all fields')
+      return 
+    }
+    if (signupForm.password.length < 4) {
+      toast.error('Password must be at least 4 characters long')
+      return
+    }
     setLoading(true)
     try {
-      if (!signupForm.name || !signupForm.username || !signupForm.dob) { toast.error('Fill all fields'); return }
+      // Check if username is already taken
+      const { data: existingUser } = await supabase.from('customers').select('id').eq('username', signupForm.username.toLowerCase()).maybeSingle()
+      if (existingUser) {
+        toast.error('Username is already taken')
+        return
+      }
+
       const { data: newCust, error } = await supabase.from('customers').insert({
         name: signupForm.name,
         username: signupForm.username.toLowerCase(),
         mobile_number: mobile,
         dob: signupForm.dob,
+        password_hash: signupForm.password,
+        is_temp_password: false,
         ghoda_coins: 0,
         branch_id: null,
         registration_type: 'self'
@@ -65,8 +93,113 @@ export default function MyBethakLogin() {
       setCustomer(newCust)
       toast.success('Welcome to Bombay Bethak!')
       navigate('/my-bethak/dashboard')
-    } catch (e) {
-      toast.error(e.message)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleCreatePasswordSubmit(e) {
+    e.preventDefault()
+    if (passwordInput.length < 4) {
+      toast.error('Password must be at least 4 characters long')
+      return
+    }
+    if (passwordInput !== confirmPasswordInput) {
+      toast.error('Passwords do not match')
+      return
+    }
+    setLoading(true)
+    try {
+      const { data: updatedCust, error } = await supabase.from('customers')
+        .update({
+          password_hash: passwordInput,
+          is_temp_password: false
+        })
+        .eq('id', tempCustomer.id)
+        .select()
+        .single()
+      
+      if (error) throw error
+      setCustomer(updatedCust)
+      toast.success(`Password set! Welcome, ${updatedCust.name}!`)
+      navigate('/my-bethak/dashboard')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleEnterPasswordSubmit(e) {
+    e.preventDefault()
+    if (!passwordInput) {
+      toast.error('Please enter your password')
+      return
+    }
+    setLoading(true)
+    try {
+      // Re-fetch the customer to get the latest password_hash and is_temp_password
+      const { data: freshCust, error } = await supabase.from('customers').select('*').eq('id', tempCustomer.id).single()
+      if (error || !freshCust) {
+        toast.error('Failed to authenticate. User not found.')
+        return
+      }
+
+      if (freshCust.password_hash !== passwordInput) {
+        toast.error('Incorrect password')
+        return
+      }
+
+      if (freshCust.is_temp_password) {
+        setTempCustomer(freshCust) // update with fresh data
+        setPasswordInput('')
+        setConfirmPasswordInput('')
+        setStep('reset_temp_password')
+      } else {
+        setCustomer(freshCust)
+        toast.success(`Welcome back, ${freshCust.name}!`)
+        navigate('/my-bethak/dashboard')
+      }
+    } catch (err) {
+      toast.error('Something went wrong')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleResetTempPasswordSubmit(e) {
+    e.preventDefault()
+    if (passwordInput.length < 4) {
+      toast.error('Password must be at least 4 characters long')
+      return
+    }
+    if (passwordInput !== confirmPasswordInput) {
+      toast.error('Passwords do not match')
+      return
+    }
+    if (passwordInput === tempCustomer.password_hash) {
+      toast.error('New password cannot be the same as the temporary password')
+      return
+    }
+    setLoading(true)
+    try {
+      const { data: updatedCust, error } = await supabase.from('customers')
+        .update({
+          password_hash: passwordInput,
+          is_temp_password: false
+        })
+        .eq('id', tempCustomer.id)
+        .select()
+        .single()
+      
+      if (error) throw error
+      setCustomer(updatedCust)
+      toast.success('Password updated! Welcome back.')
+      navigate('/my-bethak/dashboard')
+    } catch (err) {
+      toast.error(err.message)
     } finally {
       setLoading(false)
     }
@@ -130,11 +263,127 @@ export default function MyBethakLogin() {
                       />
                     </div>
                   ))}
+                  <div key="password">
+                    <label style={STYLES.label}>Password</label>
+                    <input
+                      style={{ ...STYLES.input, fontSize: '0.9rem' }}
+                      type="password" placeholder="••••••••" value={signupForm.password}
+                      required minLength={4}
+                      onChange={e => setSignupForm(p => ({ ...p, password: e.target.value }))}
+                      onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
+                      onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                    />
+                  </div>
                 </div>
               </div>
 
               <button type="submit" style={{ ...STYLES.btn, marginTop: '1.5rem' }} disabled={loading}>
                 {loading ? 'Creating...' : 'Join Bombay Bethak'}
+              </button>
+            </form>
+          </motion.div>
+        )}
+
+        {step === 'enter_password' && (
+          <motion.div key="enter_password" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={STYLES.card}>
+            <button onClick={() => { setStep('mobile'); setPasswordInput(''); }} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1.5rem', fontSize: '0.8rem', padding: 0 }}>
+              <ArrowLeft size={14} /> Back
+            </button>
+            <p style={{ fontFamily: 'Georgia, serif', fontSize: '1.4rem', color: 'white', marginBottom: '0.5rem', fontWeight: 700 }}>Enter Password</p>
+            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.35)', marginBottom: '2rem' }}>Hello {tempCustomer?.name}, please enter your password.</p>
+            
+            <form onSubmit={handleEnterPasswordSubmit}>
+              <label style={STYLES.label}>Password</label>
+              <input
+                style={STYLES.input}
+                type="password" value={passwordInput} required
+                onChange={e => setPasswordInput(e.target.value)}
+                placeholder="••••••••"
+                onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
+                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                autoFocus
+              />
+              <button type="submit" style={{ ...STYLES.btn, marginTop: '1.5rem' }} disabled={loading}>
+                {loading ? 'Verifying...' : <><span>Login</span><ArrowRight size={16} /></>}
+              </button>
+            </form>
+          </motion.div>
+        )}
+
+        {step === 'create_password' && (
+          <motion.div key="create_password" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={STYLES.card}>
+            <button onClick={() => { setStep('mobile'); setPasswordInput(''); setConfirmPasswordInput(''); }} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1.5rem', fontSize: '0.8rem', padding: 0 }}>
+              <ArrowLeft size={14} /> Back
+            </button>
+            <p style={{ fontFamily: 'Georgia, serif', fontSize: '1.4rem', color: 'white', marginBottom: '0.5rem', fontWeight: 700 }}>Create Password</p>
+            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.35)', marginBottom: '2rem' }}>For privacy, please set a password for your account.</p>
+            
+            <form onSubmit={handleCreatePasswordSubmit}>
+              <div style={{ display: 'grid', gap: '1rem' }}>
+                <div>
+                  <label style={STYLES.label}>New Password</label>
+                  <input
+                    style={STYLES.input}
+                    type="password" value={passwordInput} required
+                    onChange={e => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label style={STYLES.label}>Confirm Password</label>
+                  <input
+                    style={STYLES.input}
+                    type="password" value={confirmPasswordInput} required
+                    onChange={e => setConfirmPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                  />
+                </div>
+              </div>
+              <button type="submit" style={{ ...STYLES.btn, marginTop: '1.5rem' }} disabled={loading}>
+                {loading ? 'Saving...' : 'Set Password & Login'}
+              </button>
+            </form>
+          </motion.div>
+        )}
+
+        {step === 'reset_temp_password' && (
+          <motion.div key="reset_temp_password" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} style={STYLES.card}>
+            <p style={{ fontFamily: 'Georgia, serif', fontSize: '1.4rem', color: 'white', marginBottom: '0.5rem', fontWeight: 700 }}>Reset Password</p>
+            <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.35)', marginBottom: '2rem' }}>You are logged in with a temporary password. You must set a new permanent password.</p>
+            
+            <form onSubmit={handleResetTempPasswordSubmit}>
+              <div style={{ display: 'grid', gap: '1rem' }}>
+                <div>
+                  <label style={STYLES.label}>New Password</label>
+                  <input
+                    style={STYLES.input}
+                    type="password" value={passwordInput} required
+                    onChange={e => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label style={STYLES.label}>Confirm New Password</label>
+                  <input
+                    style={STYLES.input}
+                    type="password" value={confirmPasswordInput} required
+                    onChange={e => setConfirmPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    onFocus={e => e.target.style.borderColor = 'rgba(255,255,255,0.6)'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.15)'}
+                  />
+                </div>
+              </div>
+              <button type="submit" style={{ ...STYLES.btn, marginTop: '1.5rem' }} disabled={loading}>
+                {loading ? 'Updating...' : 'Update Password & Enter'}
               </button>
             </form>
           </motion.div>

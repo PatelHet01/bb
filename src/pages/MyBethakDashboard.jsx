@@ -3,8 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useCustomerStore } from '../store/customerStore'
 import { motion } from 'framer-motion'
-import { LogOut, ArrowUpCircle, ArrowDownCircle, Gamepad2 } from 'lucide-react'
+import { LogOut, ArrowUpCircle, ArrowDownCircle, Gamepad2, Key } from 'lucide-react'
 import { getLedgerEntryStyle } from '../utils/ledger'
+import toast from 'react-hot-toast'
 
 const S = {
   page: { background: '#000', minHeight: '100vh', fontFamily: 'Inter, sans-serif', color: 'white' },
@@ -15,6 +16,65 @@ const S = {
   tab: (active) => ({
     padding: '0.75rem 1.25rem', fontSize: '0.75rem', letterSpacing: '0.15em', textTransform: 'uppercase', fontWeight: 700, cursor: 'pointer', border: 'none', background: 'none', color: active ? 'white' : 'rgba(255,255,255,0.3)', borderBottom: active ? '2px solid white' : '2px solid transparent', transition: 'all 0.2s',
   }),
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0,0,0,0.85)',
+    backdropFilter: 'blur(4px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    padding: '1rem'
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: '400px',
+    background: '#0a0a0a',
+    border: '1px solid rgba(255,255,255,0.1)',
+    padding: '2.5rem',
+    position: 'relative'
+  },
+  input: {
+    width: '100%',
+    background: 'transparent',
+    border: '1px solid rgba(255,255,255,0.15)',
+    color: 'white',
+    padding: '0.85rem 1rem',
+    fontSize: '1rem',
+    outline: 'none',
+    boxSizing: 'border-box',
+    marginBottom: '1rem'
+  },
+  btn: {
+    width: '100%',
+    background: 'white',
+    color: 'black',
+    border: 'none',
+    padding: '1rem',
+    fontWeight: 900,
+    fontSize: '0.8rem',
+    letterSpacing: '0.25em',
+    textTransform: 'uppercase',
+    cursor: 'pointer',
+    marginTop: '0.5rem'
+  },
+  btnSecondary: {
+    width: '100%',
+    background: 'transparent',
+    color: 'white',
+    border: '1px solid rgba(255,255,255,0.15)',
+    padding: '1rem',
+    fontWeight: 900,
+    fontSize: '0.8rem',
+    letterSpacing: '0.25em',
+    textTransform: 'uppercase',
+    cursor: 'pointer',
+    marginTop: '0.5rem'
+  }
 }
 
 export default function MyBethakDashboard() {
@@ -26,6 +86,13 @@ export default function MyBethakDashboard() {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+
+  // Password reset state
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
 
   useEffect(() => {
     if (!customer) { navigate('/my-bethak'); return }
@@ -80,6 +147,50 @@ export default function MyBethakDashboard() {
     }
   }
 
+  async function handleChangePassword(e) {
+    e.preventDefault()
+    if (newPassword.length < 4) {
+      toast.error('New password must be at least 4 characters long')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('New passwords do not match')
+      return
+    }
+    setPasswordLoading(true)
+    try {
+      const { data: freshCust, error: fetchErr } = await supabase.from('customers').select('password_hash').eq('id', customer.id).single()
+      if (fetchErr || !freshCust) {
+        toast.error('Customer not found')
+        return
+      }
+
+      if (freshCust.password_hash && freshCust.password_hash !== currentPassword) {
+        toast.error('Incorrect current password')
+        return
+      }
+
+      const { error: updateErr } = await supabase.from('customers').update({
+        password_hash: newPassword,
+        is_temp_password: false
+      }).eq('id', customer.id)
+
+      if (updateErr) throw updateErr
+
+      toast.success('Password changed successfully!')
+      setShowPasswordModal(false)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      
+      useCustomerStore.getState().setCustomer({ ...customer, password_hash: newPassword, is_temp_password: false })
+    } catch (err) {
+      toast.error('Failed to change password: ' + err.message)
+    } finally {
+      setPasswordLoading(false)
+    }
+  }
+
   const rawKhata = khataLedger.reduce((s, l) => l.type === 'CREDIT' ? s + Number(l.amount) : s - Number(l.amount), 0)
   const rawAdv = advLedger.reduce((s, l) => l.type === 'TOPUP' ? s + Number(l.amount) : s - Number(l.amount), 0)
   
@@ -103,6 +214,9 @@ export default function MyBethakDashboard() {
           <Link to="/games" style={{ fontSize: '0.7rem', letterSpacing: '0.2em', color: 'rgba(255,255,255,0.5)', textDecoration: 'none', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <Gamepad2 size={14} /> Games
           </Link>
+          <button onClick={() => { setConfirmPassword(''); setNewPassword(''); setCurrentPassword(''); setShowPasswordModal(true); }} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '0.4rem 0.8rem', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <Key size={12} /> Security
+          </button>
           <button onClick={() => { logout(); navigate('/my-bethak') }} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '0.4rem 0.8rem', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
             <LogOut size={12} /> Sign out
           </button>
@@ -147,6 +261,57 @@ export default function MyBethakDashboard() {
             </motion.div>
           ))}
         </div>
+
+        {/* Credit Limit Status */}
+        {customer?.khata_limit != null && (() => {
+          const limit = Number(customer.khata_limit)
+          const unlockPct = Number(customer.khata_unlock_percent || 30)
+          const unlockThr = limit * (1 - unlockPct / 100)
+          const locked = customer.is_khata_locked
+          const usedPct = limit > 0 ? Math.min(100, (finalKhata / limit) * 100) : 0
+          return (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+              style={{
+                ...S.card,
+                marginBottom: '1.5rem',
+                border: locked ? '1px solid rgba(239,68,68,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                background: locked ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.06)'
+              }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <p style={{ ...S.label }}>Credit Limit (Khata)</p>
+                <span style={{
+                  fontSize: '0.6rem', fontWeight: 800, padding: '2px 8px', borderRadius: 99, letterSpacing: '0.05em',
+                  background: locked ? '#ef4444' : '#22c55e', color: 'white', textTransform: 'uppercase'
+                }}>{locked ? '🔒 LOCKED' : '🔓 Active'}</span>
+              </div>
+              {/* Progress bar */}
+              <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 99, height: 8, marginBottom: '0.75rem', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 99, transition: 'width 0.6s ease',
+                  width: `${usedPct}%`,
+                  background: locked ? '#ef4444' : usedPct > 80 ? '#f59e0b' : '#22c55e'
+                }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                {[
+                  { l: 'Limit', v: `₹${limit.toLocaleString('en-IN')}` },
+                  { l: 'Outstanding', v: `₹${finalKhata.toLocaleString('en-IN')}`, c: finalKhata > 0 ? '#ef4444' : '#22c55e' },
+                  { l: 'Unlock at ≤', v: `₹${unlockThr.toLocaleString('en-IN')}` }
+                ].map(({ l, v, c }) => (
+                  <div key={l}>
+                    <p style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.35)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 2 }}>{l}</p>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 900, color: c || 'white' }}>{v}</p>
+                  </div>
+                ))}
+              </div>
+              {locked && (
+                <p style={{ fontSize: '0.65rem', color: '#fca5a5', marginTop: '0.75rem', lineHeight: 1.5 }}>
+                  ⚠️ Your khata credit is paused. Pay down to ₹{unlockThr.toLocaleString('en-IN')} to resume credit ordering.
+                </p>
+              )}
+            </motion.div>
+          )
+        })()}
 
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: '1.5rem' }}>
@@ -207,6 +372,58 @@ export default function MyBethakDashboard() {
       <div style={{ textAlign: 'center', padding: '2rem', fontSize: '0.65rem', color: 'rgba(255,255,255,0.15)' }}>
         ⚠️ Tobacco causes cancer. Smoking is injurious to health.
       </div>
+
+      {showPasswordModal && (
+        <div style={S.modalOverlay}>
+          <div style={S.modalContent}>
+            <p style={{ fontFamily: 'Georgia, serif', fontSize: '1.4rem', color: 'white', marginBottom: '0.5rem', fontWeight: 700 }}>Change Password</p>
+            <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', marginBottom: '1.5rem' }}>Update your security credentials for My Bethak.</p>
+            
+            <form onSubmit={handleChangePassword}>
+              {customer.password_hash && (
+                <div>
+                  <label style={S.label}>Current Password</label>
+                  <input 
+                    style={S.input} 
+                    type="password" required 
+                    value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} 
+                    placeholder="••••••••"
+                  />
+                </div>
+              )}
+              
+              <div>
+                <label style={S.label}>New Password</label>
+                <input 
+                  style={S.input} 
+                  type="password" required 
+                  value={newPassword} onChange={e => setNewPassword(e.target.value)} 
+                  placeholder="••••••••"
+                />
+              </div>
+
+              <div>
+                <label style={S.label}>Confirm New Password</label>
+                <input 
+                  style={S.input} 
+                  type="password" required 
+                  value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} 
+                  placeholder="••••••••"
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+                <button type="submit" style={S.btn} disabled={passwordLoading}>
+                  {passwordLoading ? 'Updating...' : 'Save Password'}
+                </button>
+                <button type="button" style={S.btnSecondary} onClick={() => { setShowPasswordModal(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

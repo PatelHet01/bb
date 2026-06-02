@@ -9,9 +9,19 @@ const NOTES = [2000, 500, 200, 100, 50, 20, 10]
 const COINS = [20, 10, 5, 2, 1]
 const ALL_DENOMS = [...NOTES, ...COINS]
 
+export function normalizeDenoms(denoms) {
+  if (!denoms) return {}
+  const res = {}
+  Object.keys(denoms).forEach(k => {
+    const cleanKey = k.replace(/^(note|coin)_/, '')
+    res[cleanKey] = parseInt(denoms[k]) || 0
+  })
+  return res
+}
+
 function DenomForm({ value, onChange }) {
-  const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(value[`note_${d}`] || 0)), 0)
-  const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(value[`coin_${d}`] || 0)), 0)
+  const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(value[d] || 0)), 0)
+  const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(value[d] || 0)), 0)
   const total = totalNotes + totalCoins
 
   return (
@@ -26,12 +36,12 @@ function DenomForm({ value, onChange }) {
               <input
                 type="number" min="0"
                 className="input w-20 text-center font-bold py-1.5"
-                value={value[`note_${d}`] || ''}
-                onChange={e => onChange({ ...value, [`note_${d}`]: parseInt(e.target.value) || 0 })}
+                value={value[d] || ''}
+                onChange={e => onChange({ ...value, [d]: parseInt(e.target.value) || 0 })}
                 placeholder="0"
               />
               <span className="text-xs text-ink-500 w-16 text-right">
-                = ₹{(d * (parseInt(value[`note_${d}`] || 0))).toLocaleString('en-IN')}
+                = ₹{(d * (parseInt(value[d] || 0))).toLocaleString('en-IN')}
               </span>
             </div>
           ))}
@@ -45,12 +55,12 @@ function DenomForm({ value, onChange }) {
               <input
                 type="number" min="0"
                 className="input w-20 text-center font-bold py-1.5"
-                value={value[`coin_${d}`] || ''}
-                onChange={e => onChange({ ...value, [`coin_${d}`]: parseInt(e.target.value) || 0 })}
+                value={value[d] || ''}
+                onChange={e => onChange({ ...value, [d]: parseInt(e.target.value) || 0 })}
                 placeholder="0"
               />
               <span className="text-xs text-ink-500 w-16 text-right">
-                = ₹{(d * (parseInt(value[`coin_${d}`] || 0))).toLocaleString('en-IN')}
+                = ₹{(d * (parseInt(value[d] || 0))).toLocaleString('en-IN')}
               </span>
             </div>
           ))}
@@ -93,15 +103,15 @@ export default function SessionPage() {
 
   // Sync denomination totals to numeric inputs
   useEffect(() => {
-    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(openingDenoms[`note_${d}`] || 0)), 0)
-    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(openingDenoms[`coin_${d}`] || 0)), 0)
+    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
+    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
     const total = totalNotes + totalCoins
     if (total > 0) setOpeningBalance(String(total))
   }, [openingDenoms])
 
   useEffect(() => {
-    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(closingDenoms[`note_${d}`] || 0)), 0)
-    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(closingDenoms[`coin_${d}`] || 0)), 0)
+    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
+    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
     const total = totalNotes + totalCoins
     if (total > 0) setClosingBalance(String(total))
   }, [closingDenoms])
@@ -140,9 +150,11 @@ export default function SessionPage() {
       .maybeSingle()
     if (lastClose) {
       setOpeningBalance(String(lastClose.total_amount || 0))
+      setOpeningDenoms(normalizeDenoms(lastClose.denominations))
       setLastClosingInfo({ amount: lastClose.total_amount, date: lastClose.created_at })
     } else {
       setOpeningBalance('')
+      setOpeningDenoms({})
       setLastClosingInfo(null)
     }
     setOpeningNotes('')
@@ -216,6 +228,7 @@ export default function SessionPage() {
 
     setSessionSummary({ revenue, orders: orders?.length || 0, byMode, expenses: totalExp, cashExpenses })
     setClosingBalance('')
+    setClosingDenoms({})
     setClosingNotes('')
     setCloseModal(true)
   }
@@ -225,27 +238,42 @@ export default function SessionPage() {
     setSubmitting(true)
     const branch = branchId || 'gurukul'
     try {
-      const { error: sErr } = await supabase
+      const payload = {
+        status: 'closed',
+        closing_balance: closingTotal,
+        closing_cash_breakdown: closingDenoms,
+        closed_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
+        end_time: new Date().toISOString(),
+        notes: closingNotes,
+        total_revenue: sessionSummary?.revenue || 0,
+        total_orders: sessionSummary?.orders || 0,
+        total_cash: sessionSummary?.byMode?.CASH || 0,
+        total_upi: sessionSummary?.byMode?.UPI || 0,
+        total_card: (sessionSummary?.byMode?.CREDIT_CARD || 0) + (sessionSummary?.byMode?.DEBIT_CARD || 0),
+        total_khata: sessionSummary?.byMode?.KHATA || 0,
+        total_advance: sessionSummary?.byMode?.ADVANCE || 0,
+        total_expenses: sessionSummary?.expenses || 0,
+        total_cash_expenses: sessionSummary?.cashExpenses || 0,
+      }
+
+      let { error: sErr } = await supabase
         .from('business_sessions')
-        .update({
-          status: 'closed',
-          closing_balance: closingTotal,
-          closing_cash_breakdown: closingDenoms,
-          closed_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null,
-          end_time: new Date().toISOString(),
-          notes: closingNotes,
-          total_revenue: sessionSummary?.revenue || 0,
-          total_orders: sessionSummary?.orders || 0,
-          total_cash: sessionSummary?.byMode?.CASH || 0,
-          total_upi: sessionSummary?.byMode?.UPI || 0,
-          total_card: (sessionSummary?.byMode?.CREDIT_CARD || 0) + (sessionSummary?.byMode?.DEBIT_CARD || 0),
-          total_khata: sessionSummary?.byMode?.KHATA || 0,
-          total_advance: sessionSummary?.byMode?.ADVANCE || 0,
-          total_expenses: sessionSummary?.expenses || 0,
-          total_cash_expenses: sessionSummary?.cashExpenses || 0,
-        })
+        .update(payload)
         .eq('id', currentSession.id)
-      if (sErr) throw sErr
+
+      if (sErr) {
+        // If column total_cash_expenses doesn't exist, retry without it
+        if (sErr.message?.includes('total_cash_expenses') || sErr.code === 'PGRST204' || sErr.code === '42703') {
+          delete payload.total_cash_expenses
+          const { error: retryErr } = await supabase
+            .from('business_sessions')
+            .update(payload)
+            .eq('id', currentSession.id)
+          if (retryErr) throw retryErr
+        } else {
+          throw sErr
+        }
+      }
 
       await supabase.from('cash_sessions').insert({
         business_session_id: currentSession.id,

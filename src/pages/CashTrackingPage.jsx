@@ -9,6 +9,16 @@ const NOTES = [2000, 500, 200, 100, 50, 20, 10]
 const COINS = [20, 10, 5, 2, 1]
 const ALL_DENOMS = [...NOTES, ...COINS]
 
+function normalizeDenoms(denoms) {
+  if (!denoms) return {}
+  const res = {}
+  Object.keys(denoms).forEach(k => {
+    const cleanKey = k.replace(/^(note|coin)_/, '')
+    res[cleanKey] = parseInt(denoms[k]) || 0
+  })
+  return res
+}
+
 export default function CashTrackingPage() {
   const { user, branchId } = useAuthStore()
   const { currentSession } = useSessionStore()
@@ -146,7 +156,7 @@ export default function CashTrackingPage() {
           <span>📊 Yesterday's closing carry-forward: ₹{Number(yesterdayClosing.total_amount).toLocaleString('en-IN')}</span>
           <button 
             onClick={() => {
-              setDenominations(yesterdayClosing.denominations || {})
+              setDenominations(normalizeDenoms(yesterdayClosing.denominations))
               setAmount(yesterdayClosing.total_amount.toString())
               toast.success('Carry-forward cash pre-filled!')
             }}

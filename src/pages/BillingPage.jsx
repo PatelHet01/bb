@@ -220,7 +220,10 @@ export default function BillingPage() {
   useEffect(() => {
     async function loadActiveSession() {
       const branch = branchId || selectedBranch
-      if (!branch) return
+      if (!branch) {
+        setCurrentSessionId(null)
+        return
+      }
       const { data } = await supabase
         .from('business_sessions')
         .select('id')
@@ -229,7 +232,11 @@ export default function BillingPage() {
         .order('start_time', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (data) setCurrentSessionId(data.id)
+      if (data) {
+        setCurrentSessionId(data.id)
+      } else {
+        setCurrentSessionId(null)
+      }
     }
     loadActiveSession()
   }, [branchId, selectedBranch])
@@ -1031,6 +1038,13 @@ export default function BillingPage() {
       toast.error(`Advance exceeds balance (₹${custBalances.advance})`); return
     }
 
+    // Khata credit limit guard — block if locked and any payment is KHATA
+    const hasKhataPayment = finalPayments.some(p => p.mode === 'KHATA')
+    if (hasKhataPayment && customer?.is_khata_locked) {
+      toast.error(`🔒 ${customer.name}'s khata limit is reached. They must repay to unlock before adding more on credit.`)
+      return
+    }
+
     setLoading(true)
     try {
       const target_branch = branchId || selectedBranch
@@ -1553,9 +1567,12 @@ export default function BillingPage() {
                     <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer.name[0]}</div>
                     <div>
                       <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
-                      <div className="flex gap-2 text-[9px] font-bold mt-1">
+                      <div className="flex gap-2 text-[9px] font-bold mt-1 flex-wrap">
                         {custBalances.khata > 0 && <span className="text-red-500">Levana: ₹{custBalances.khata}</span>}
                         {custBalances.advance > 0 && <span className="text-emerald-500">Adv: ₹{custBalances.advance}</span>}
+                        {customer.is_khata_locked && (
+                          <span className="text-white bg-red-500 px-1.5 py-0.5 rounded animate-pulse">🔒 KHATA LOCKED</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1912,7 +1929,14 @@ export default function BillingPage() {
                   <select className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 text-xs font-bold p-2.5 rounded-lg w-24 focus:ring-1 focus:ring-ember outline-none appearance-none" value={p.mode} onChange={e => updatePayment(i, 'mode', e.target.value)}>
                     <option value="CASH">Cash</option>
                     <option value="ONLINE">Online</option>
-                    {customer && <option value="KHATA">Khata</option>}
+                    {customer && (
+                      <option
+                        value="KHATA"
+                        disabled={!!customer.is_khata_locked}
+                      >
+                        {customer.is_khata_locked ? '🔒 Khata (Locked)' : 'Khata'}
+                      </option>
+                    )}
                     {customer && custBalances.advance > 0 && <option value="ADVANCE">Advance</option>}
                   </select>
                   {p.mode === 'ONLINE' && (

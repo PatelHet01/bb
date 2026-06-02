@@ -32,7 +32,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ username: '', name: '', mobile_number: '', dob: '', branch_id: branchId || 'gurukul' })
+  const [form, setForm] = useState({ username: '', name: '', mobile_number: '', dob: '', branch_id: branchId || 'gurukul', khata_limit: '', khata_unlock_percent: '30' })
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -48,6 +48,8 @@ export default function CustomersPage() {
   const [showKhataModal, setShowKhataModal] = useState(false)
   const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '' })
   const [editingLedgerEntry, setEditingLedgerEntry] = useState(null)
+  const [showTempPasswordModal, setShowTempPasswordModal] = useState(false)
+  const [tempPassword, setTempPassword] = useState('')
 
   const isAdmin = role === 'admin' || role === 'super_admin'
 
@@ -157,7 +159,9 @@ export default function CustomersPage() {
             mobile_number: form.mobile_number,
             dob: form.dob,
             branch_id: form.branch_id,
-            username: form.username.toLowerCase()
+            username: form.username.toLowerCase(),
+            khata_limit: form.khata_limit !== '' ? parseFloat(form.khata_limit) : null,
+            khata_unlock_percent: form.khata_unlock_percent !== '' ? parseFloat(form.khata_unlock_percent) : 30
           })
           .eq('id', editingId)
           .select().single()
@@ -175,7 +179,9 @@ export default function CustomersPage() {
           dob: form.dob,
           branch_id: form.branch_id,
           ghoda_coins: 0,
-          registration_type: 'admin'
+          registration_type: 'admin',
+          khata_limit: form.khata_limit !== '' ? parseFloat(form.khata_limit) : null,
+          khata_unlock_percent: form.khata_unlock_percent !== '' ? parseFloat(form.khata_unlock_percent) : 30
         }).select().single()
         
         if (error) throw error
@@ -183,7 +189,7 @@ export default function CustomersPage() {
         setCustomers(prev => [{ ...data, khataBalance: 0, advanceBalance: 0, totalPurchases: 0, lastVisit: null }, ...prev].sort((a,b) => a.name.localeCompare(b.name)))
       }
       
-      setForm({ username: '', name: '', mobile_number: '', dob: '', branch_id: branchId || 'gurukul' })
+      setForm({ username: '', name: '', mobile_number: '', dob: '', branch_id: branchId || 'gurukul', khata_limit: '', khata_unlock_percent: '30' })
       setShowForm(false)
       setEditingId(null)
     } catch (e) {
@@ -200,7 +206,9 @@ export default function CustomersPage() {
       mobile_number: c.mobile_number, 
       dob: c.dob || '', 
       username: c.username, 
-      branch_id: c.branch_id || 'gurukul' 
+      branch_id: c.branch_id || 'gurukul',
+      khata_limit: c.khata_limit != null ? String(c.khata_limit) : '',
+      khata_unlock_percent: c.khata_unlock_percent != null ? String(c.khata_unlock_percent) : '30'
     })
     setEditingId(c.id)
     setShowForm(true)
@@ -242,6 +250,10 @@ export default function CustomersPage() {
     e.preventDefault()
     const X = parseFloat(txForm.amount)
     if (!X || X <= 0) { toast.error('Enter valid amount'); return }
+    if (selected?.is_khata_locked) {
+      toast.error('Customer khata is LOCKED — they must repay to below the unlock threshold before adding more khata credit.')
+      return
+    }
     setSaving(true)
     try {
       await supabase.from('khata_ledger').insert({
@@ -377,6 +389,31 @@ export default function CustomersPage() {
     } catch (err) { toast.error(err.message) }
   }
 
+  async function handleSetTempPassword(e) {
+    e.preventDefault()
+    if (!tempPassword || tempPassword.length < 4) {
+      toast.error('Password must be at least 4 characters long')
+      return
+    }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('customers').update({
+        password_hash: tempPassword,
+        is_temp_password: true
+      }).eq('id', selected.id)
+      
+      if (error) throw error
+      toast.success('Temporary password set successfully!')
+      setShowTempPasswordModal(false)
+      setTempPassword('')
+      setSelected(prev => ({ ...prev, password_hash: tempPassword, is_temp_password: true }))
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const filtered = customers.filter(c =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
     (c.username || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -495,6 +532,19 @@ export default function CustomersPage() {
                   </select>
                 </div>
               )}
+              <div className="sm:col-span-2 border-t border-ink-100 dark:border-ink-800 pt-3 mt-1">
+                <p className="text-[10px] font-bold text-ink-400 uppercase mb-2">Line of Credit Settings</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Khata Limit (₹) <span className="normal-case font-normal text-ink-400">— blank = unlimited</span></label>
+                    <input className="input" type="number" min="0" step="1" value={form.khata_limit} onChange={e => setForm(p => ({ ...p, khata_limit: e.target.value }))} placeholder="e.g. 10000" />
+                  </div>
+                  <div>
+                    <label className="label">Unlock % <span className="normal-case font-normal text-ink-400">— pay this % to reopen</span></label>
+                    <input className="input" type="number" min="1" max="100" step="1" value={form.khata_unlock_percent} onChange={e => setForm(p => ({ ...p, khata_unlock_percent: e.target.value }))} placeholder="30" />
+                  </div>
+                </div>
+              </div>
               <div className="sm:col-span-2 flex justify-end gap-2 mt-2">
                 <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setEditingId(null); }}>Cancel</button>
                 <button type="submit" className="btn-primary px-6" disabled={saving}>{saving ? 'Saving…' : (editingId ? 'Update' : 'Create')}</button>
@@ -623,6 +673,77 @@ export default function CustomersPage() {
                     <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Branch</span> <span className="font-semibold">{selected.branch_id || 'Global'}</span></div>
                     <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Reg Date</span> <span className="font-semibold">{new Date(selected.created_at).toLocaleDateString()}</span></div>
                     <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Reg Type</span> <span className="font-semibold capitalize">{selected.registration_type || 'Admin'}</span></div>
+                  </div>
+                </div>
+
+                {/* ── Line of Credit Panel ── */}
+                {(() => {
+                  const limit = selected.khata_limit != null ? Number(selected.khata_limit) : null
+                  const unlockPct = Number(selected.khata_unlock_percent || 30)
+                  const unlockThr = limit != null ? limit * (1 - unlockPct / 100) : null
+                  const locked = selected.is_khata_locked
+                  return (
+                    <div className={`p-5 rounded-xl border space-y-3 ${
+                      locked
+                        ? 'bg-red-50 dark:bg-red-900/10 border-red-300 dark:border-red-800'
+                        : 'bg-white dark:bg-ink-900 border-ink-200 dark:border-ink-800'
+                    }`}>
+                      <div className="flex items-center justify-between border-b border-ink-100 dark:border-ink-800 pb-2">
+                        <h3 className="font-black text-sm uppercase text-ink-900 dark:text-white">Line of Credit</h3>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${
+                          limit == null
+                            ? 'bg-ink-100 dark:bg-ink-800 text-ink-500'
+                            : locked
+                              ? 'bg-red-500 text-white animate-pulse'
+                              : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                        }`}>
+                          {limit == null ? 'Unlimited' : locked ? '🔒 LOCKED' : '🔓 Active'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-y-2.5 text-sm">
+                        <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Credit Limit</span><span className="font-black text-base">{limit != null ? `₹${limit.toLocaleString('en-IN')}` : 'Unlimited'}</span></div>
+                        <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Outstanding</span><span className={`font-black text-base ${displayKhata > 0 ? 'text-red-500' : 'text-emerald-500'}`}>₹{displayKhata.toLocaleString('en-IN')}</span></div>
+                        {limit != null && <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Unlock At (≤)</span><span className="font-semibold">₹{unlockThr.toLocaleString('en-IN')} ({unlockPct}% repaid)</span></div>}
+                        {limit != null && displayKhata > 0 && <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Remaining Room</span><span className={`font-semibold ${!locked && limit - displayKhata < limit * 0.1 ? 'text-amber-500' : ''}`}>{locked ? '—' : `₹${Math.max(0, limit - displayKhata).toLocaleString('en-IN')}`}</span></div>}
+                      </div>
+                      {locked && (
+                        <p className="text-[10px] text-red-600 dark:text-red-400 font-semibold bg-red-100 dark:bg-red-900/20 px-3 py-2 rounded-lg">
+                          ⚠️ Customer has exceeded their credit limit of ₹{limit?.toLocaleString('en-IN')}. They must reduce outstanding khata to ₹{unlockThr?.toLocaleString('en-IN')} ({unlockPct}% of limit) before new khata orders are allowed.
+                        </p>
+                      )}
+                      <button
+                        onClick={(e) => startEdit(selected, e)}
+                        className="w-full py-2 text-xs font-bold text-ember border border-ember/30 hover:bg-ember/5 rounded-lg transition-colors"
+                      >
+                        Edit Limit Settings
+                      </button>
+                    </div>
+                  )
+                })()}
+
+                <div className="bg-white dark:bg-ink-900 p-5 rounded-xl border border-ink-200 dark:border-ink-800 space-y-3">
+                  <h3 className="font-black text-sm uppercase text-ink-900 dark:text-white border-b border-ink-100 dark:border-ink-800 pb-2">Security</h3>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-ink-700 dark:text-ink-300">
+                        {selected.password_hash ? (
+                          selected.is_temp_password ? (
+                            <span className="text-amber-500 font-bold">Temporary Password Active</span>
+                          ) : (
+                            <span className="text-emerald-500 font-bold">Password Protected</span>
+                          )
+                        ) : (
+                          <span className="text-red-500 font-bold">No Password Set</span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-ink-400 mt-0.5">Set a temporary password to assist customer login.</p>
+                    </div>
+                    <button 
+                      onClick={() => { setTempPassword(''); setShowTempPasswordModal(true); }}
+                      className="px-3 py-1.5 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-lg shadow-sm transition-colors shrink-0"
+                    >
+                      Set Temp Password
+                    </button>
                   </div>
                 </div>
 
@@ -936,6 +1057,14 @@ export default function CustomersPage() {
             </div>
           </>
         )}
+      </Modal>
+
+      <Modal title={`Set Temp Password for ${selected?.name}`} show={showTempPasswordModal} onClose={() => setShowTempPasswordModal(false)} onSubmit={handleSetTempPassword} saving={saving}>
+        <div>
+          <label className="label">Temporary Password *</label>
+          <input className="input w-full font-black text-lg" type="text" required value={tempPassword} onChange={e => setTempPassword(e.target.value)} placeholder="e.g. Temp123" autoFocus />
+          <p className="text-[10px] text-ink-400 mt-2">The customer will be forced to change this password on their next login.</p>
+        </div>
       </Modal>
 
     </div>

@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import OrderNotificationOverlay from './OrderNotificationOverlay'
 import BBLogo from './BBLogo'
+import toast from 'react-hot-toast'
 
 
 const NAV_GROUPS = [
@@ -73,6 +74,22 @@ export default function DashboardLayout() {
 
 
   useEffect(() => {
+    // Check if the logged in user actually exists in DB
+    async function verifyUser() {
+      if (!user?.id) return
+      const { data, error } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+      
+      if (!error && !data) {
+        toast.error('Session expired or database reset. Please log in again.')
+        handleLogout()
+      }
+    }
+    verifyUser()
+
     // Fetch feature permissions
     async function getPerms() {
       const { data } = await supabase.from('system_settings').select('*').eq('key', 'role_permissions').single()
@@ -82,7 +99,7 @@ export default function DashboardLayout() {
       if (staffData) setStaffPerms(staffData.value)
     }
     getPerms()
-  }, [])
+  }, [user])
 
   function handleLogout() {
     if (user) {

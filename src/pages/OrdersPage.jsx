@@ -25,6 +25,7 @@ export default function OrdersPage() {
   const [sortBy, setSortBy] = useState('Newest')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [timeFilter, setTimeFilter] = useState('Today')
   const [cancellingId, setCancellingId] = useState(null)
   const [editingOrder, setEditingOrder] = useState(null)
   const [allItems, setAllItems] = useState([])
@@ -89,7 +90,8 @@ export default function OrdersPage() {
         branch_id,
         customers(id, name, mobile_number),
         order_items(id, item_id, quantity, price, total, sell_mode, items(name, variant, units_per_box, pack_price)),
-        order_payments(id, mode, amount)
+        order_payments(id, mode, amount),
+        users!user_id(username, full_name)
       `)
       .order('created_at', { ascending: false })
     if (branchId) q = q.eq('branch_id', branchId)
@@ -420,12 +422,53 @@ export default function OrdersPage() {
     URL.revokeObjectURL(a.href)
   }
 
+  const computedDateRange = useMemo(() => {
+    const now = new Date()
+    let from = ''
+    let to = ''
+
+    if (timeFilter === 'Today') {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      from = today.toISOString()
+    } else if (timeFilter === 'Yesterday') {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      yesterday.setHours(0, 0, 0, 0)
+      from = yesterday.toISOString()
+
+      const endYesterday = new Date()
+      endYesterday.setDate(endYesterday.getDate() - 1)
+      endYesterday.setHours(23, 59, 59, 999)
+      to = endYesterday.toISOString()
+    } else if (timeFilter === '7d') {
+      const past7 = new Date()
+      past7.setDate(past7.getDate() - 7)
+      past7.setHours(0, 0, 0, 0)
+      from = past7.toISOString()
+    } else if (timeFilter === 'this_month') {
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      from = firstOfMonth.toISOString()
+    } else if (timeFilter === 'Custom') {
+      if (dateFrom) {
+        const parsed = new Date(dateFrom)
+        if (!isNaN(parsed.getTime())) from = parsed.toISOString()
+      }
+      if (dateTo) {
+        const parsed = new Date(dateTo)
+        if (!isNaN(parsed.getTime())) to = parsed.toISOString()
+      }
+    }
+    return { from, to }
+  }, [timeFilter, dateFrom, dateTo])
+
   const filteredOrders = useMemo(() => {
     let result = [...orders]
     
-    // Date filter
-    if (dateFrom) result = result.filter(o => o.created_at >= dateFrom)
-    if (dateTo) result = result.filter(o => o.created_at <= dateTo + 'T23:59:59')
+    // Time/Date filter
+    const { from, to } = computedDateRange
+    if (from) result = result.filter(o => o.created_at >= from)
+    if (to) result = result.filter(o => o.created_at <= to)
     
     // Payment/Status filter
     if (payFilter === 'Cancelled') {
@@ -468,7 +511,7 @@ export default function OrdersPage() {
     else if (sortBy === 'Lowest Amount') mapped.sort((a, b) => a.activeAmount - b.activeAmount)
     
     return mapped
-  }, [orders, search, payFilter, sortBy, dateFrom, dateTo])
+  }, [orders, search, payFilter, sortBy, computedDateRange])
 
   // Revenue = only non-cancelled orders active sum
   const totalRevenue = useMemo(() =>
@@ -510,12 +553,32 @@ export default function OrdersPage() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        {/* Date range */}
-        <div className="flex gap-2 items-center">
-          <input type="date" className="input text-xs" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          <span className="text-ink-400 text-sm">to</span>
-          <input type="date" className="input text-xs" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        </div>
+        {/* Time filter */}
+        <select className="input text-sm w-44" value={timeFilter} onChange={e => setTimeFilter(e.target.value)}>
+          <option value="Today">Today</option>
+          <option value="Yesterday">Yesterday</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="this_month">This Month</option>
+          <option value="All">All Time</option>
+          <option value="Custom">Custom Range</option>
+        </select>
+
+        {/* Custom date range with clock UI */}
+        {timeFilter === 'Custom' && (
+          <div className="flex gap-2 items-center animate-fade-in bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 rounded-xl px-3 py-2">
+            <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest flex items-center gap-1 pr-2 border-r border-ink-100 dark:border-ink-700">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              From
+            </span>
+            <input type="datetime-local" className="bg-transparent text-xs font-bold text-ink-900 dark:text-white focus:outline-none" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <span className="text-ink-300 text-sm font-bold px-1">→</span>
+            <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest flex items-center gap-1 pr-2 border-r border-ink-100 dark:border-ink-700">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              To
+            </span>
+            <input type="datetime-local" className="bg-transparent text-xs font-bold text-ink-900 dark:text-white focus:outline-none" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </div>
+        )}
         {/* Sort */}
         <select className="input text-sm w-40" value={sortBy} onChange={e => setSortBy(e.target.value)}>
           {SORT_OPTIONS.map(s => <option key={s}>{s}</option>)}
@@ -542,7 +605,7 @@ export default function OrdersPage() {
           <table className="w-full text-sm">
             <thead className="bg-ink-50 dark:bg-ink-800/50 border-b border-ink-100 dark:border-ink-800">
               <tr>
-                {['Order ID', 'Date / Time', 'Branch', 'Customer', 'Items', 'Total', 'Payment', 'Status', 'Actions'].map(h => (
+                {['Order ID', 'Date / Time', 'Branch', 'Customer', 'Taken By', 'Items', 'Total', 'Payment', 'Status', 'Actions'].map(h => (
                   <th key={h} className="tbl-head">{h}</th>
                 ))}
               </tr>
@@ -588,6 +651,30 @@ export default function OrdersPage() {
                         <div className="text-[10px] text-ink-400 font-mono">{order.customers.mobile_number}</div>
                       )}
                       {order.table_number && <div className="text-[10px] text-ink-400">T-{order.table_number}</div>}
+                    </td>
+                    {/* Taken By */}
+                    <td className="tbl-cell">
+                      <div className="flex items-center gap-1.5">
+                        {order.users ? (
+                          <>
+                            <div className="w-5 h-5 rounded-full bg-ember/20 flex items-center justify-center flex-shrink-0">
+                              <span className="text-[8px] font-black text-ember uppercase">
+                                {(order.users.full_name || order.users.username)?.[0]}
+                              </span>
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-ink-800 dark:text-ink-200 truncate max-w-[80px]">
+                                {order.users.full_name || order.users.username}
+                              </div>
+                              {order.users.full_name && (
+                                <div className="text-[9px] text-ink-400">@{order.users.username}</div>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-[10px] italic text-ink-400">—</span>
+                        )}
+                      </div>
                     </td>
                     {/* Items */}
                     <td className="tbl-cell max-w-[150px]">

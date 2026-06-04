@@ -73,6 +73,7 @@ export default function DashboardLayout() {
   const [staffPerms, setStaffPerms] = useState(null)
   const [showProfileModal, setShowProfileModal] = useState(false)
   const [profileUsername, setProfileUsername] = useState('')
+  const [profileFullName, setProfileFullName] = useState('')
   const [profilePassword, setProfilePassword] = useState('')
   const [profileLoading, setProfileLoading] = useState(false)
 
@@ -126,20 +127,25 @@ export default function DashboardLayout() {
     
     setProfileLoading(true)
     try {
-      const updates = { username: profileUsername.trim().toLowerCase() }
+      const updates = {
+        username: profileUsername.trim().toLowerCase(),
+        full_name: profileFullName.trim() || null,
+      }
       if (profilePassword.trim()) {
         updates.password_hash = profilePassword.trim()
       }
       
-      const { error } = await supabase.from('users').update(updates).eq('id', user.id)
-      if (error) {
-        if (error.code === '23505') throw new Error('Username already taken')
-        throw error
+      if (isRealUser(user?.id)) {
+        const { error } = await supabase.from('users').update(updates).eq('id', user.id)
+        if (error) {
+          if (error.code === '23505') throw new Error('Username already taken')
+          throw error
+        }
       }
-      
+
       // Update local state
       const { setAuth } = useAuthStore.getState()
-      setAuth({ username: updates.username, id: user.id }, role, branchId, branchName)
+      setAuth({ username: updates.username, id: user.id, name: updates.full_name }, role, branchId, branchName)
       
       toast.success('Profile updated successfully')
       setShowProfileModal(false)
@@ -149,6 +155,26 @@ export default function DashboardLayout() {
     } finally {
       setProfileLoading(false)
     }
+  }
+
+  const isRealUser = (id) => {
+    if (!id || typeof id !== 'string') return false
+    if (id.startsWith('hardcoded')) return false
+    // UUID v4 pattern
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  }
+
+  async function openProfileModal() {
+    if (isRealUser(user?.id)) {
+      const { data } = await supabase.from('users').select('full_name').eq('id', user.id).maybeSingle()
+      setProfileFullName(data?.full_name || '')
+    } else {
+      setProfileFullName('')
+    }
+    setProfileUsername(user?.username || '')
+    setProfilePassword('')
+    setShowProfileModal(true)
+    setSidebarOpen(false)
   }
 
   const renderNavGroups = () => {
@@ -228,21 +254,19 @@ export default function DashboardLayout() {
       {/* User footer */}
       <div className="px-3 pb-4 pt-3 border-t border-dash-border dark:border-dash-borderDark space-y-1">
         <div className="flex items-center gap-2.5 px-3 py-2">
-          <div className="w-7 h-7 rounded-full bg-dash-primary dark:bg-white flex items-center justify-center flex-shrink-0">
-            <span className="text-white dark:text-dash-primary font-bold text-xs uppercase">{user?.username?.[0]}</span>
+          <div className="w-8 h-8 rounded-full bg-dash-primary dark:bg-white flex items-center justify-center flex-shrink-0">
+            <span className="text-white dark:text-dash-primary font-bold text-xs uppercase">
+              {(user?.name || user?.username)?.[0]}
+            </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-dash-text dark:text-dash-textDark truncate capitalize">{user?.username}</p>
+            <p className="text-xs font-bold text-dash-text dark:text-dash-textDark truncate">{user?.name || user?.username}</p>
+            {user?.name && <p className="text-[9px] text-ink-400 truncate">@{user?.username}</p>}
             <span className="badge-default text-[9px]">{ROLE_LABEL[role] || role}</span>
           </div>
         </div>
         <button
-          onClick={() => {
-            setProfileUsername(user?.username || '')
-            setProfilePassword('')
-            setShowProfileModal(true)
-            setSidebarOpen(false)
-          }}
+          onClick={openProfileModal}
           className="nav-link w-full text-dash-text dark:text-dash-textDark hover:bg-dash-border dark:hover:bg-dash-borderDark"
         >
           <Settings size={15} />
@@ -327,6 +351,26 @@ export default function DashboardLayout() {
                 </button>
               </div>
               <div className="p-5 space-y-4">
+                {/* Avatar preview */}
+                <div className="flex items-center gap-3 pb-2">
+                  <div className="w-12 h-12 rounded-full bg-ember flex items-center justify-center text-white font-black text-lg uppercase">
+                    {(profileFullName || profileUsername)?.[0] || '?'}
+                  </div>
+                  <div>
+                    <p className="font-bold text-zinc-900 dark:text-white">{profileFullName || profileUsername || 'No name set'}</p>
+                    <p className="text-xs text-zinc-400">{ROLE_LABEL[role] || role} · {branchName}</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Full Name</label>
+                  <input 
+                    type="text" 
+                    className="input" 
+                    placeholder="Your display name"
+                    value={profileFullName} 
+                    onChange={e => setProfileFullName(e.target.value)} 
+                  />
+                </div>
                 <div>
                   <label className="label">Username</label>
                   <input 

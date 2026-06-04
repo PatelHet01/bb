@@ -13,15 +13,28 @@ export function normalizeDenoms(denoms) {
   if (!denoms) return {}
   const res = {}
   Object.keys(denoms).forEach(k => {
-    const cleanKey = k.replace(/^(note|coin)_/, '')
-    res[cleanKey] = parseInt(denoms[k]) || 0
+    if (k.startsWith('note_') || k.startsWith('coin_')) {
+      res[k] = parseInt(denoms[k]) || 0
+    } else {
+      const val = parseInt(k)
+      if (!isNaN(val)) {
+        if (val >= 50) {
+          res[`note_${val}`] = parseInt(denoms[k]) || 0
+        } else if (val <= 5) {
+          res[`coin_${val}`] = parseInt(denoms[k]) || 0
+        } else {
+          // 10 and 20 notes/coins default to notes
+          res[`note_${val}`] = parseInt(denoms[k]) || 0
+        }
+      }
+    }
   })
   return res
 }
 
 function DenomForm({ value, onChange }) {
-  const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(value[d] || 0)), 0)
-  const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(value[d] || 0)), 0)
+  const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(value[`note_${d}`] || 0)), 0)
+  const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(value[`coin_${d}`] || 0)), 0)
   const total = totalNotes + totalCoins
 
   return (
@@ -36,12 +49,12 @@ function DenomForm({ value, onChange }) {
               <input
                 type="number" min="0"
                 className="input w-20 text-center font-bold py-1.5"
-                value={value[d] || ''}
-                onChange={e => onChange({ ...value, [d]: parseInt(e.target.value) || 0 })}
+                value={value[`note_${d}`] || ''}
+                onChange={e => onChange({ ...value, [`note_${d}`]: parseInt(e.target.value) || 0 })}
                 placeholder="0"
               />
               <span className="text-xs text-ink-500 w-16 text-right">
-                = ₹{(d * (parseInt(value[d] || 0))).toLocaleString('en-IN')}
+                = ₹{(d * (parseInt(value[`note_${d}`] || 0))).toLocaleString('en-IN')}
               </span>
             </div>
           ))}
@@ -55,12 +68,12 @@ function DenomForm({ value, onChange }) {
               <input
                 type="number" min="0"
                 className="input w-20 text-center font-bold py-1.5"
-                value={value[d] || ''}
-                onChange={e => onChange({ ...value, [d]: parseInt(e.target.value) || 0 })}
+                value={value[`coin_${d}`] || ''}
+                onChange={e => onChange({ ...value, [`coin_${d}`]: parseInt(e.target.value) || 0 })}
                 placeholder="0"
               />
               <span className="text-xs text-ink-500 w-16 text-right">
-                = ₹{(d * (parseInt(value[d] || 0))).toLocaleString('en-IN')}
+                = ₹{(d * (parseInt(value[`coin_${d}`] || 0))).toLocaleString('en-IN')}
               </span>
             </div>
           ))}
@@ -103,15 +116,15 @@ export default function SessionPage() {
 
   // Sync denomination totals to numeric inputs
   useEffect(() => {
-    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
-    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(openingDenoms[d] || 0)), 0)
+    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(openingDenoms[`note_${d}`] || 0)), 0)
+    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(openingDenoms[`coin_${d}`] || 0)), 0)
     const total = totalNotes + totalCoins
     if (total > 0) setOpeningBalance(String(total))
   }, [openingDenoms])
 
   useEffect(() => {
-    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
-    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(closingDenoms[d] || 0)), 0)
+    const totalNotes = NOTES.reduce((s, d) => s + d * (parseInt(closingDenoms[`note_${d}`] || 0)), 0)
+    const totalCoins = COINS.reduce((s, d) => s + d * (parseInt(closingDenoms[`coin_${d}`] || 0)), 0)
     const total = totalNotes + totalCoins
     if (total > 0) setClosingBalance(String(total))
   }, [closingDenoms])

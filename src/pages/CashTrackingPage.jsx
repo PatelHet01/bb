@@ -13,8 +13,20 @@ function normalizeDenoms(denoms) {
   if (!denoms) return {}
   const res = {}
   Object.keys(denoms).forEach(k => {
-    const cleanKey = k.replace(/^(note|coin)_/, '')
-    res[cleanKey] = parseInt(denoms[k]) || 0
+    if (k.startsWith('note_') || k.startsWith('coin_')) {
+      res[k] = parseInt(denoms[k]) || 0
+    } else {
+      const val = parseInt(k)
+      if (!isNaN(val)) {
+        if (val >= 50) {
+          res[`note_${val}`] = parseInt(denoms[k]) || 0
+        } else if (val <= 5) {
+          res[`coin_${val}`] = parseInt(denoms[k]) || 0
+        } else {
+          res[`note_${val}`] = parseInt(denoms[k]) || 0
+        }
+      }
+    }
   })
   return res
 }
@@ -24,9 +36,12 @@ export default function CashTrackingPage() {
   const { currentSession } = useSessionStore()
 
   const [activeTab, setActiveTab] = useState('addition') // 'addition' | 'withdrawal' | 'closing'
-  const [denominations, setDenominations] = useState(
-    ALL_DENOMS.reduce((acc, d) => ({ ...acc, [d]: 0 }), {})
-  )
+  const [denominations, setDenominations] = useState(() => {
+    const res = {}
+    NOTES.forEach(d => { res[`note_${d}`] = 0 })
+    COINS.forEach(d => { res[`coin_${d}`] = 0 })
+    return res
+  })
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
   const [category, setCategory] = useState('General')
@@ -35,7 +50,8 @@ export default function CashTrackingPage() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [yesterdayClosing, setYesterdayClosing] = useState(null)
 
-  const calculatedTotal = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(denominations[d] || 0)), 0)
+  const calculatedTotal = NOTES.reduce((s, d) => s + d * (parseInt(denominations[`note_${d}`] || 0)), 0) +
+                          COINS.reduce((s, d) => s + d * (parseInt(denominations[`coin_${d}`] || 0)), 0)
 
   useEffect(() => {
     fetchHistory()
@@ -122,7 +138,12 @@ export default function CashTrackingPage() {
       // Reset form
       setAmount('')
       setReason('')
-      setDenominations(ALL_DENOMS.reduce((acc, d) => ({ ...acc, [d]: 0 }), {}))
+      setDenominations(() => {
+        const res = {}
+        NOTES.forEach(d => { res[`note_${d}`] = 0 })
+        COINS.forEach(d => { res[`coin_${d}`] = 0 })
+        return res
+      })
       
       fetchHistory()
     } catch (err) {
@@ -137,7 +158,8 @@ export default function CashTrackingPage() {
     const newDenoms = { ...denominations, [denom]: intVal }
     setDenominations(newDenoms)
     if (activeTab !== 'closing') {
-      const total = ALL_DENOMS.reduce((s, d) => s + d * (parseInt(newDenoms[d] || 0)), 0)
+      const total = NOTES.reduce((s, d) => s + d * (parseInt(newDenoms[`note_${d}`] || 0)), 0) +
+                    COINS.reduce((s, d) => s + d * (parseInt(newDenoms[`coin_${d}`] || 0)), 0)
       setAmount(total.toString())
     }
   }
@@ -180,7 +202,12 @@ export default function CashTrackingPage() {
                 key={tab.id}
                 onClick={() => {
                   setActiveTab(tab.id)
-                  setDenominations(ALL_DENOMS.reduce((acc, d) => ({ ...acc, [d]: 0 }), {}))
+                  setDenominations(() => {
+                    const res = {}
+                    NOTES.forEach(d => { res[`note_${d}`] = 0 })
+                    COINS.forEach(d => { res[`coin_${d}`] = 0 })
+                    return res
+                  })
                   setAmount('')
                 }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold rounded-lg transition-all ${
@@ -253,8 +280,8 @@ export default function CashTrackingPage() {
                         type="number"
                         min="0"
                         className="input py-1 text-center font-bold text-xs w-16"
-                        value={denominations[d] || ''}
-                        onChange={e => handleDenomChange(d, e.target.value)}
+                        value={denominations[`note_${d}`] || ''}
+                        onChange={e => handleDenomChange(`note_${d}`, e.target.value)}
                         placeholder="0"
                       />
                     </div>
@@ -269,8 +296,8 @@ export default function CashTrackingPage() {
                         type="number"
                         min="0"
                         className="input py-1 text-center font-bold text-xs w-16"
-                        value={denominations[d] || ''}
-                        onChange={e => handleDenomChange(d, e.target.value)}
+                        value={denominations[`coin_${d}`] || ''}
+                        onChange={e => handleDenomChange(`coin_${d}`, e.target.value)}
                         placeholder="0"
                       />
                     </div>

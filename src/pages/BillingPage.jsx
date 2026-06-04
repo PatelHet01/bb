@@ -1280,7 +1280,7 @@ export default function BillingPage() {
       const hadKhata = finalPayments.some(p => p.mode === 'KHATA')
       if (hadKhata && customer?.id) {
         const { data: freshCust } = await supabase.from('customers').select('is_khata_locked, khata_limit, khata_unlock_percent').eq('id', customer.id).single()
-        if (freshCust) setCustomer(prev => ({ ...prev, ...freshCust }))
+        if (freshCust) setCustomer(prev => prev ? { ...prev, ...freshCust } : null)
       }
 
       toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
@@ -1598,7 +1598,7 @@ export default function BillingPage() {
               ) : (
                 <div className="flex-1 flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
                   <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer.name[0]}</div>
+                    <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer?.name?.[0] || ''}</div>
                     <div>
                       <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
                       <div className="flex gap-2 text-[9px] font-bold mt-1 flex-wrap">

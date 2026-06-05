@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
 
 import { playBell } from '../utils/bell'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff, SlidersHorizontal } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff, SlidersHorizontal, Mic } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -80,6 +80,196 @@ export default function BillingPage() {
 
   // Search & New Customer
   const [itemSearch, setItemSearch] = useState('')
+  const [isListening, setIsListening] = useState(false)
+
+  const toggleVoiceSearch = () => {
+    if (isListening) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Voice typing is not supported in this browser.');
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-IN'; // Use Indian English to get Latin characters for regional words
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setItemSearch(''); // Clear previous search on new mic click
+      toast('Listening...', { icon: '🎙️', duration: 2000, id: 'voice-toast' });
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      const rawText = transcript.toLowerCase().replace(/[.]/g, '').trim();
+      
+      const phrases = rawText.split(/\s+(?:and|aur|ane|plus)\s+|,/);
+
+      const qtyMap = {
+        'ek': 1, 'one': 1, '1': 1, 'a': 1, 'an': 1,
+        'be': 2, 'do': 2, 'two': 2, '2': 2,
+        'tran': 3, 'teen': 3, 'three': 3, '3': 3,
+        'char': 4, 'four': 4, '4': 4,
+        'panch': 5, 'five': 5, '5': 5,
+        'chha': 6, 'che': 6, 'six': 6, '6': 6,
+        'saat': 7, 'seven': 7, '7': 7,
+        'aath': 8, 'eight': 8, '8': 8,
+        'nav': 9, 'nine': 9, '9': 9,
+        'das': 10, 'ten': 10, '10': 10,
+      };
+
+      const packWords = ['box', 'pack', 'packet', 'dabba', 'boxes', 'packs', 'packets'];
+      
+      let addedCount = 0;
+      let missingNames = [];
+      let successDetails = [];
+
+      for (let phrase of phrases) {
+        phrase = phrase.trim();
+        if (!phrase) continue;
+
+        const words = phrase.split(/\s+/);
+        let qty = 1;
+        let rawItemNameWords = [];
+
+        if (words.length > 1) {
+          if (qtyMap[words[0]]) {
+            qty = qtyMap[words[0]];
+            rawItemNameWords = words.slice(1);
+          } else if (qtyMap[words[words.length - 1]]) {
+            qty = qtyMap[words[words.length - 1]];
+            rawItemNameWords = words.slice(0, -1);
+          } else {
+            rawItemNameWords = words;
+          }
+        } else {
+          rawItemNameWords = words;
+        }
+
+        let isPackMode = false;
+        const itemNameWords = [];
+        
+        for (const w of rawItemNameWords) {
+          if (packWords.includes(w)) {
+            isPackMode = true;
+          } else {
+            itemNameWords.push(w);
+          }
+        }
+
+        const itemName = itemNameWords.join(' ');
+        if (!itemName) continue;
+
+        // Massive Synonym Dictionary for Indian FMCG & Fast Food
+        const synonyms = {
+          'chij': 'cheese', 'cheez': 'cheese', 'chees': 'cheese',
+          'chhaas': 'chaas', 'chhas': 'chaas', 'chhachh': 'chaas', 'buttermilk': 'chaas',
+          'maggifg': 'maggi', 'mggi': 'maggi', 'megi': 'maggi', 'magi': 'maggi',
+          'ful': 'full', 'haf': 'half',
+          'maska': 'butter', 'masaka': 'butter',
+          'botle': 'botel', 'bottle': 'botel', 'pani': 'water', 'watter': 'water',
+          'dew': 'due', 'due': 'dew', 'mountain': 'mountain',
+          'fruti': 'frooti', 'frooty': 'frooti',
+          'deri': 'dairy', 'dairi': 'dairy',
+          'mava': 'maavo', 'maava': 'maavo', 'mavo': 'maavo', 'mawa': 'maavo',
+          'supari': 'sopari', 'sopari': 'supari', 'shupari': 'sopari',
+          'pan': 'paan', 'paf': 'puff', 'paff': 'puff', 'papp': 'puff',
+          'flack': 'flake', 'flek': 'flake',
+          'sel': 'cell', 'pavar': 'cell', 'battery': 'cell',
+          'ikler': 'eclairs', 'iklair': 'eclairs',
+          'kasata': 'cassata', 'casata': 'cassata',
+          'cok': 'coca', 'coke': 'coca',
+          'elaychi': 'elaichi', 'ilaychi': 'elaichi',
+          'hepiden': 'happydent', 'happiden': 'happydent',
+          'hel': 'hell', 'shing': 'sing', 'mung': 'moong',
+          'sev': 'sevmamra', 'mamra': 'sevmamra',
+          'meda': 'menda', 'maida': 'menda',
+          'biskit': 'biscuit', 'biskoet': 'biscuit'
+        };
+
+        let bestMatch = null;
+        let highestScore = 0;
+
+        for (const i of items) {
+          const fullName = `${i.name || ''} ${i.variant || ''}`.toLowerCase();
+          let score = 0;
+          
+          for (const rawSw of itemNameWords) {
+            const mappedSw = synonyms[rawSw];
+            
+            // Check if fullName includes original word OR mapped synonym
+            if (fullName.includes(rawSw)) {
+              score += 10;
+            } else if (mappedSw && fullName.includes(mappedSw)) {
+              score += 10;
+            } 
+            // Partial match for misspelled words
+            else if (rawSw.length >= 4 && fullName.includes(rawSw.substring(0, 4))) {
+              score += 5;
+            } else if (mappedSw && mappedSw.length >= 4 && fullName.includes(mappedSw.substring(0, 4))) {
+              score += 5;
+            }
+          }
+          
+          // Exact or exact-ish matches get huge bonuses
+          if (fullName === itemName) score += 50;
+          if (fullName.startsWith(itemName)) score += 20;
+
+          if (score > highestScore && score >= 5) { // Needs at least a partial match
+            highestScore = score;
+            bestMatch = i;
+          }
+        }
+
+        const match = bestMatch;
+
+        if (match) {
+          addToCart(match, qty, isPackMode);
+          addedCount++;
+          successDetails.push(`${qty} ${isPackMode ? 'Box(es) of' : 'x'} ${match.name}`);
+        } else {
+          missingNames.push(itemName);
+        }
+      }
+
+      setItemSearch(rawText); // Show what was recognized
+
+      if (addedCount > 0) {
+        playBell();
+        if (missingNames.length > 0) {
+          toast.success(`Added: ${successDetails.join(', ')}. Missing: ${missingNames.join(', ')}`, { duration: 4000 });
+        } else {
+          toast.success(`Voice Added: ${successDetails.join(', ')} 🛒`, { duration: 4000 });
+        }
+        // Clear search bar after successfully adding so it's ready for next items visually
+        setTimeout(() => setItemSearch(''), 2500);
+      } else if (missingNames.length > 0) {
+        toast(`Could not find items: ${missingNames.join(', ')}`, { icon: '🤔', duration: 4000 });
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error", event.error);
+      setIsListening(false);
+      toast.dismiss('voice-toast');
+      if (event.error !== 'no-speech') {
+        toast.error('Voice typing error: ' + event.error);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      toast.dismiss('voice-toast');
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error(e);
+      setIsListening(false);
+    }
+  };
   const [showAddCustomer, setShowAddCustomer] = useState(false)
   const [newCustName, setNewCustName] = useState('')
   const [addingCust, setAddingCust] = useState(false)
@@ -977,9 +1167,10 @@ export default function BillingPage() {
     setPayments([{ mode: 'CASH', subtype: '', amount: total }])
   }
 
-  function addToCart(item, qty = 1) {
+  function addToCart(item, qty = 1, forcePackOverride = null) {
     const currentItem = items.find(i => i.id === item.id) || item
-    const wantPack = !!(cardPackMode[item.id] && (currentItem.units_per_box || 1) > 1 && (currentItem.pack_price || 0) > 0)
+    const isPackModeActive = forcePackOverride !== null ? forcePackOverride : !!cardPackMode[item.id];
+    const wantPack = !!(isPackModeActive && (currentItem.units_per_box || 1) > 1 && (currentItem.pack_price || 0) > 0)
     const stockDecrement = wantPack ? qty * (currentItem.units_per_box || 1) : qty
     if (!currentItem.is_active || !currentItem.price || currentItem.stock_quantity < stockDecrement) {
       toast.error(`Not enough stock. Available: ${currentItem.stock_quantity}`)
@@ -1594,16 +1785,25 @@ export default function BillingPage() {
       {/* Mobile-only compact header */}
       <div className="md:hidden flex items-center gap-2 p-2.5 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 shadow-sm z-20 shrink-0">
         {/* Menu Search */}
-        <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+        <div className="flex-1 flex items-center bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl px-2 focus-within:ring-2 focus-within:ring-ember transition-all min-w-0">
+          <Search size={14} className="text-ink-400 shrink-0 ml-1" />
           <input 
             type="text" 
             placeholder="Search Cafe..." 
-            className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-8 pr-8 py-2 text-xs focus:ring-2 focus:ring-ember outline-none"
+            className="w-full bg-transparent border-none py-2 px-2 text-xs outline-none focus:ring-0 text-ink-900 dark:text-ink-100 min-w-0"
             value={itemSearch}
             onChange={e => setItemSearch(e.target.value)}
           />
-          {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+          <div className="flex items-center shrink-0">
+            {itemSearch && <button onClick={() => setItemSearch('')} className="p-1 text-ink-400 hover:text-ink-600 rounded"><X size={14}/></button>}
+            <button 
+              onClick={toggleVoiceSearch}
+              className={`p-1 rounded-lg transition-colors ${isListening ? 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse' : 'text-ink-400 hover:text-ink-600'}`}
+              title="Voice Search"
+            >
+              <Mic size={14} />
+            </button>
+          </div>
         </div>
         
         {/* Barcode scan */}
@@ -1879,16 +2079,25 @@ export default function BillingPage() {
         <div className="flex flex-1 gap-3 w-full lg:w-auto">
           {/* 1. Menu Search */}
           <div className="flex-1 relative flex gap-2">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+            <div className="flex-1 flex items-center bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl px-3 focus-within:ring-2 focus-within:ring-ember transition-all min-w-0">
+              <Search size={16} className="text-ink-400 shrink-0" />
               <input 
                 type="text" 
                 placeholder="Search Cafe Menu..." 
-                className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none transition-all"
+                className="w-full bg-transparent border-none py-2.5 px-2 text-sm outline-none focus:ring-0 text-ink-900 dark:text-ink-100 min-w-0"
                 value={itemSearch}
                 onChange={e => setItemSearch(e.target.value)}
               />
-              {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+              <div className="flex items-center gap-0.5 shrink-0">
+                {itemSearch && <button onClick={() => setItemSearch('')} className="p-1.5 text-ink-400 hover:text-ink-600 rounded-md"><X size={14}/></button>}
+                <button 
+                  onClick={toggleVoiceSearch}
+                  className={`p-1.5 rounded-lg transition-colors ${isListening ? 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse' : 'text-ink-400 hover:text-ink-600'}`}
+                  title="Voice Search"
+                >
+                  <Mic size={14} />
+                </button>
+              </div>
             </div>
             <button
               onClick={() => { setShowBarcodeModal(true); startCameraScanning(); }}

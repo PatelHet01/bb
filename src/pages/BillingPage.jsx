@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
 
 import { playBell } from '../utils/bell'
-import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff } from 'lucide-react'
+import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff, SlidersHorizontal } from 'lucide-react'
 
 const ALL_CATEGORIES = [
   'Smoke', 'Paan', 'Candy & Chewing', 'Beverages', 'Snacks', 'BB Cafe'
@@ -40,6 +40,7 @@ export default function BillingPage() {
   const [tableCarts, setTableCarts] = useState({})
 
   const [cartExpanded, setCartExpanded] = useState(false)
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
   const [qtyEditor, setQtyEditor] = useState(null)
   const [packMode, setPackMode] = useState({}) // { [item_id]: true = pack mode (in cart) }
   const [cardPackMode, setCardPackMode] = useState({}) // { [item_id]: true = pack selected on item card (before add) }
@@ -314,6 +315,7 @@ export default function BillingPage() {
         .select('id, username, full_name, role')
         .eq('is_active', true)
         .not('username', 'like', '%_device_%')
+        .neq('role', 'super_admin')
         .order('full_name')
       setUsersList(users || [])
     }
@@ -1532,17 +1534,15 @@ export default function BillingPage() {
       )}
       
       {/* LEFT / TOP: Category Tabs */}
-      <div className="md:w-32 lg:w-40 bg-white dark:bg-ink-900 border-b md:border-b-0 md:border-r border-ink-200 dark:border-ink-800 flex-shrink-0 z-10 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-x-auto md:overflow-y-auto no-scrollbar flex md:flex-col p-1.5 md:p-3 gap-1 md:gap-2 mt-2 md:mt-0">
+      <div className="w-full md:w-32 lg:w-40 bg-white dark:bg-ink-900 border-b md:border-b-0 md:border-r border-ink-200 dark:border-ink-800 flex-shrink-0 z-10 flex flex-row md:flex-col overflow-hidden">
+        <div className="flex-1 overflow-x-auto md:overflow-y-auto no-scrollbar flex md:flex-col p-1.5 md:p-3 gap-1 md:gap-2">
           {availableTabs.map(cat => (
             <button key={cat} onClick={() => { setActiveCategory(cat); setItemSearch(''); }}
-              className={`px-4 py-3 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base font-bold whitespace-nowrap md:whitespace-normal text-left transition-all flex flex-col md:gap-1 flex-shrink-0
+              className={`px-4 py-2.5 md:py-4 rounded-xl md:rounded-2xl text-xs md:text-sm font-black whitespace-nowrap md:whitespace-normal text-center md:text-left transition-all flex flex-col items-center md:items-start justify-center md:gap-1 flex-shrink-0
               ${activeCategory === cat && !itemSearch ? 'bg-ember text-white shadow-md shadow-ember/20' : 'bg-ink-50 dark:bg-ink-950/50 text-ink-600 dark:text-ink-400 hover:bg-ink-100 dark:hover:bg-ink-800'}`}>
               {cat}
             </button>
           ))}
-
-          {/* Removed internal table selector, now handled in Table Dashboard */}
         </div>
       </div>
 
@@ -1591,60 +1591,77 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* Top Search Bar (Menu + Customer) */}
-        <div className="p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex flex-col md:flex-row items-center gap-3 shadow-sm z-20">
-          <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary w-full md:w-auto md:px-4 py-2.5 md:mr-2 shrink-0 border-ink-300 hover:bg-ink-100 flex items-center justify-center gap-2">
-            <Receipt size={16}/> Manage Orders
+      {/* Mobile-only compact header */}
+      <div className="md:hidden flex items-center gap-2 p-2.5 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 shadow-sm z-20 shrink-0">
+        {/* Menu Search */}
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+          <input 
+            type="text" 
+            placeholder="Search Cafe..." 
+            className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-8 pr-8 py-2 text-xs focus:ring-2 focus:ring-ember outline-none"
+            value={itemSearch}
+            onChange={e => setItemSearch(e.target.value)}
+          />
+          {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+        </div>
+        
+        {/* Barcode scan */}
+        <button
+          onClick={() => { setShowBarcodeModal(true); startCameraScanning(); }}
+          className="p-2 bg-ink-50 dark:bg-ink-950 rounded-xl border border-ink-200 dark:border-ink-800 text-ink-600 dark:text-ink-300 hover:border-ember hover:text-ember transition-all"
+          title="Scan Barcode"
+        >
+          <ScanLine size={16} />
+        </button>
+
+        {/* Collapsible toggle */}
+        <button
+          onClick={() => setFiltersExpanded(!filtersExpanded)}
+          className={`p-2 rounded-xl border flex items-center justify-center transition-all ${
+            filtersExpanded || customer || orderDate !== new Date().toISOString().split('T')[0]
+              ? 'bg-ember text-white border-ember'
+              : 'bg-ink-50 dark:bg-ink-950 text-ink-600 dark:text-ink-300 border-ink-200 dark:border-ink-800'
+          }`}
+          title="Search & Filters Options"
+        >
+          <SlidersHorizontal size={16} />
+        </button>
+      </div>
+
+      {/* Mobile active customer banner when collapsed */}
+      {customer && !filtersExpanded && (
+        <div className="md:hidden px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-b border-indigo-100 dark:border-indigo-900 text-xs font-bold flex justify-between items-center shrink-0">
+          <span className="truncate">Buyer: {customer.name}</span>
+          <button onClick={deselectCustomer} className="p-1 text-ink-400 hover:text-red-500 rounded"><X size={12}/></button>
+        </div>
+      )}
+
+      {/* Mobile Collapsible Panel */}
+      {filtersExpanded && (
+        <div className="md:hidden p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 space-y-3 z-20 shadow-inner shrink-0">
+          <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary w-full py-2 flex items-center justify-center gap-2 text-xs">
+            <Receipt size={14}/> Manage Orders
           </button>
           
-          {/* POS Date Selection */}
-          <div className="flex items-center gap-2 bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl px-3 py-2 shrink-0 relative transition-all duration-200 hover:border-ink-300 dark:hover:border-ink-700">
-            <Calendar 
-              size={16} 
-              className={orderDate === new Date().toISOString().split('T')[0] ? "text-ink-400" : "text-amber-500 animate-pulse"} 
-            />
+          <div className="flex items-center justify-between bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl px-3 py-1.5 w-full">
+            <div className="flex items-center gap-1.5">
+              <Calendar size={14} className={orderDate === new Date().toISOString().split('T')[0] ? "text-ink-400" : "text-amber-500 animate-pulse"} />
+              <span className="text-xs font-bold text-ink-700 dark:text-ink-300">Date:</span>
+            </div>
             <input 
               type="date" 
-              className="bg-transparent border-none text-xs font-bold text-ink-700 dark:text-ink-300 outline-none cursor-pointer focus:ring-0"
+              className="bg-transparent border-none text-xs font-bold text-ink-700 dark:text-ink-300 outline-none cursor-pointer focus:ring-0 p-0"
               value={orderDate}
               onChange={e => setOrderDate(e.target.value)}
               max={new Date().toISOString().split('T')[0]}
             />
-            {orderDate !== new Date().toISOString().split('T')[0] && (
-              <span className="text-[10px] font-black text-white bg-amber-500 px-2 py-0.5 rounded-lg uppercase tracking-wider animate-bounce shadow-sm">
-                Backdated
-              </span>
-            )}
           </div>
-          
-          <div className="flex w-full gap-3">
-            {/* 1. Menu Search */}
-            <div className="flex-1 relative flex gap-2">
-              <div className="relative flex-1">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
-                <input 
-                  type="text" 
-                  placeholder="Search Cafe Menu..." 
-                  className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none transition-all"
-                  value={itemSearch}
-                  onChange={e => setItemSearch(e.target.value)}
-                />
-                {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
-              </div>
-              <button
-                onClick={() => { setShowBarcodeModal(true); startCameraScanning(); }}
-                title="Scan Barcode to search product name"
-                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-ink-200 dark:border-ink-800 bg-ink-50 dark:bg-ink-950 text-ink-600 dark:text-ink-300 hover:border-ember hover:text-ember transition-all text-xs font-semibold shrink-0"
-              >
-                <ScanLine size={15} />
-                <span className="hidden sm:inline">Scan</span>
-              </button>
-            </div>
 
-            {/* 2. Customer Search / Selected Customer */}
+          <div className="w-full">
             {customer ? (
               isEditingCustomer ? (
-                <div className="flex-1 bg-ink-50 dark:bg-ink-950 rounded-xl p-3 border border-indigo-200 dark:border-indigo-800 space-y-2 relative z-30">
+                <div className="bg-ink-50 dark:bg-ink-950 rounded-xl p-3 border border-indigo-200 dark:border-indigo-800 space-y-2">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Edit Customer</span>
                     <button onClick={() => setIsEditingCustomer(false)} className="text-ink-400 hover:text-ink-900"><X size={14}/></button>
@@ -1697,7 +1714,7 @@ export default function BillingPage() {
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
+                <div className="flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer?.name?.[0] || ''}</div>
                     <div>
@@ -1718,120 +1735,364 @@ export default function BillingPage() {
                 </div>
               )
             ) : (
-            <div className="flex-1 space-y-2">
-              {/* Segmented Control */}
-              <div className="flex bg-ink-50 dark:bg-ink-950 p-1 rounded-xl w-full border border-ink-100 dark:border-ink-800">
-                {[
-                  { id: 'regular', label: 'Regular' },
-                  { id: 'branch', label: 'Branch' },
-                  { id: 'staff', label: 'Admin/Staff' }
-                ].map(tab => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => {
-                      setCustType(tab.id)
-                      setCustomerSearch('')
-                      setCustomerResults([])
-                      setDropdownOpen(true)
-                    }}
-                    className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all text-center ${
-                      custType === tab.id
-                        ? 'bg-white dark:bg-ink-800 shadow text-ink-900 dark:text-white'
-                        : 'text-ink-500 hover:text-ink-700'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
+              <div className="space-y-2">
+                <div className="flex bg-ink-50 dark:bg-ink-950 p-1 rounded-xl w-full border border-ink-100 dark:border-ink-800">
+                  {[
+                    { id: 'regular', label: 'Regular' },
+                    { id: 'branch', label: 'Branch' },
+                    { id: 'staff', label: 'Admin/Staff' }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        setCustType(tab.id)
+                        setCustomerSearch('')
+                        setCustomerResults([])
+                        setDropdownOpen(true)
+                      }}
+                      className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all text-center ${
+                        custType === tab.id
+                          ? 'bg-white dark:bg-ink-800 shadow text-ink-900 dark:text-white'
+                          : 'text-ink-500 hover:text-ink-700'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
 
-              <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
-                <input
-                  className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none animate-fade-in"
-                  placeholder={custType === 'regular' ? "Search customer..." : custType === 'branch' ? "Select branch..." : "Select admin/staff..."}
-                  value={customerSearch}
-                  onFocus={() => setDropdownOpen(true)}
-                  onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }}
-                />
+                <div className="relative">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+                  <input
+                    className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2 text-xs focus:ring-2 focus:ring-ember outline-none"
+                    placeholder={custType === 'regular' ? "Search customer..." : custType === 'branch' ? "Select branch..." : "Select admin/staff..."}
+                    value={customerSearch}
+                    onFocus={() => setDropdownOpen(true)}
+                    onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }}
+                  />
 
-                {dropdownOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
-                    <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-xl shadow-modal overflow-hidden max-h-60 overflow-y-auto">
-                      {custType === 'regular' ? (
-                        <>
-                          {customerSearch.length > 0 && customerResults.map(c => (
-                            <button key={c.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => { selectCustomer(c); setDropdownOpen(false); }}>
-                              <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username || c.mobile_number}</span></p>
-                            </button>
-                          ))}
-                          {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length >= 10 && (
-                            <div className="p-3 relative z-50">
-                              <p className="text-xs text-ink-500 mb-2">Customer not found. Register?</p>
-                              <button type="button" onClick={() => { setShowAddCustomer(true); setDropdownOpen(false) }} className="btn-secondary w-full py-2 flex justify-center text-sm"><UserPlus size={14} className="mr-2"/> Add New Customer</button>
-                            </div>
-                          )}
-                          {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length < 10 && (
-                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">No results found</div>
-                          )}
-                          {customerSearch.length === 0 && (
-                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">Type at least 2 characters to search...</div>
-                          )}
-                        </>
-                      ) : custType === 'branch' ? (
-                        <>
-                          {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).map(b => (
-                            <button key={b.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
-                              selectCustomer({
-                                id: `branch_${b.id}`,
-                                name: `Branch: ${b.name}`,
-                                registration_type: 'branch',
-                                mobile_number: `INTERNAL_BRANCH_${b.id}`,
-                                is_internal: true,
-                                ghoda_coins: 0
-                              });
-                              setDropdownOpen(false);
-                            }}>
-                              <p className="font-bold text-sm text-ink-900 dark:text-white">{b.name} <span className="font-normal text-[10px] text-ink-400 ml-1">({b.id})</span></p>
-                            </button>
-                          ))}
-                          {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).length === 0 && (
-                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">No branches found</div>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          {(customerSearch.trim() === '' ? usersList : filteredInternalResults).map(u => (
-                            <button key={u.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
-                              selectCustomer({
-                                id: `staff_${u.username}`,
-                                name: `Staff: ${u.full_name || u.username}`,
-                                registration_type: 'staff',
-                                mobile_number: `INTERNAL_STAFF_${u.username}`,
-                                user_id: u.id,
-                                is_internal: true,
-                                ghoda_coins: 0
-                              });
-                              setDropdownOpen(false);
-                            }}>
-                              <p className="font-bold text-sm text-ink-900 dark:text-white">{u.full_name || u.username} <span className="font-normal text-[10px] text-ink-400 ml-1">@{u.username} ({u.role})</span></p>
-                            </button>
-                          ))}
-                          {(customerSearch.trim() === '' ? usersList : filteredInternalResults).length === 0 && (
-                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">No staff users found</div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
+                  {dropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-xl shadow-modal overflow-hidden max-h-60 overflow-y-auto">
+                        {custType === 'regular' ? (
+                          <>
+                            {customerSearch.length > 0 && customerResults.map(c => (
+                              <button key={c.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => { selectCustomer(c); setDropdownOpen(false); }}>
+                                <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username || c.mobile_number}</span></p>
+                              </button>
+                            ))}
+                            {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length >= 10 && (
+                              <div className="p-3 relative z-50">
+                                <p className="text-xs text-ink-500 mb-2">Customer not found. Register?</p>
+                                <button type="button" onClick={() => { setShowAddCustomer(true); setDropdownOpen(false) }} className="btn-secondary w-full py-2 flex justify-center text-sm"><UserPlus size={14} className="mr-2"/> Add New Customer</button>
+                              </div>
+                            )}
+                            {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length < 10 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">No results found</div>
+                            )}
+                            {customerSearch.length === 0 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">Type at least 2 characters to search...</div>
+                            )}
+                          </>
+                        ) : custType === 'branch' ? (
+                          <>
+                            {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).map(b => (
+                              <button key={b.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
+                                selectCustomer({
+                                  id: `branch_${b.id}`,
+                                  name: `Branch: ${b.name}`,
+                                  registration_type: 'branch',
+                                  mobile_number: `INTERNAL_BRANCH_${b.id}`,
+                                  is_internal: true,
+                                  ghoda_coins: 0
+                                });
+                                setDropdownOpen(false);
+                              }}>
+                                <p className="font-bold text-sm text-ink-900 dark:text-white">{b.name} <span className="font-normal text-[10px] text-ink-400 ml-1">({b.id})</span></p>
+                              </button>
+                            ))}
+                            {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).length === 0 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">No branches found</div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {(customerSearch.trim() === '' ? usersList : filteredInternalResults).map(u => (
+                              <button key={u.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
+                                selectCustomer({
+                                  id: `staff_${u.username}`,
+                                  name: `Staff: ${u.full_name || u.username}`,
+                                  registration_type: 'staff',
+                                  mobile_number: `INTERNAL_STAFF_${u.username}`,
+                                  user_id: u.id,
+                                  is_internal: true,
+                                  ghoda_coins: 0
+                                });
+                                setDropdownOpen(false);
+                              }}>
+                                <p className="font-bold text-sm text-ink-900 dark:text-white">{u.full_name || u.username} <span className="font-normal text-[10px] text-ink-400 ml-1">@{u.username} ({u.role})</span></p>
+                              </button>
+                            ))}
+                            {(customerSearch.trim() === '' ? usersList : filteredInternalResults).length === 0 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">No staff users found</div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
           </div>
         </div>
+      )}
+
+      {/* Desktop-only full header */}
+      <div className="hidden md:flex p-3 bg-white dark:bg-ink-900 border-b border-ink-200 dark:border-ink-800 flex-row flex-wrap lg:flex-nowrap items-center gap-3 shadow-sm z-20 shrink-0">
+        <button onClick={() => { fetchRecentOrders(); setShowOrdersModal(true); }} className="btn-secondary w-full lg:w-auto px-4 py-2.5 shrink-0 border-ink-300 hover:bg-ink-100 flex items-center justify-center gap-2">
+          <Receipt size={16}/> Manage Orders
+        </button>
+        
+        {/* POS Date Selection */}
+        <div className="flex items-center gap-2 bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl px-3 py-2 shrink-0 relative transition-all duration-200 hover:border-ink-300 dark:hover:border-ink-700">
+          <Calendar 
+            size={16} 
+            className={orderDate === new Date().toISOString().split('T')[0] ? "text-ink-400" : "text-amber-500 animate-pulse"} 
+          />
+          <input 
+            type="date" 
+            className="bg-transparent border-none text-xs font-bold text-ink-700 dark:text-ink-300 outline-none cursor-pointer focus:ring-0"
+            value={orderDate}
+            onChange={e => setOrderDate(e.target.value)}
+            max={new Date().toISOString().split('T')[0]}
+          />
+          {orderDate !== new Date().toISOString().split('T')[0] && (
+            <span className="text-[10px] font-black text-white bg-amber-500 px-2 py-0.5 rounded-lg uppercase tracking-wider animate-bounce shadow-sm">
+              Backdated
+            </span>
+          )}
+        </div>
+        
+        <div className="flex flex-1 gap-3 w-full lg:w-auto">
+          {/* 1. Menu Search */}
+          <div className="flex-1 relative flex gap-2">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+              <input 
+                type="text" 
+                placeholder="Search Cafe Menu..." 
+                className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none transition-all"
+                value={itemSearch}
+                onChange={e => setItemSearch(e.target.value)}
+              />
+              {itemSearch && <button onClick={() => setItemSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"><X size={14}/></button>}
+            </div>
+            <button
+              onClick={() => { setShowBarcodeModal(true); startCameraScanning(); }}
+              title="Scan Barcode to search product name"
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-ink-200 dark:border-ink-800 bg-ink-50 dark:bg-ink-950 text-ink-600 dark:text-ink-300 hover:border-ember hover:text-ember transition-all text-xs font-semibold shrink-0"
+            >
+              <ScanLine size={15} />
+              <span className="hidden sm:inline">Scan</span>
+            </button>
+          </div>
+
+          {/* 2. Customer Search / Selected Customer */}
+          <div className="flex-1">
+            {customer ? (
+              isEditingCustomer ? (
+                <div className="bg-ink-50 dark:bg-ink-950 rounded-xl p-3 border border-indigo-200 dark:border-indigo-800 space-y-2 relative z-30">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Edit Customer</span>
+                    <button onClick={() => setIsEditingCustomer(false)} className="text-ink-400 hover:text-ink-900"><X size={14}/></button>
+                  </div>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      className="input text-xs w-full py-1.5 bg-white"
+                      placeholder="Customer Name"
+                      value={editCustName}
+                      onChange={e => setEditCustName(e.target.value)}
+                    />
+                    <input
+                      type="tel"
+                      maxLength={10}
+                      className="input text-xs w-full py-1.5 bg-white text-ink-500 font-mono"
+                      placeholder="Mobile Number"
+                      value={editCustMobile}
+                      onChange={e => setEditCustMobile(e.target.value.replace(/\D/g, ''))}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!editCustName.trim() || editCustMobile.trim().length !== 10) {
+                          toast.error('Enter valid name and 10-digit mobile number')
+                          return
+                        }
+                        setSavingCust(true)
+                        try {
+                          const { data, error } = await supabase
+                            .from('customers')
+                            .update({ name: editCustName.trim(), mobile_number: editCustMobile.trim() })
+                            .eq('id', customer.id)
+                            .select()
+                            .single()
+                          if (error) throw error
+                          setCustomer(data)
+                          setIsEditingCustomer(false)
+                          toast.success('Customer updated!')
+                        } catch (err) {
+                          toast.error(err.message)
+                        } finally {
+                          setSavingCust(false)
+                        }
+                      }}
+                      disabled={savingCust}
+                      className="btn-primary w-full py-2 text-xs"
+                    >
+                      {savingCust ? 'Saving...' : 'Apply Changes'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center bg-ink-50 dark:bg-ink-950 rounded-xl px-3 py-2 border border-ink-200 dark:border-ink-700">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-ember text-white flex items-center justify-center font-bold uppercase">{customer?.name?.[0] || ''}</div>
+                    <div>
+                      <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
+                      <div className="flex gap-2 text-[9px] font-bold mt-1 flex-wrap">
+                        {custBalances.khata > 0 && <span className="text-red-500">Levana: ₹{custBalances.khata}</span>}
+                        {custBalances.advance > 0 && <span className="text-emerald-500">Adv: ₹{custBalances.advance}</span>}
+                        {customer.is_khata_locked && (
+                          <span className="text-white bg-red-500 px-1.5 py-0.5 rounded animate-pulse">🔒 KHATA LOCKED</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { setEditCustName(customer.name || ''); setEditCustMobile(customer.mobile_number || ''); setIsEditingCustomer(true); }} className="p-1.5 text-ink-400 hover:bg-indigo-50 hover:text-indigo-600 rounded-md transition-colors"><Edit2 size={14}/></button>
+                    <button onClick={deselectCustomer} className="p-1.5 text-ink-400 hover:bg-red-50 hover:text-red-500 rounded-md transition-colors"><X size={16}/></button>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="space-y-2">
+                {/* Segmented Control */}
+                <div className="flex bg-ink-50 dark:bg-ink-950 p-1 rounded-xl w-full border border-ink-100 dark:border-ink-800">
+                  {[
+                    { id: 'regular', label: 'Regular' },
+                    { id: 'branch', label: 'Branch' },
+                    { id: 'staff', label: 'Admin/Staff' }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        setCustType(tab.id)
+                        setCustomerSearch('')
+                        setCustomerResults([])
+                        setDropdownOpen(true)
+                      }}
+                      className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all text-center ${
+                        custType === tab.id
+                          ? 'bg-white dark:bg-ink-800 shadow text-ink-900 dark:text-white'
+                          : 'text-ink-500 hover:text-ink-700'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+                  <input
+                    className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none"
+                    placeholder={custType === 'regular' ? "Search customer..." : custType === 'branch' ? "Select branch..." : "Select admin/staff..."}
+                    value={customerSearch}
+                    onFocus={() => setDropdownOpen(true)}
+                    onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }}
+                  />
+
+                  {dropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
+                      <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-xl shadow-modal overflow-hidden max-h-60 overflow-y-auto">
+                        {custType === 'regular' ? (
+                          <>
+                            {customerSearch.length > 0 && customerResults.map(c => (
+                              <button key={c.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => { selectCustomer(c); setDropdownOpen(false); }}>
+                                <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username || c.mobile_number}</span></p>
+                              </button>
+                            ))}
+                            {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length >= 10 && (
+                              <div className="p-3 relative z-50">
+                                <p className="text-xs text-ink-500 mb-2">Customer not found. Register?</p>
+                                <button type="button" onClick={() => { setShowAddCustomer(true); setDropdownOpen(false) }} className="btn-secondary w-full py-2 flex justify-center text-sm"><UserPlus size={14} className="mr-2"/> Add New Customer</button>
+                              </div>
+                            )}
+                            {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length < 10 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">No results found</div>
+                            )}
+                            {customerSearch.length === 0 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">Type at least 2 characters to search...</div>
+                            )}
+                          </>
+                        ) : custType === 'branch' ? (
+                          <>
+                            {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).map(b => (
+                              <button key={b.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
+                                selectCustomer({
+                                  id: `branch_${b.id}`,
+                                  name: `Branch: ${b.name}`,
+                                  registration_type: 'branch',
+                                  mobile_number: `INTERNAL_BRANCH_${b.id}`,
+                                  is_internal: true,
+                                  ghoda_coins: 0
+                                });
+                                setDropdownOpen(false);
+                              }}>
+                                <p className="font-bold text-sm text-ink-900 dark:text-white">{b.name} <span className="font-normal text-[10px] text-ink-400 ml-1">({b.id})</span></p>
+                              </button>
+                            ))}
+                            {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).length === 0 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">No branches found</div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {(customerSearch.trim() === '' ? usersList : filteredInternalResults).map(u => (
+                              <button key={u.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
+                                selectCustomer({
+                                  id: `staff_${u.username}`,
+                                  name: `Staff: ${u.full_name || u.username}`,
+                                  registration_type: 'staff',
+                                  mobile_number: `INTERNAL_STAFF_${u.username}`,
+                                  user_id: u.id,
+                                  is_internal: true,
+                                  ghoda_coins: 0
+                                });
+                                setDropdownOpen(false);
+                              }}>
+                                <p className="font-bold text-sm text-ink-900 dark:text-white">{u.full_name || u.username} <span className="font-normal text-[10px] text-ink-400 ml-1">@{u.username} ({u.role})</span></p>
+                              </button>
+                            ))}
+                            {(customerSearch.trim() === '' ? usersList : filteredInternalResults).length === 0 && (
+                              <div className="p-4 text-center text-xs text-ink-400 relative z-50">No staff users found</div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
         {/* Editing Banner */}
         {editingOrderId && (
@@ -1977,6 +2238,11 @@ export default function BillingPage() {
           )}
         </div>
       </div>
+
+      {/* Backdrop overlay for mobile cart drawer */}
+      {cartExpanded && (
+        <div className="fixed inset-0 bg-black/60 z-30 md:hidden animate-fade-in" onClick={() => setCartExpanded(false)} />
+      )}
 
       {/* RIGHT / BOTTOM: Cart Panel */}
       <div className={`

@@ -4,6 +4,8 @@ import { useAuthStore } from '../store/authStore'
 import { Plus, Check, Clock, User, DollarSign, Shield, ShieldAlert, X, Edit2, Trash2, Key, History, Filter, Search, Download, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
+
 
 export default function StaffSalaryPage() {
   const { branchId, role, user } = useAuthStore()
@@ -360,8 +362,21 @@ export default function StaffSalaryPage() {
   async function markPaid(recordId) {
     const { error } = await supabase.from('salary_records').update({ status: 'paid' }).eq('id', recordId)
     if (error) toast.error(error.message)
-    else fetchData()
+    else {
+      const rec = records.find(r => r.id === recordId)
+      const w = workers.find(x => x.id === rec?.worker_id)
+      logAudit({
+        branchId: branchId || w?.branch_id || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.SALARY_MARKED_PAID,
+        entityType: 'salary',
+        entityId: recordId,
+        entityLabel: `Paid ${w?.name || 'Worker'} for ${rec?.month_year || ''}: ₹${rec?.net_payable}`
+      })
+      fetchData()
+    }
   }
+
 
   async function deleteSalaryRecord(id) {
     if (!confirm('Delete this salary record?')) return

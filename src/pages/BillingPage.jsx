@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
+import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
+
 import { playBell } from '../utils/bell'
 import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff } from 'lucide-react'
 
@@ -740,7 +742,16 @@ export default function BillingPage() {
     }
 
     toast.success('Order cancelled & stock restored')
+    logAudit({
+      branchId: orderMeta?.branch_id || branchId || 'gurukul',
+      actor: user,
+      action: AUDIT_ACTIONS.ORDER_CANCELLED,
+      entityType: 'order',
+      entityId: orderId,
+      entityLabel: `Cancelled Order #${orderMeta?.order_number || orderId.slice(0, 8)}`
+    })
     fetchRecentOrders()
+
   }
 
   // ── Debounced DB sync for pending table carts ──────────────────────────────
@@ -1284,6 +1295,25 @@ export default function BillingPage() {
       }
 
       toast.success(wasEditing ? 'Order updated successfully!' : 'Bill generated & cart cleared!')
+      logAudit({
+        branchId: branchId || selectedBranch || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.ORDER_CREATED,
+        entityType: 'order',
+        entityId: order?.id,
+        entityLabel: `${wasEditing ? 'Updated' : 'Created'} Order #${order?.order_number || order?.id?.slice(0, 8) || ''} - Total: ₹${Math.round(total)}`
+      })
+      if (discount > 0) {
+        logAudit({
+          branchId: branchId || selectedBranch || 'gurukul',
+          actor: user,
+          action: AUDIT_ACTIONS.ORDER_DISCOUNT_APPLIED,
+          entityType: 'order',
+          entityId: order?.id,
+          entityLabel: `Discount applied to Order #${order?.order_number || order?.id?.slice(0, 8) || ''}: ₹${discount}`
+        })
+      }
+
     } catch (e) {
       toast.error('Failed: ' + e.message)
     } finally {

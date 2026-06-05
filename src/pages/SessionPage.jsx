@@ -4,6 +4,8 @@ import { useAuthStore } from '../store/authStore'
 import { useSessionStore } from '../store/sessionStore'
 import { Clock, Play, Square, ChevronDown, CheckCircle2, AlertTriangle, TrendingUp, ShoppingBag, Banknote, CreditCard, Smartphone, BookOpen, ReceiptText } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
+
 
 const NOTES = [2000, 500, 200, 100, 50, 20, 10]
 const COINS = [20, 10, 5, 2, 1]
@@ -208,7 +210,16 @@ export default function SessionPage() {
 
       setSession(newSession)
       toast.success('Session opened! Shop is live.')
+      logAudit({
+        branchId: branch,
+        actor: user,
+        action: AUDIT_ACTIONS.SESSION_OPENED,
+        entityType: 'session',
+        entityId: newSession.id,
+        entityLabel: `Opened with ₹${openingTotal.toLocaleString('en-IN')}`
+      })
       setOpenModal(false)
+
       fetchSessions()
     } catch (e) {
       toast.error('Failed: ' + e.message)
@@ -300,8 +311,17 @@ export default function SessionPage() {
 
       clearSession()
       toast.success('Session closed. Good night! 🌙')
+      logAudit({
+        branchId: branch,
+        actor: user,
+        action: AUDIT_ACTIONS.SESSION_CLOSED,
+        entityType: 'session',
+        entityId: currentSession.id,
+        entityLabel: `Closed with ₹${closingTotal.toLocaleString('en-IN')}, Revenue: ₹${Math.round(sessionSummary?.revenue || 0)}`
+      })
       setCloseModal(false)
       fetchSessions()
+
     } catch (e) {
       toast.error('Failed: ' + e.message)
     } finally {

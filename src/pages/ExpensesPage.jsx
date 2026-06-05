@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import { Plus, Trash2, Edit2, CheckCircle2, Lock, Unlock, PlusCircle, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
 
 const categories = ['Rent', 'Utilities', 'Supplies', 'Salaries', 'Maintenance', 'Misc']
 
@@ -62,6 +63,13 @@ export default function ExpensesPage() {
     }
     if (error) return toast.error(error.message)
     toast.success(editingId ? 'Expense updated' : 'Expense logged')
+    logAudit({
+      branchId: branchId || 'gurukul',
+      actor: user,
+      action: AUDIT_ACTIONS.EXPENSE_ADDED,
+      entityType: 'expense',
+      entityLabel: `${form.category}: ${form.description || '—'} ₹${form.amount} (${form.payment_mode})`
+    })
     setShowForm(false); setEditingId(null)
     setForm({ category: 'Supplies', amount: '', description: '', payment_mode: 'CASH', expense_date: new Date().toISOString().split('T')[0] })
     fetchExpenses()
@@ -69,9 +77,20 @@ export default function ExpensesPage() {
 
   async function handleDelete(id) {
     if (!confirm('Delete expense?')) return
+    const exp = expenses.find(e => e.id === id)
     const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) toast.error(error.message)
-    else fetchExpenses()
+    else {
+      logAudit({
+        branchId: branchId || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.EXPENSE_DELETED,
+        entityType: 'expense',
+        entityId: id,
+        entityLabel: exp ? `${exp.category}: ${exp.description || '—'} ₹${exp.amount}` : id
+      })
+      fetchExpenses()
+    }
   }
 
   // ── Fixed Costs ─────────────────────────────────────────────────────────────

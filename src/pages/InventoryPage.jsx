@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
+import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
+
 import { Plus, Search, AlertTriangle, ToggleLeft, ToggleRight, Edit2, Check, X, Trash2, Archive, RefreshCw, LayoutGrid, Download, Upload, ScanLine, Camera, CameraOff } from 'lucide-react'
 import { BRANCH_CATEGORY_MAP, CATEGORY_ICONS, CATEGORY_SUBCATEGORIES } from '../lib/branchConfig'
 import MenuPage from './MenuPage'
@@ -10,7 +12,7 @@ import MenuPage from './MenuPage'
 const UNITS = ['piece','gram','ml','kg','litre','pack','session']
 
 export default function InventoryPage() {
-  const { branchId, role } = useAuthStore()
+  const { branchId, role, user } = useAuthStore()
   const [searchParams, setSearchParams] = useSearchParams()
   // Barcode Scanner
   const [showBarcodeModal, setShowBarcodeModal] = useState(false)
@@ -237,8 +239,16 @@ export default function InventoryPage() {
       })
       if (error) throw error
       toast.success('Item added')
+      logAudit({
+        branchId: form.branch_id || branchId || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.ITEM_ADDED,
+        entityType: 'inventory',
+        entityLabel: `Added Item: ${form.name} ${form.variant ? `(${form.variant})` : ''} - Category: ${form.category}`
+      })
       setForm({ name: '', category: '', subcategory: '', variant: '', unit: 'piece', price: '', cost_price: '', pack_price: '', stock_quantity: 0, low_stock_threshold: 5, units_per_box: 1, is_active: true, item_type: 'SELLABLE', branch_id: branchId || 'gurukul' })
       setShowForm(false)
+
       fetchItems()
     } catch (e) { 
       console.error(e)
@@ -266,7 +276,16 @@ export default function InventoryPage() {
       setItems(prevItems) // revert
     } else {
       toast.success('Stock updated instantly')
+      logAudit({
+        branchId: item?.branch_id || branchId || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.ITEM_EDITED,
+        entityType: 'inventory',
+        entityId: id,
+        entityLabel: `Quick Stock Update: ${item?.name || 'Item'} (${item?.variant || 'Regular'}) -> Stock: ${n}`
+      })
     }
+
   }
 
   // --- Bulk Stock Edit ---
@@ -296,11 +315,19 @@ export default function InventoryPage() {
     if (changedCount > 0) {
       await Promise.all(updates)
       toast.success(`${changedCount} items updated`)
+      logAudit({
+        branchId: branchId || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.ITEM_EDITED,
+        entityType: 'inventory',
+        entityLabel: `Bulk Stock Update: ${changedCount} items updated`
+      })
       fetchItems()
     } else {
       toast('No changes to save')
     }
     setBulkMode(false)
+
     setSaving(false)
   }
 
@@ -330,6 +357,15 @@ export default function InventoryPage() {
     setItems(p => p.map(i => i.id === id ? { ...i, ...updates } : i))
     setEditingRow(null)
     toast.success('Saved')
+    logAudit({
+      branchId: editForm.branch_id || branchId || 'gurukul',
+      actor: user,
+      action: AUDIT_ACTIONS.ITEM_EDITED,
+      entityType: 'inventory',
+      entityId: id,
+      entityLabel: `Edited Item: ${editForm.name} ${editForm.variant ? `(${editForm.variant})` : ''} - Category: ${editForm.category}`
+    })
+
   }
 
   async function addIngredient(itemId) {
@@ -368,16 +404,36 @@ export default function InventoryPage() {
     await supabase.from('items').update({ is_archived: !curArchive }).eq('id', id)
     setItems(p => p.map(i => i.id === id ? { ...i, is_archived: !curArchive } : i))
     toast.success(curArchive ? 'Restored to Active' : 'Moved to Archive')
+    const item = items.find(i => i.id === id)
+    logAudit({
+      branchId: item?.branch_id || branchId || 'gurukul',
+      actor: user,
+      action: AUDIT_ACTIONS.ITEM_EDITED,
+      entityType: 'inventory',
+      entityId: id,
+      entityLabel: `${curArchive ? 'Restore' : 'Archive'} Item: ${item?.name || 'Item'} (${item?.variant || 'Regular'})`
+    })
   }
+
   
   async function deleteForever(id, name) {
     const input = prompt(`This will permanently delete ${name} and cannot be undone. Type DELETE to confirm.`)
     if (input === 'DELETE') {
+      const item = items.find(i => i.id === id)
       await supabase.from('items').delete().eq('id', id)
       setItems(p => p.filter(i => i.id !== id))
       toast.success('Deleted permanently')
+      logAudit({
+        branchId: item?.branch_id || branchId || 'gurukul',
+        actor: user,
+        action: AUDIT_ACTIONS.ITEM_DELETED,
+        entityType: 'inventory',
+        entityId: id,
+        entityLabel: `Deleted Item Forever: ${name} (Category: ${item?.category || ''})`
+      })
     }
   }
+
 
   // --- Filtering & Computed ---
   const filtered = useMemo(() => {

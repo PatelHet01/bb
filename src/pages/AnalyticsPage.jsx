@@ -3,12 +3,13 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import {
   BarChart2, TrendingUp, TrendingDown, DollarSign, Package,
-  Clock, CreditCard, Users, Wallet
+  Clock, CreditCard, Users, Wallet, ChevronRight
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
 } from 'recharts'
+import KPIDetailModal from '../components/analytics/KPIDetailModal'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const NOTES = [2000, 500, 200, 100, 50, 20, 10]
@@ -81,15 +82,27 @@ const fmtRs  = n => `₹${Math.round(n || 0).toLocaleString('en-IN')}`
 const fmtNum = n => Math.round(n || 0).toLocaleString('en-IN')
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
-function KPICard({ label, value, sub, color = 'text-ink-900 dark:text-white', Icon, iconColor }) {
+function KPICard({ label, value, sub, color = 'text-ink-900 dark:text-white', Icon, iconColor, onClick }) {
+  const isClickable = Boolean(onClick)
   return (
-    <div className="bg-white dark:bg-ink-900 p-5 rounded-2xl border border-ink-100 dark:border-ink-800 shadow-sm flex flex-col gap-1 transition-all hover:scale-[1.02] cursor-default">
+    <div
+      onClick={onClick}
+      className={`bg-white dark:bg-ink-900 p-5 rounded-2xl border border-ink-100 dark:border-ink-800 shadow-sm flex flex-col gap-1 transition-all ${
+        isClickable
+          ? 'cursor-pointer hover:scale-[1.025] hover:shadow-md hover:border-ember/30 group'
+          : 'cursor-default hover:scale-[1.02]'
+      }`}
+    >
       <div className="flex justify-between items-center">
         <span className="text-[10px] font-black text-ink-400 uppercase tracking-widest leading-none">{label}</span>
-        {Icon && <Icon size={15} className={iconColor || 'text-ember'} />}
+        <div className="flex items-center gap-1">
+          {Icon && <Icon size={15} className={iconColor || 'text-ember'} />}
+          {isClickable && <ChevronRight size={12} className="text-ink-300 group-hover:text-ember transition-colors" />}
+        </div>
       </div>
       <p className={`text-2xl font-black mt-1 leading-tight ${color}`}>{value}</p>
       {sub && <p className="text-[10px] text-ink-400 font-semibold leading-none">{sub}</p>}
+      {isClickable && <p className="text-[9px] text-ink-300 font-semibold mt-1 group-hover:text-ember/70 transition-colors">Click to drill down</p>}
     </div>
   )
 }
@@ -104,6 +117,7 @@ export default function AnalyticsPage() {
   const [customStart,  setCustomStart]  = useState('')
   const [customEnd,    setCustomEnd]    = useState('')
   const [finData,      setFinData]      = useState(null)
+  const [activeModal,  setActiveModal]  = useState(null)  // which KPI card is open
 
   // Sessions tab state (unchanged)
   const [sessionsList,      setSessionsList]      = useState([])
@@ -432,33 +446,41 @@ export default function AnalyticsPage() {
             {/* KPI Row 1 — Revenue & Profit */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <KPICard label="Total Revenue"       value={fmtRs(finData.totalRevenue)}
-                Icon={DollarSign} iconColor="text-ember" />
+                Icon={DollarSign} iconColor="text-ember"
+                onClick={() => setActiveModal({ type:'revenue', label:'Total Revenue' })} />
               <KPICard label="Net Revenue"         value={fmtRs(finData.netRevenue)}
                 sub={`Discount: ${fmtRs(finData.totalDiscount)}`}
-                Icon={TrendingUp} iconColor="text-blue-500" />
+                Icon={TrendingUp} iconColor="text-blue-500"
+                onClick={() => setActiveModal({ type:'netRevenue', label:'Net Revenue' })} />
               <KPICard label="Gross Profit (SP−CP)" value={fmtRs(finData.grossProfit)}
                 color="text-emerald-600 dark:text-emerald-400"
-                Icon={BarChart2} iconColor="text-emerald-500" />
+                Icon={BarChart2} iconColor="text-emerald-500"
+                onClick={() => setActiveModal({ type:'grossProfit', label:'Gross Profit (SP−CP)' })} />
               <KPICard label="Net Profit"          value={fmtRs(finData.netProfit)}
                 sub="After expenses & salary"
                 color={finData.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600'}
                 Icon={finData.netProfit >= 0 ? TrendingUp : TrendingDown}
-                iconColor={finData.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'} />
+                iconColor={finData.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}
+                onClick={() => setActiveModal({ type:'netProfit', label:'Net Profit' })} />
             </div>
 
             {/* KPI Row 2 — Operations */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <KPICard label="Total Orders"     value={fmtNum(finData.orderCount)}
-                Icon={Package} iconColor="text-indigo-500" />
+                Icon={Package} iconColor="text-indigo-500"
+                onClick={() => setActiveModal({ type:'orders', label:'Total Orders' })} />
               <KPICard label="Avg Order Value"  value={fmtRs(finData.avgOrder)}
-                Icon={CreditCard} iconColor="text-purple-500" />
+                Icon={CreditCard} iconColor="text-purple-500"
+                onClick={() => setActiveModal({ type:'avgOrder', label:'Avg Order Value' })} />
               <KPICard label="Total Expenses"   value={fmtRs(finData.totalExpenses)}
                 color="text-red-600"
-                Icon={Wallet} iconColor="text-red-500" />
+                Icon={Wallet} iconColor="text-red-500"
+                onClick={() => setActiveModal({ type:'expenses', label:'Total Expenses' })} />
               <KPICard label="Khata Outstanding" value={fmtRs(finData.khataNet)}
                 sub={`Recovered: ${fmtRs(finData.khataPayment)}`}
                 color="text-amber-600"
-                Icon={Users} iconColor="text-amber-500" />
+                Icon={Users} iconColor="text-amber-500"
+                onClick={() => setActiveModal({ type:'khata', label:'Khata Outstanding' })} />
             </div>
 
             {/* Revenue vs Expenses Chart */}
@@ -883,6 +905,17 @@ export default function AnalyticsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* KPI Drill-Down Modal */}
+      {activeModal && (
+        <KPIDetailModal
+          type={activeModal.type}
+          label={activeModal.label}
+          dateRange={dateRange}
+          branchId={branchId}
+          onClose={() => setActiveModal(null)}
+        />
       )}
     </div>
   )

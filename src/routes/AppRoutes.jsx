@@ -28,6 +28,7 @@ import OffersPage from '../pages/OffersPage'
 import CashTrackingPage from '../pages/CashTrackingPage'
 import InternalLedgerPage from '../pages/InternalLedgerPage'
 import SessionPage from '../pages/SessionPage'
+import AuditPage from '../pages/AuditPage'
 
 function AdminRoute({ children, allowedRoles }) {
   const { user, role } = useAuthStore()
@@ -111,6 +112,9 @@ export default function AppRoutes() {
         } />
         <Route path="sessions" element={
           <AdminRoute allowedRoles={['super_admin', 'admin']}><SessionPage /></AdminRoute>
+        } />
+        <Route path="audit" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}><AuditPage /></AdminRoute>
         } />
         <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Route>

@@ -4,13 +4,15 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
   BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee, Shield,
-  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock
+  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock, ShieldCheck
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import OrderNotificationOverlay from './OrderNotificationOverlay'
+import NotificationBell from './NotificationBell'
 import BBLogo from './BBLogo'
 import toast from 'react-hot-toast'
+import { useAdminNotifications } from '../../hooks/useAdminNotifications'
 
 
 const NAV_GROUPS = [
@@ -51,6 +53,7 @@ const NAV_GROUPS = [
   {
     title: 'SYSTEM',
     items: [
+      { to: '/admin/audit',     label: 'Audit Trail',  icon: ShieldCheck,     roles: ['super_admin','admin'], feature: 'audit' },
       { to: '/admin/settings',  label: 'Settings',     icon: Settings,        roles: ['super_admin','admin'], feature: 'settings' },
       { to: '/admin/branches',  label: 'Branches',     icon: GitBranch,       roles: ['super_admin'], feature: 'branches' }
     ]
@@ -69,6 +72,9 @@ export default function DashboardLayout() {
   const { user, role, branchName, branchId, darkMode, toggleDark, logout } = useAuthStore()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Realtime notifications for admins
+  useAdminNotifications()
   const [permissions, setPermissions] = useState(null)
   const [staffPerms, setStaffPerms] = useState(null)
   const [showProfileModal, setShowProfileModal] = useState(false)
@@ -320,17 +326,20 @@ export default function DashboardLayout() {
             </div>
           </div>
 
-          <button
-            onClick={toggleDark}
-            className="btn-ghost p-2 rounded-lg"
-            id="btn-dark-mode"
-            title="Toggle dark mode"
-          >
-            {darkMode
-              ? <Sun size={16} className="text-dash-muted dark:text-dash-mutedDark" />
-              : <Moon size={16} className="text-dash-muted dark:text-dash-mutedDark" />
-            }
-          </button>
+          <div className="flex items-center gap-1">
+            {['super_admin','admin','manager'].includes(role) && <NotificationBell />}
+            <button
+              onClick={toggleDark}
+              className="btn-ghost p-2 rounded-lg"
+              id="btn-dark-mode"
+              title="Toggle dark mode"
+            >
+              {darkMode
+                ? <Sun size={16} className="text-dash-muted dark:text-dash-mutedDark" />
+                : <Moon size={16} className="text-dash-muted dark:text-dash-mutedDark" />
+              }
+            </button>
+          </div>
         </header>
 
         {/* Page */}

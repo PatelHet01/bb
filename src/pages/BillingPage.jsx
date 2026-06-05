@@ -47,6 +47,31 @@ export default function BillingPage() {
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerResults, setCustomerResults] = useState([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [custType, setCustType] = useState('regular') // 'regular' | 'branch' | 'staff'
+  const [branchesList, setBranchesList] = useState([])
+  const [usersList, setUsersList] = useState([])
+
+  const otherBranches = useMemo(() => {
+    const activeB = branchId || selectedBranch
+    return branchesList.filter(b => b.id !== activeB)
+  }, [branchesList, branchId, selectedBranch])
+
+  const filteredInternalResults = useMemo(() => {
+    const searchLower = customerSearch.toLowerCase().trim()
+    if (custType === 'branch') {
+      return otherBranches.filter(b => 
+        b.name.toLowerCase().includes(searchLower) ||
+        b.id.toLowerCase().includes(searchLower)
+      )
+    }
+    if (custType === 'staff') {
+      return usersList.filter(u => 
+        (u.full_name || '').toLowerCase().includes(searchLower) ||
+        (u.username || '').toLowerCase().includes(searchLower)
+      )
+    }
+    return []
+  }, [custType, customerSearch, otherBranches, usersList])
 
   // Payments & Checkout
   const [payments, setPayments] = useState([{ mode: 'CASH', subtype: '', amount: 0 }])
@@ -280,6 +305,22 @@ export default function BillingPage() {
   }, [total])
 
   useEffect(() => {
+    async function loadBranchesAndUsers() {
+      const { data: branches } = await supabase.from('branches').select('id, name')
+      setBranchesList(branches || [])
+      
+      const { data: users } = await supabase
+        .from('users')
+        .select('id, username, full_name, role')
+        .eq('is_active', true)
+        .not('username', 'like', '%_device_%')
+        .order('full_name')
+      setUsersList(users || [])
+    }
+    loadBranchesAndUsers()
+  }, [])
+
+  useEffect(() => {
     const targetBranch = branchId || selectedBranch
 
     async function fetchInventory() {
@@ -379,6 +420,7 @@ export default function BillingPage() {
   }
 
   useEffect(() => {
+    if (custType !== 'regular') return
     if (customerSearch.length < 2) { setCustomerResults([]); return }
     const t = setTimeout(async () => {
       let q = supabase.from('customers').select('*')
@@ -387,7 +429,7 @@ export default function BillingPage() {
       setCustomerResults(data || [])
     }, 250)
     return () => clearTimeout(t)
-  }, [customerSearch])
+  }, [customerSearch, custType])
 
   // ── Subscribe to order-ready broadcast (bell + toast) ───────────────────────
   useEffect(() => {
@@ -1086,6 +1128,35 @@ export default function BillingPage() {
     try {
       const target_branch = branchId || selectedBranch
       
+      let dbCustomerId = customer?.id || null
+      const isInternal = customer && customer.is_internal
+      
+      if (isInternal) {
+        const { data: existingCust } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('mobile_number', customer.mobile_number)
+          .maybeSingle()
+          
+        if (existingCust) {
+          dbCustomerId = existingCust.id
+        } else {
+          const { data: newCust, error: provError } = await supabase
+            .from('customers')
+            .insert({
+              name: customer.name,
+              mobile_number: customer.mobile_number,
+              registration_type: customer.registration_type,
+              branch_id: target_branch
+            })
+            .select()
+            .single()
+            
+          if (provError) throw provError
+          dbCustomerId = newCust.id
+        }
+      }
+      
       // If editing an order, restore stock for old items first
       if (editingOrderId) {
         const { data: oldItems } = await supabase.from('order_items').select('item_id, quantity, price, sell_mode, items(units_per_box, pack_price)').eq('order_id', editingOrderId)
@@ -1106,7 +1177,7 @@ export default function BillingPage() {
       if (editingOrderId || selectedTable?.current_order_id || kitchenOrderId) {
         const orderIdToUpdate = editingOrderId || selectedTable?.current_order_id || kitchenOrderId
         const { data: updatedOrder, error } = await supabase.from('orders')
-          .update({ customer_id: customer?.id || null, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId, created_at: getOrderTimestamp() })
+          .update({ customer_id: dbCustomerId, subtotal, discount: calculatedDiscount, total, status: 'completed', order_type: orderType, received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId, created_at: getOrderTimestamp() })
           .eq('id', orderIdToUpdate)
           .select().single()
         if (error) throw error
@@ -1133,7 +1204,7 @@ export default function BillingPage() {
         }))
       } else {
         const { data: newOrder, error } = await supabase.from('orders').insert({
-          customer_id: customer?.id || null, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
+          customer_id: dbCustomerId, branch_id: target_branch, subtotal, discount: calculatedDiscount, total, status: 'completed',
           table_number: selectedTable?.table_number || null, order_type: orderType,
           received_by: user?.id && !String(user.id).startsWith('hardcoded') ? user.id : null, session_id: currentSessionId,
           created_at: getOrderTimestamp()
@@ -1647,27 +1718,116 @@ export default function BillingPage() {
                 </div>
               )
             ) : (
-            <div className="flex-1 relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-              <input className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none" placeholder="Select Customer..." value={customerSearch} onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }} />
-              {dropdownOpen && customerSearch.length > 0 && (
-                <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-xl shadow-modal overflow-hidden">
-                  {customerResults.map(c => (
-                    <button key={c.id} className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0" onClick={() => selectCustomer(c)}>
-                      <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username || c.mobile_number}</span></p>
-                    </button>
-                  ))}
-                  {customerResults.length === 0 && customerSearch.length >= 10 && (
-                    <div className="p-3">
-                      <p className="text-xs text-ink-500 mb-2">Customer not found. Register?</p>
-                      <button onClick={() => { setShowAddCustomer(true); setDropdownOpen(false) }} className="btn-secondary w-full py-2 flex justify-center text-sm"><UserPlus size={14} className="mr-2"/> Add New Customer</button>
+            <div className="flex-1 space-y-2">
+              {/* Segmented Control */}
+              <div className="flex bg-ink-50 dark:bg-ink-950 p-1 rounded-xl w-full border border-ink-100 dark:border-ink-800">
+                {[
+                  { id: 'regular', label: 'Regular' },
+                  { id: 'branch', label: 'Branch' },
+                  { id: 'staff', label: 'Admin/Staff' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setCustType(tab.id)
+                      setCustomerSearch('')
+                      setCustomerResults([])
+                      setDropdownOpen(true)
+                    }}
+                    className={`flex-1 py-1 text-xs font-bold rounded-lg transition-all text-center ${
+                      custType === tab.id
+                        ? 'bg-white dark:bg-ink-800 shadow text-ink-900 dark:text-white'
+                        : 'text-ink-500 hover:text-ink-700'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+                <input
+                  className="w-full bg-ink-50 dark:bg-ink-950 border border-ink-200 dark:border-ink-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-ember outline-none animate-fade-in"
+                  placeholder={custType === 'regular' ? "Search customer..." : custType === 'branch' ? "Select branch..." : "Select admin/staff..."}
+                  value={customerSearch}
+                  onFocus={() => setDropdownOpen(true)}
+                  onChange={e => { setCustomerSearch(e.target.value); setDropdownOpen(true) }}
+                />
+
+                {dropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setDropdownOpen(false)} />
+                    <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-xl shadow-modal overflow-hidden max-h-60 overflow-y-auto">
+                      {custType === 'regular' ? (
+                        <>
+                          {customerSearch.length > 0 && customerResults.map(c => (
+                            <button key={c.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => { selectCustomer(c); setDropdownOpen(false); }}>
+                              <p className="font-bold text-sm text-ink-900 dark:text-white">{c.name} <span className="font-normal text-[10px] text-ink-400 ml-1">@{c.username || c.mobile_number}</span></p>
+                            </button>
+                          ))}
+                          {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length >= 10 && (
+                            <div className="p-3 relative z-50">
+                              <p className="text-xs text-ink-500 mb-2">Customer not found. Register?</p>
+                              <button type="button" onClick={() => { setShowAddCustomer(true); setDropdownOpen(false) }} className="btn-secondary w-full py-2 flex justify-center text-sm"><UserPlus size={14} className="mr-2"/> Add New Customer</button>
+                            </div>
+                          )}
+                          {customerSearch.length > 0 && customerResults.length === 0 && customerSearch.length < 10 && (
+                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">No results found</div>
+                          )}
+                          {customerSearch.length === 0 && (
+                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">Type at least 2 characters to search...</div>
+                          )}
+                        </>
+                      ) : custType === 'branch' ? (
+                        <>
+                          {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).map(b => (
+                            <button key={b.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
+                              selectCustomer({
+                                id: `branch_${b.id}`,
+                                name: `Branch: ${b.name}`,
+                                registration_type: 'branch',
+                                mobile_number: `INTERNAL_BRANCH_${b.id}`,
+                                is_internal: true,
+                                ghoda_coins: 0
+                              });
+                              setDropdownOpen(false);
+                            }}>
+                              <p className="font-bold text-sm text-ink-900 dark:text-white">{b.name} <span className="font-normal text-[10px] text-ink-400 ml-1">({b.id})</span></p>
+                            </button>
+                          ))}
+                          {(customerSearch.trim() === '' ? otherBranches : filteredInternalResults).length === 0 && (
+                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">No branches found</div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {(customerSearch.trim() === '' ? usersList : filteredInternalResults).map(u => (
+                            <button key={u.id} type="button" className="w-full text-left px-4 py-3 hover:bg-ink-50 dark:hover:bg-ink-700 border-b border-ink-100 dark:border-ink-700 last:border-0 relative z-50" onClick={() => {
+                              selectCustomer({
+                                id: `staff_${u.username}`,
+                                name: `Staff: ${u.full_name || u.username}`,
+                                registration_type: 'staff',
+                                mobile_number: `INTERNAL_STAFF_${u.username}`,
+                                user_id: u.id,
+                                is_internal: true,
+                                ghoda_coins: 0
+                              });
+                              setDropdownOpen(false);
+                            }}>
+                              <p className="font-bold text-sm text-ink-900 dark:text-white">{u.full_name || u.username} <span className="font-normal text-[10px] text-ink-400 ml-1">@{u.username} ({u.role})</span></p>
+                            </button>
+                          ))}
+                          {(customerSearch.trim() === '' ? usersList : filteredInternalResults).length === 0 && (
+                            <div className="p-4 text-center text-xs text-ink-400 relative z-50">No staff users found</div>
+                          )}
+                        </>
+                      )}
                     </div>
-                  )}
-                  {customerResults.length === 0 && customerSearch.length < 10 && (
-                    <div className="p-4 text-center text-xs text-ink-400">No results found</div>
-                  )}
-                </div>
-              )}
+                  </>
+                )}
+              </div>
             </div>
           )}
           </div>

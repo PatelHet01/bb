@@ -28,7 +28,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
-  const [mainTab, setMainTab] = useState(searchParams.get('tab') || 'Active') // Active, Archived, Disposables, menu
+  const [mainTab, setMainTab] = useState(searchParams.get('tab') || 'Active') // Active, Disposables, menu
   const [lowStockFilter, setLowStockFilter] = useState(searchParams.get('filter') === 'low_stock')
   const [zeroStockFilter, setZeroStockFilter] = useState(false)
 
@@ -74,7 +74,7 @@ export default function InventoryPage() {
 
   const isManager = role === 'manager'
   const isAdmin = role === 'admin' || role === 'super_admin'
-  const canDefineItems = isAdmin || role === 'super_admin' // Only admins can create/delete/archive
+  const canDefineItems = isAdmin || role === 'super_admin' // Only admins can create/delete
   const canManageStock = true // Managers and Admins can update stock quantities
 
   // --- Barcode / OpenFoodFacts ---
@@ -399,24 +399,11 @@ export default function InventoryPage() {
     toast.success('Ingredient removed')
   }
 
-  // --- Actions ---
-  async function toggleArchive(id, curArchive) {
-    await supabase.from('items').update({ is_archived: !curArchive }).eq('id', id)
-    setItems(p => p.map(i => i.id === id ? { ...i, is_archived: !curArchive } : i))
-    toast.success(curArchive ? 'Restored to Active' : 'Moved to Archive')
-    const item = items.find(i => i.id === id)
-    logAudit({
-      branchId: item?.branch_id || branchId || 'gurukul',
-      actor: user,
-      action: AUDIT_ACTIONS.ITEM_EDITED,
-      entityType: 'inventory',
-      entityId: id,
-      entityLabel: `${curArchive ? 'Restore' : 'Archive'} Item: ${item?.name || 'Item'} (${item?.variant || 'Regular'})`
-    })
-  }
-
-  
   async function deleteForever(id, name) {
+    if (!isAdmin) {
+      toast.error('Only admins can delete items')
+      return
+    }
     const input = prompt(`This will permanently delete ${name} and cannot be undone. Type DELETE to confirm.`)
     if (input === 'DELETE') {
       const item = items.find(i => i.id === id)
@@ -442,7 +429,6 @@ export default function InventoryPage() {
       if (mainTab === 'Disposables' && (i.category !== 'Inventory' || i.subcategory !== 'Disposables')) return false
       if (mainTab === 'Raw Materials' && i.item_type !== 'RAW_MATERIAL') return false
       if (mainTab === 'Active' && (i.is_archived || i.category === 'Inventory' || i.item_type === 'RAW_MATERIAL')) return false
-      if (mainTab === 'Archived' && (!i.is_archived || i.category === 'Inventory')) return false
       
       // Category Filter
       if (filterCat && i.category !== filterCat) return false
@@ -480,7 +466,7 @@ export default function InventoryPage() {
 
   const handleExportCSV = () => {
     const csvRows = ['id,name,variant,category,subcategory,stock_quantity'];
-    const exportData = mainTab === 'archived' ? items.filter(i => i.is_archived) : items.filter(i => !i.is_archived);
+    const exportData = items.filter(i => !i.is_archived);
     
     exportData.forEach(i => {
       const row = [
@@ -716,7 +702,7 @@ export default function InventoryPage() {
 
       {/* Main Tabs */}
       <div className="flex border-b border-zinc-200 dark:border-zinc-800 gap-6 overflow-x-auto no-scrollbar">
-        {['Active', 'Raw Materials', 'Archived', 'Disposables', 'BB Cafe Menu'].map(tab => {
+        {['Active', 'Raw Materials', 'Disposables', 'BB Cafe Menu'].map(tab => {
           const isActive = mainTab === tab || (tab === 'BB Cafe Menu' && mainTab === 'menu');
           return (
             <button key={tab} onClick={() => setMainTab(tab === 'BB Cafe Menu' ? 'menu' : tab)}
@@ -1116,13 +1102,8 @@ export default function InventoryPage() {
                         <td className="tbl-cell text-right">
                           <div className="flex gap-1 justify-end">
                             <button onClick={()=>startEdit(item)} className="p-2 md:p-1.5 text-zinc-400 hover:text-ember hover:bg-ember/10 rounded-lg transition-colors" title="Edit row"><Edit2 size={18}/></button>
-                            {mainTab === 'Archived' ? (
-                              <>
-                                <button onClick={()=>toggleArchive(item.id, true)} className="p-2 md:p-1.5 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="Restore"><RefreshCw size={18}/></button>
-                                {isAdmin && <button onClick={()=>deleteForever(item.id, item.name)} className="p-2 md:p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Forever"><Trash2 size={18}/></button>}
-                              </>
-                            ) : (
-                              <button onClick={()=>toggleArchive(item.id, false)} className="p-2 md:p-1.5 text-zinc-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors" title="Archive"><Archive size={18}/></button>
+                            {isAdmin && (
+                              <button onClick={()=>deleteForever(item.id, item.name)} className="p-2 md:p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Forever"><Trash2 size={18}/></button>
                             )}
                           </div>
                         </td>

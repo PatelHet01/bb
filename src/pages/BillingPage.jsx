@@ -5,6 +5,9 @@ import toast from 'react-hot-toast'
 import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
 
 import { playBell } from '../utils/bell'
+import { processVoiceCommand } from '../utils/voiceAI'
+import * as IndianDict from '../utils/indianVoiceDictionary'
+import Fuse from 'fuse.js'
 import { Plus, Minus, Trash2, Search, X, CheckCircle2, Receipt, UserPlus, Banknote, ShoppingCart, ChevronUp, Printer, Grid3X3, ArrowLeft, ShoppingBag, Flame, Edit2, Calendar, ScanLine, Camera, CameraOff, SlidersHorizontal, Mic } from 'lucide-react'
 
 const ALL_CATEGORIES = [
@@ -78,198 +81,208 @@ export default function BillingPage() {
   const [payments, setPayments] = useState([{ mode: 'CASH', subtype: '', amount: 0 }])
   const [loading, setLoading] = useState(true)
 
+  // Voice AI
+  const [isListening, setIsListening] = useState(false)
+  const [voiceProcessing, setVoiceProcessing] = useState(false)
+  const [voiceTier, setVoiceTier] = useState(null) // which AI tier responded
+  const [voiceConfirmCustomer, setVoiceConfirmCustomer] = useState(null) // pending customer confirmation
+
+  // Register dictionary + Fuse.js on window once — used by local offline parser
+  useEffect(() => {
+    if (!window.__indianDict__) {
+      window.__indianDict__ = IndianDict
+      window.__Fuse__ = Fuse
+      console.log('[VoiceAI] Indian dictionary loaded ✅', Object.keys(IndianDict.ITEM_SYNONYMS).length, 'synonyms')
+    }
+  }, [])
+
   // Search & New Customer
   const [itemSearch, setItemSearch] = useState('')
-  const [isListening, setIsListening] = useState(false)
 
-  const toggleVoiceSearch = () => {
-    if (isListening) return;
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error('Voice typing is not supported in this browser.');
-      return;
+  // ── Voice AI: Execute Actions Dispatcher ─────────────────────────────────
+  async function executeVoiceActions(actions, tier) {
+    setVoiceTier(tier)
+    let cartSummary = []
+    let hadFinalize = false
+    let pendingPayments = []
+
+    for (const action of actions) {
+      switch (action.action) {
+
+        case 'ADD_ITEM': {
+          const item = items.find(i => i.id === action.item_id)
+          if (item) {
+            addToCart(item, action.qty || 1, action.pack_mode || false)
+            cartSummary.push(`${action.qty || 1}${action.pack_mode ? ' box' : 'x'} ${item.name}`)
+          }
+          break
+        }
+
+        case 'REMOVE_ITEM': {
+          setCart(prev => prev.filter(c => c.id !== action.item_id))
+          break
+        }
+
+        case 'SET_QTY': {
+          setCart(prev => prev.map(c => c.id === action.item_id ? { ...c, quantity: action.qty } : c))
+          break
+        }
+
+        case 'CLEAR_CART': {
+          setCart([])
+          toast('🗑️ Cart cleared', { duration: 2000 })
+          break
+        }
+
+        case 'FIND_CUSTOMER': {
+          // Search customers and show confirmation dialog
+          try {
+            const q = action.query?.toLowerCase() || ''
+            const { data } = await supabase.from('customers')
+              .select('*')
+              .or(`name.ilike.%${q}%,mobile_number.ilike.%${q}%`)
+              .limit(5)
+            if (data && data.length === 1) {
+              // Single match — show confirmation
+              setVoiceConfirmCustomer(data[0])
+            } else if (data && data.length > 1) {
+              setCustomerResults(data)
+              setDropdownOpen(true)
+              toast('Multiple customers found — please select one', { icon: '👥', duration: 3000 })
+            } else {
+              toast(`No customer found for "${action.query}"`, { icon: '🤔', duration: 3000 })
+            }
+          } catch (e) {
+            console.error('Customer search error', e)
+          }
+          break
+        }
+
+        case 'SET_ORDER_TYPE': {
+          setOrderType(action.value)
+          toast(`Order type: ${action.value}`, { icon: '📋', duration: 2000 })
+          break
+        }
+
+        case 'SET_PAYMENT': {
+          // Collect all payment actions together, resolve after loop
+          pendingPayments.push(action)
+          break
+        }
+
+        case 'SET_DISCOUNT': {
+          setDiscountType(action.type || 'FLAT')
+          setDiscountValue(action.value || 0)
+          toast(`Discount: ${action.value}${action.type === 'PERCENT' ? '%' : '₹'}`, { icon: '🏷️', duration: 2000 })
+          break
+        }
+
+        case 'FINALIZE_BILL': {
+          hadFinalize = true
+          break
+        }
+
+        case 'FINALIZE_AND_PRINT': {
+          hadFinalize = true
+          // handleBill will print after success via window.print()
+          break
+        }
+
+        default: break
+      }
     }
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-IN'; // Use Indian English to get Latin characters for regional words
+
+    // Resolve all payment actions
+    if (pendingPayments.length > 0) {
+      const resolvedPayments = pendingPayments.map((p, idx) => {
+        let amount = p.amount
+        if (amount === 'total') amount = total
+        else if (amount === 'remaining') {
+          const otherSum = pendingPayments
+            .filter((_, i) => i !== idx)
+            .reduce((s, x) => s + (typeof x.amount === 'number' ? x.amount : 0), 0)
+          amount = Math.max(0, total - otherSum)
+        }
+        return { mode: p.mode, subtype: '', amount: parseFloat(amount) || 0 }
+      })
+      setPayments(resolvedPayments)
+      toast(`Payment set: ${resolvedPayments.map(p => `₹${p.amount} ${p.mode}`).join(' + ')}`, { icon: '💳', duration: 3000 })
+    }
+
+    // Show cart summary toast
+    if (cartSummary.length > 0) {
+      playBell()
+      toast.success(`${tier} | Added: ${cartSummary.join(', ')} 🛒`, { duration: 4000 })
+      setTimeout(() => setItemSearch(''), 2000)
+    }
+
+    // Finalize bill if requested
+    if (hadFinalize) {
+      setTimeout(() => handleBill(), 300)
+    }
+  }
+
+  // ── Voice AI: Main Toggle ─────────────────────────────────────────────────
+  const toggleVoiceSearch = () => {
+    if (isListening || voiceProcessing) return
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      toast.error('Voice typing is not supported in this browser.')
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.lang = 'en-IN'
 
     recognition.onstart = () => {
-      setIsListening(true);
-      setItemSearch(''); // Clear previous search on new mic click
-      toast('Listening...', { icon: '🎙️', duration: 2000, id: 'voice-toast' });
-    };
+      setIsListening(true)
+      setItemSearch('')
+      toast('Listening... 🎙️', { id: 'voice-toast', duration: 10000 })
+    }
 
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      const rawText = transcript.toLowerCase().replace(/[.]/g, '').trim();
-      
-      const phrases = rawText.split(/\s+(?:and|aur|ane|plus)\s+|,/);
+    recognition.onresult = async (event) => {
+      const transcript = event.results[0][0].transcript
+      setItemSearch(transcript)
+      toast.loading('AI thinking...', { id: 'voice-toast' })
+      setVoiceProcessing(true)
 
-      const qtyMap = {
-        'ek': 1, 'one': 1, '1': 1, 'a': 1, 'an': 1,
-        'be': 2, 'do': 2, 'two': 2, '2': 2,
-        'tran': 3, 'teen': 3, 'three': 3, '3': 3,
-        'char': 4, 'four': 4, '4': 4,
-        'panch': 5, 'five': 5, '5': 5,
-        'chha': 6, 'che': 6, 'six': 6, '6': 6,
-        'saat': 7, 'seven': 7, '7': 7,
-        'aath': 8, 'eight': 8, '8': 8,
-        'nav': 9, 'nine': 9, '9': 9,
-        'das': 10, 'ten': 10, '10': 10,
-      };
-
-      const packWords = ['box', 'pack', 'packet', 'dabba', 'boxes', 'packs', 'packets'];
-      
-      let addedCount = 0;
-      let missingNames = [];
-      let successDetails = [];
-
-      for (let phrase of phrases) {
-        phrase = phrase.trim();
-        if (!phrase) continue;
-
-        const words = phrase.split(/\s+/);
-        let qty = 1;
-        let rawItemNameWords = [];
-
-        if (words.length > 1) {
-          if (qtyMap[words[0]]) {
-            qty = qtyMap[words[0]];
-            rawItemNameWords = words.slice(1);
-          } else if (qtyMap[words[words.length - 1]]) {
-            qty = qtyMap[words[words.length - 1]];
-            rawItemNameWords = words.slice(0, -1);
-          } else {
-            rawItemNameWords = words;
-          }
+      try {
+        const { actions, tier } = await processVoiceCommand(transcript, items)
+        toast.dismiss('voice-toast')
+        if (actions.length === 0) {
+          toast(`Nothing recognized. Try again.`, { icon: '🤔', duration: 3000 })
         } else {
-          rawItemNameWords = words;
+          await executeVoiceActions(actions, tier)
         }
-
-        let isPackMode = false;
-        const itemNameWords = [];
-        
-        for (const w of rawItemNameWords) {
-          if (packWords.includes(w)) {
-            isPackMode = true;
-          } else {
-            itemNameWords.push(w);
-          }
-        }
-
-        const itemName = itemNameWords.join(' ');
-        if (!itemName) continue;
-
-        // Massive Synonym Dictionary for Indian FMCG & Fast Food
-        const synonyms = {
-          'chij': 'cheese', 'cheez': 'cheese', 'chees': 'cheese',
-          'chhaas': 'chaas', 'chhas': 'chaas', 'chhachh': 'chaas', 'buttermilk': 'chaas',
-          'maggifg': 'maggi', 'mggi': 'maggi', 'megi': 'maggi', 'magi': 'maggi',
-          'ful': 'full', 'haf': 'half',
-          'maska': 'butter', 'masaka': 'butter',
-          'botle': 'botel', 'bottle': 'botel', 'pani': 'water', 'watter': 'water',
-          'dew': 'due', 'due': 'dew', 'mountain': 'mountain',
-          'fruti': 'frooti', 'frooty': 'frooti',
-          'deri': 'dairy', 'dairi': 'dairy',
-          'mava': 'maavo', 'maava': 'maavo', 'mavo': 'maavo', 'mawa': 'maavo',
-          'supari': 'sopari', 'sopari': 'supari', 'shupari': 'sopari',
-          'pan': 'paan', 'paf': 'puff', 'paff': 'puff', 'papp': 'puff',
-          'flack': 'flake', 'flek': 'flake',
-          'sel': 'cell', 'pavar': 'cell', 'battery': 'cell',
-          'ikler': 'eclairs', 'iklair': 'eclairs',
-          'kasata': 'cassata', 'casata': 'cassata',
-          'cok': 'coca', 'coke': 'coca',
-          'elaychi': 'elaichi', 'ilaychi': 'elaichi',
-          'hepiden': 'happydent', 'happiden': 'happydent',
-          'hel': 'hell', 'shing': 'sing', 'mung': 'moong',
-          'sev': 'sevmamra', 'mamra': 'sevmamra',
-          'meda': 'menda', 'maida': 'menda',
-          'biskit': 'biscuit', 'biskoet': 'biscuit'
-        };
-
-        let bestMatch = null;
-        let highestScore = 0;
-
-        for (const i of items) {
-          const fullName = `${i.name || ''} ${i.variant || ''}`.toLowerCase();
-          let score = 0;
-          
-          for (const rawSw of itemNameWords) {
-            const mappedSw = synonyms[rawSw];
-            
-            // Check if fullName includes original word OR mapped synonym
-            if (fullName.includes(rawSw)) {
-              score += 10;
-            } else if (mappedSw && fullName.includes(mappedSw)) {
-              score += 10;
-            } 
-            // Partial match for misspelled words
-            else if (rawSw.length >= 4 && fullName.includes(rawSw.substring(0, 4))) {
-              score += 5;
-            } else if (mappedSw && mappedSw.length >= 4 && fullName.includes(mappedSw.substring(0, 4))) {
-              score += 5;
-            }
-          }
-          
-          // Exact or exact-ish matches get huge bonuses
-          if (fullName === itemName) score += 50;
-          if (fullName.startsWith(itemName)) score += 20;
-
-          if (score > highestScore && score >= 5) { // Needs at least a partial match
-            highestScore = score;
-            bestMatch = i;
-          }
-        }
-
-        const match = bestMatch;
-
-        if (match) {
-          addToCart(match, qty, isPackMode);
-          addedCount++;
-          successDetails.push(`${qty} ${isPackMode ? 'Box(es) of' : 'x'} ${match.name}`);
-        } else {
-          missingNames.push(itemName);
-        }
+      } catch (e) {
+        console.error('Voice AI error', e)
+        toast.error('Voice processing failed. Try again.')
+      } finally {
+        setVoiceProcessing(false)
       }
-
-      setItemSearch(rawText); // Show what was recognized
-
-      if (addedCount > 0) {
-        playBell();
-        if (missingNames.length > 0) {
-          toast.success(`Added: ${successDetails.join(', ')}. Missing: ${missingNames.join(', ')}`, { duration: 4000 });
-        } else {
-          toast.success(`Voice Added: ${successDetails.join(', ')} 🛒`, { duration: 4000 });
-        }
-        // Clear search bar after successfully adding so it's ready for next items visually
-        setTimeout(() => setItemSearch(''), 2500);
-      } else if (missingNames.length > 0) {
-        toast(`Could not find items: ${missingNames.join(', ')}`, { icon: '🤔', duration: 4000 });
-      }
-    };
+    }
 
     recognition.onerror = (event) => {
-      console.error("Speech recognition error", event.error);
-      setIsListening(false);
-      toast.dismiss('voice-toast');
-      if (event.error !== 'no-speech') {
-        toast.error('Voice typing error: ' + event.error);
-      }
-    };
+      console.error('Speech recognition error', event.error)
+      setIsListening(false)
+      setVoiceProcessing(false)
+      toast.dismiss('voice-toast')
+      if (event.error !== 'no-speech') toast.error('Mic error: ' + event.error)
+    }
 
     recognition.onend = () => {
-      setIsListening(false);
-      toast.dismiss('voice-toast');
-    };
+      setIsListening(false)
+      toast.dismiss('voice-toast')
+    }
 
     try {
-      recognition.start();
+      recognition.start()
     } catch (e) {
-      console.error(e);
-      setIsListening(false);
+      console.error(e)
+      setIsListening(false)
     }
-  };
+  }
   const [showAddCustomer, setShowAddCustomer] = useState(false)
   const [newCustName, setNewCustName] = useState('')
   const [addingCust, setAddingCust] = useState(false)
@@ -1798,8 +1811,11 @@ export default function BillingPage() {
             {itemSearch && <button onClick={() => setItemSearch('')} className="p-1 text-ink-400 hover:text-ink-600 rounded"><X size={14}/></button>}
             <button 
               onClick={toggleVoiceSearch}
-              className={`p-1 rounded-lg transition-colors ${isListening ? 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse' : 'text-ink-400 hover:text-ink-600'}`}
-              title="Voice Search"
+              className={`p-1 rounded-lg transition-colors ${
+                voiceProcessing ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20 animate-spin' :
+                isListening ? 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse' : 
+                'text-ink-400 hover:text-ink-600'}`}
+              title={voiceProcessing ? 'AI Processing...' : isListening ? 'Listening...' : 'Voice Command'}
             >
               <Mic size={14} />
             </button>
@@ -2573,8 +2589,30 @@ export default function BillingPage() {
         <div className="bg-white dark:bg-ink-900 p-4 border-t border-ink-200 dark:border-ink-800 shadow-[0_-10px_20px_rgba(0,0,0,0.03)] pb-[env(safe-area-inset-bottom)]">
           {cart.length > 0 && (
             <div className="mb-4 space-y-3">
+              {/* Voice AI — Customer Confirmation Dialog */}
+              {voiceConfirmCustomer && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-xl space-y-2 mb-2 animate-slide-up">
+                  <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">🎙️ Voice Found Customer — Confirm?</span>
+                  <p className="text-sm font-semibold text-ink-900 dark:text-white">{voiceConfirmCustomer.name}</p>
+                  {voiceConfirmCustomer.mobile_number && (
+                    <p className="text-xs text-ink-500">{voiceConfirmCustomer.mobile_number}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => { await selectCustomer(voiceConfirmCustomer); setVoiceConfirmCustomer(null); toast.success(`Customer: ${voiceConfirmCustomer.name}`) }}
+                      className="flex-1 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >✓ Yes, Select</button>
+                    <button
+                      onClick={() => setVoiceConfirmCustomer(null)}
+                      className="flex-1 py-2 text-sm font-bold bg-ink-100 dark:bg-ink-800 text-ink-700 dark:text-ink-300 rounded-lg hover:bg-ink-200"
+                    >✗ No</button>
+                  </div>
+                </div>
+              )}
+
               {/* Add Customer Inline Form */}
               {showAddCustomer && (
+
                 <div className="p-3 bg-ember/5 border border-ember/20 rounded-xl space-y-2 mb-2 animate-slide-up">
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-[10px] font-black text-ember uppercase tracking-widest">New Customer</span>

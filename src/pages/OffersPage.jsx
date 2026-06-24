@@ -74,6 +74,9 @@ export default function OffersPage() {
 
   const [isGeneratingImage, setIsGeneratingImage] = useState(null)
   const [editCpItem, setEditCpItem] = useState(null)
+  
+  const [postGenOffer, setPostGenOffer] = useState(null)
+  const [selectedImgModel, setSelectedImgModel] = useState('gpt-image-1.5')
 
   useEffect(() => {
     fetchData()
@@ -185,25 +188,122 @@ export default function OffersPage() {
     fetchData()
   }
 
-  async function generateSocialPost(offer) {
+  async function generateSocialPost(offer, modelId) {
     const count = parseInt(localStorage.getItem('bb_image_gen_count') || '0')
     if (count >= 5) {
       return toast.error('You have reached the maximum limit of 5 image generations.')
     }
 
     setIsGeneratingImage(offer.id)
+    setPostGenOffer(null) // close modal
     try {
       if (!window.puter) throw new Error("AI is initializing. Please wait a moment.")
       
-      toast.loading('Generating background image with AI...', { id: 'img-gen' })
+      toast.loading(`Generating image with ${modelId}...`, { id: 'img-gen' })
       
-      const prompt = `A highly realistic, cinematic, mouth-watering food photography shot of ${offer.name}. ${offer.description}. Dark, moody lighting, perfectly styled for instagram.`
+      const itemList = offer.offer_items?.map(oi => `- ${oi.quantity}x ${oi.items?.name} ${oi.items?.variant || ''}`).join('\n') || ''
+
+      const optimizedPrompt = `You are an expert food advertising creative director.
+Create a premium Instagram promotional post for Bombay Bethak.
+
+Offer Name: ${offer.name}
+Offer Price: ₹${offer.price}
+Offer Description: ${offer.description || 'Delicious food'}
+
+Items Included:
+${itemList}
+
+CRITICAL REQUIREMENTS:
+1. VISUAL COMPOSITION
+* Show ALL listed items from the combo prominently.
+* Every item in the combo must be visible.
+* Create a rich, abundant composition that highlights the value of the combo.
+* Arrange food professionally like a restaurant advertisement.
+* Use premium plating and presentation.
+* Create depth and visual hierarchy.
+
+2. ADVERTISING STYLE
+* Commercial food photography.
+* Restaurant marketing campaign style.
+* Luxury food advertisement.
+* Premium Indian cafe and restaurant branding.
+* Similar quality to Zomato, Swiggy, Starbucks and premium restaurant ads.
+* Cinematic lighting.
+* Warm tones.
+* Mouth-watering food styling.
+* High realism.
+
+3. TYPOGRAPHY SPACE
+* Reserve clean space for text overlays.
+* Keep composition balanced.
+* Ensure title and pricing can be clearly displayed.
+* Avoid placing important food elements behind text areas.
+
+4. BRANDING
+* Place logo elegantly in a corner.
+* Keep branding premium and subtle.
+
+5. OFFER FOCUS
+* Make the combo appear irresistible and high value.
+* Visually communicate savings and abundance.
+* Showcase all included products.
+* Highlight the complete meal experience.
+
+6. OUTPUT QUALITY
+* Square Instagram post.
+* 1080x1080 composition.
+* Ultra realistic.
+* Commercial advertising quality.
+* Sharp details.
+* Professional food photography.
+
+ADDITIONAL CONTEXT:
+Generate an actual advertisement, not a menu card and not a simple food photo. The result should immediately look like a social media campaign creative designed by a professional restaurant marketing agency.
+
+NEGATIVE INSTRUCTIONS:
+Do not generate generic stock photos.
+Do not show only one item when multiple items exist.
+Do not crop food items.
+Do not create empty backgrounds.
+Do not generate low-quality typography.
+Do not make the image look AI-generated.
+Do not create cluttered layouts.`
       
-      const imgElement = await window.puter.ai.txt2img(prompt, {
-        provider: 'openai-image-generation',
-        model: 'gpt-image-1',
-        ratio: { w: 1, h: 1 }
-      })
+      // Determine provider from model to be safe, though puter can infer
+      let provider = undefined
+      if (modelId.includes('gpt') || modelId.includes('dall')) provider = 'openai-image-generation'
+      else if (modelId.includes('gemini') || modelId.includes('nano-banana')) provider = 'gemini'
+      else if (modelId.includes('flux') || modelId.includes('lucid')) provider = 'replicate-image-generation'
+      else if (modelId.includes('grok')) provider = 'xai'
+
+      let imgElement;
+      try {
+        imgElement = await window.puter.ai.txt2img(optimizedPrompt, {
+          provider,
+          model: modelId,
+          ratio: { w: 1, h: 1 }
+        })
+      } catch (e) {
+        console.warn(`Primary model ${modelId} failed:`, e)
+        toast.loading(`Model ${modelId} unavailable. Trying fallback...`, { id: 'img-gen' })
+        
+        try {
+          // Fallback 1: Free GPT Image
+          imgElement = await window.puter.ai.txt2img(optimizedPrompt, {
+            provider: 'openai-image-generation',
+            model: 'gpt-image-1',
+            ratio: { w: 1, h: 1 }
+          })
+        } catch (e2) {
+          console.warn("Fallback 1 failed:", e2)
+          // Fallback 2: Flux Schnell
+          imgElement = await window.puter.ai.txt2img(optimizedPrompt, {
+            provider: 'replicate-image-generation',
+            model: 'flux-schnell',
+            ratio: { w: 1, h: 1 }
+          })
+        }
+      }
       
       toast.loading('Applying Bombay Bethak Logo and Text...', { id: 'img-gen' })
 
@@ -216,9 +316,10 @@ export default function OffersPage() {
 
       ctx.drawImage(imgElement, 0, 0, width, height)
 
-      const gradient = ctx.createLinearGradient(0, height * 0.5, 0, height)
+      const gradient = ctx.createLinearGradient(0, height * 0.4, 0, height)
       gradient.addColorStop(0, 'rgba(0,0,0,0)')
-      gradient.addColorStop(1, 'rgba(0,0,0,0.8)')
+      gradient.addColorStop(0.5, 'rgba(0,0,0,0.6)')
+      gradient.addColorStop(1, 'rgba(0,0,0,0.95)')
       ctx.fillStyle = gradient
       ctx.fillRect(0, 0, width, height)
 
@@ -228,24 +329,66 @@ export default function OffersPage() {
       
       await new Promise((resolve) => {
         logoImg.onload = () => {
-          const logoWidth = 200
+          const logoWidth = 180
           const logoHeight = (logoImg.height / logoImg.width) * logoWidth
-          ctx.drawImage(logoImg, (width - logoWidth) / 2, 50, logoWidth, logoHeight)
+          ctx.drawImage(logoImg, (width - logoWidth) / 2, 60, logoWidth, logoHeight)
           resolve()
         }
         logoImg.onerror = resolve
       })
 
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 80px "Playfair Display", serif'
+      // Title Rendering Logic Update
       ctx.textAlign = 'center'
-      ctx.shadowColor = 'rgba(0,0,0,0.5)'
-      ctx.shadowBlur = 10
-      ctx.fillText(offer.name.toUpperCase(), width / 2, height - 150)
+      ctx.shadowColor = 'rgba(0,0,0,0.8)'
+      ctx.shadowBlur = 15
 
-      ctx.font = 'bold 100px Montserrat, sans-serif'
-      ctx.fillStyle = '#10b981'
-      ctx.fillText(`₹${offer.price}`, width / 2, height - 40)
+      // Subtitle: Special Combo Offer
+      ctx.font = 'bold 36px Montserrat, sans-serif'
+      ctx.fillStyle = '#fcd34d' // amber-300
+      ctx.letterSpacing = '4px' // Canvas API doesn't support letterSpacing directly in all browsers, but we'll stick to standard
+      ctx.fillText('SPECIAL COMBO OFFER', width / 2, height - 280)
+
+      // Large Combo Title
+      ctx.fillStyle = '#ffffff'
+      ctx.font = '900 85px "Playfair Display", serif'
+      
+      // Auto-wrap title if too long
+      const words = offer.name.toUpperCase().split(' ')
+      let line = ''
+      let y = height - 180
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' '
+        const metrics = ctx.measureText(testLine)
+        if (metrics.width > width - 100 && n > 0) {
+          ctx.fillText(line, width / 2, y)
+          line = words[n] + ' '
+          y += 90 // line height
+        } else {
+          line = testLine
+        }
+      }
+      ctx.fillText(line, width / 2, y)
+
+      // Large Price Highlight
+      ctx.font = '900 130px Montserrat, sans-serif'
+      ctx.fillStyle = '#10b981' // emerald-500
+      ctx.shadowBlur = 20
+      ctx.fillText(`₹${offer.price}`, width / 2, y + 130)
+
+      // Optional Profit Badge
+      const totalCost = offer.offer_items?.reduce((sum, oi) => sum + ((oi.items?.cost_price || 0) * oi.quantity), 0) || 0
+      const profit = offer.price - totalCost
+      if (profit > 0) {
+        ctx.font = 'bold 24px Montserrat, sans-serif'
+        ctx.fillStyle = '#ffffff'
+        ctx.shadowBlur = 5
+        ctx.beginPath()
+        ctx.roundRect((width / 2) + 160, y + 50, 180, 40, 20)
+        ctx.fillStyle = '#ef4444' // red-500 badge
+        ctx.fill()
+        ctx.fillStyle = '#ffffff'
+        ctx.fillText('MEGA SAVINGS', (width / 2) + 250, y + 78)
+      }
 
       const dataUrl = canvas.toDataURL('image/png')
       const link = document.createElement('a')
@@ -671,7 +814,7 @@ No markdown formatting or extra text. ONLY raw JSON.`
                 {o.is_active ? 'Active' : 'Inactive'}
               </button>
               <div className="flex gap-2 items-center">
-                <button onClick={() => generateSocialPost(o)} disabled={isGeneratingImage === o.id} className="p-1.5 text-xs font-bold text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded flex items-center gap-1 disabled:opacity-50">
+                <button onClick={() => setPostGenOffer(o)} disabled={isGeneratingImage === o.id} className="p-1.5 text-xs font-bold text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded flex items-center gap-1 disabled:opacity-50">
                   {isGeneratingImage === o.id ? 'Generating...' : '✨ Insta Post'}
                 </button>
                 <button onClick={() => handleEdit(o)} className="p-1.5 text-zinc-400 hover:text-indigo-500 bg-zinc-50 dark:bg-zinc-800 rounded"><Edit2 size={14}/></button>
@@ -750,6 +893,53 @@ No markdown formatting or extra text. ONLY raw JSON.`
               className="w-full btn-primary py-3 flex justify-center items-center gap-2"
             >
               {loading ? 'Saving...' : 'Update Cost Price'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Social Media Generator Modal */}
+      {postGenOffer && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up border border-purple-200 dark:border-purple-900/50">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-black text-purple-600 flex items-center gap-2">✨ Create Insta Post</h3>
+              <button onClick={() => setPostGenOffer(null)} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
+            </div>
+            
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-6">
+              Select an AI Image Model to generate a stunning background for <strong className="text-zinc-900 dark:text-white">{postGenOffer.name}</strong>.
+            </p>
+            
+            <label className="label mb-2 block text-zinc-700 dark:text-zinc-300">AI Image Model</label>
+            <select 
+              className="input w-full mb-6 font-semibold"
+              value={selectedImgModel}
+              onChange={e => setSelectedImgModel(e.target.value)}
+            >
+              <optgroup label="OpenAI">
+                <option value="gpt-image-1.5">GPT Image 1.5</option>
+                <option value="dall-e-3">DALL-E 3</option>
+                <option value="gpt-image-1">GPT Image 1</option>
+              </optgroup>
+              <optgroup label="Google">
+                <option value="gemini-2.5-flash-image-preview">Gemini 2.5 Flash</option>
+                <option value="gemini">Gemini Default</option>
+                <option value="nano-banana-2">Nano Banana 2</option>
+              </optgroup>
+              <optgroup label="Flux & Others">
+                <option value="flux-schnell">FLUX 1 Schnell</option>
+                <option value="flux-2-klein-9b-base">FLUX 2 Klein</option>
+                <option value="grok-2-image">Grok 2 Image</option>
+                <option value="lucid-origin">Leonardo Lucid Origin</option>
+              </optgroup>
+            </select>
+            
+            <button 
+              onClick={() => generateSocialPost(postGenOffer, selectedImgModel)} 
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-xl transition-colors flex justify-center items-center gap-2 shadow-sm"
+            >
+              Generate & Download
             </button>
           </div>
         </div>

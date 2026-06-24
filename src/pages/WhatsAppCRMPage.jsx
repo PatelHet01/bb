@@ -49,6 +49,9 @@ export default function WhatsAppCRMPage() {
   // Custom Customer Messaging
   const [customMessages, setCustomMessages] = useState({})
   const [isGeneratingFor, setIsGeneratingFor] = useState(null)
+  
+  // UI states
+  const [showFilters, setShowFilters] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -215,7 +218,8 @@ export default function WhatsAppCRMPage() {
     let num = customer.mobile_number.replace(/\D/g, '')
     if (num.length === 10) num = '91' + num
     
-    const url = `https://wa.me/${num}?text=${encodeURIComponent(msg)}`
+    // Using api.whatsapp.com for better PWA support
+    const url = `https://api.whatsapp.com/send/?phone=${num}&text=${encodeURIComponent(msg)}`
     window.open(url, '_blank')
   }
 
@@ -354,213 +358,193 @@ Return ONLY the final message body text. No quotes.`
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-2rem)] md:h-[calc(100vh-4rem)] max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-4xl mx-auto space-y-4 pb-20">
+      <div className="flex items-center justify-between mb-2">
         <div>
-          <h1 className="text-2xl font-black text-ink-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-xl font-black text-ink-900 dark:text-white flex items-center gap-2">
             <MessageCircle className="text-green-500" />
             WhatsApp CRM
           </h1>
-          <p className="text-sm text-ink-500 dark:text-ink-400 mt-1">Free click-to-chat messaging platform for your customers.</p>
         </div>
       </div>
 
-      {/* Filters & Template Selector */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        
-        {/* Filters Panel */}
-        <div className="lg:col-span-3 bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-2xl p-4 flex flex-wrap gap-4 items-end">
-          <div className="flex-1 min-w-[200px]">
-            <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Search</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" size={16} />
-              <input 
-                type="text" 
-                placeholder="Name or Mobile..." 
-                className="input w-full pl-9"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-              />
-            </div>
+      {/* Top Action Bar */}
+      <div className="flex flex-col md:flex-row gap-3">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" size={16} />
+          <input 
+            type="text" 
+            placeholder="Search name or mobile..." 
+            className="input w-full pl-9 py-3"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setShowFilters(!showFilters)} className={`btn-secondary flex-1 md:flex-none py-3 ${showFilters ? 'bg-ink-100 dark:bg-ink-800 border-ink-300 dark:border-ink-600' : ''}`}>
+            <Filter size={16} /> Filters
+          </button>
+          <div className="flex-1 md:w-56 flex bg-white dark:bg-ink-900 rounded-lg border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm">
+            <select className="bg-transparent border-0 text-sm font-bold w-full px-3 focus:ring-0 text-ink-900 dark:text-white" value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)}>
+              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <button onClick={() => handleEditTemplate(activeTemplate)} className="px-3 hover:bg-ink-50 dark:hover:bg-ink-800 border-l border-ink-100 dark:border-ink-800 text-ink-500 transition-colors" title="Edit Template">⚙️</button>
+            <button onClick={handleAddTemplate} className="px-3 hover:bg-ink-50 dark:hover:bg-ink-800 border-l border-ink-100 dark:border-ink-800 text-green-500 font-bold transition-colors" title="Add Template"><Plus size={16}/></button>
           </div>
-          
-          <div className="w-40">
-            <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Branch</label>
-            <select className="input w-full" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+        </div>
+      </div>
+
+      {/* Expandable Advanced Filters */}
+      {showFilters && (
+        <div className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-3 animate-fade-in shadow-sm">
+          <div>
+            <label className="text-[10px] font-bold text-ink-500 uppercase tracking-widest mb-1 block">Branch</label>
+            <select className="input w-full py-2" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="all">All Branches</option>
               {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
-
-          <div className="w-40">
-            <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Khata Filter</label>
-            <select className="input w-full" value={balanceFilter} onChange={e => setBalanceFilter(e.target.value)}>
+          <div>
+            <label className="text-[10px] font-bold text-ink-500 uppercase tracking-widest mb-1 block">Khata Filter</label>
+            <select className="input w-full py-2" value={balanceFilter} onChange={e => setBalanceFilter(e.target.value)}>
               <option value="all">All Customers</option>
               <option value="owes">Owes Money</option>
-              <option value="jama">Has Advance (Jama)</option>
+              <option value="jama">Has Advance</option>
               <option value="clear">Clear Balance</option>
             </select>
           </div>
-
-          <div className="w-40">
-            <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Entries Filter</label>
-            <select className="input w-full" value={statementFilter} onChange={e => setStatementFilter(e.target.value)}>
+          <div>
+            <label className="text-[10px] font-bold text-ink-500 uppercase tracking-widest mb-1 block">Entries Filter</label>
+            <select className="input w-full py-2" value={statementFilter} onChange={e => setStatementFilter(e.target.value)}>
               <option value="all">Whole Khata</option>
               <option value="today">Today's Entries</option>
               <option value="date">Specific Date</option>
             </select>
           </div>
-
           {statementFilter === 'date' && (
-            <div className="w-40">
-              <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Custom Date</label>
-              <input type="date" className="input w-full" value={statementDate} onChange={e => setStatementDate(e.target.value)} />
+            <div>
+              <label className="text-[10px] font-bold text-ink-500 uppercase tracking-widest mb-1 block">Custom Date</label>
+              <input type="date" className="input w-full py-2" value={statementDate} onChange={e => setStatementDate(e.target.value)} />
             </div>
           )}
         </div>
+      )}
 
-        {/* Template Panel */}
-        <div className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-2xl p-4 flex flex-col justify-between">
-          <div>
-            <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Active Template</label>
-            <select className="input w-full" value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)}>
-              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div className="flex gap-2 mt-4">
-            <button onClick={() => handleEditTemplate(activeTemplate)} className="btn-secondary flex-1 text-xs py-2">Edit</button>
-            <button onClick={handleAddTemplate} className="btn-primary flex-1 text-xs py-2 flex items-center justify-center gap-1"><Plus size={14}/> Add New</button>
-          </div>
-        </div>
-      </div>
-
-      {/* Global AI Generator Toggle */}
-      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 rounded-2xl border border-purple-100 dark:border-purple-800/50 overflow-hidden shadow-sm">
-        <button type="button" onClick={() => setShowAi(!showAi)} className="w-full px-5 py-4 flex items-center justify-between font-bold text-sm text-purple-700 dark:text-purple-300 hover:bg-purple-100/50 dark:hover:bg-purple-900/20 transition-colors">
-          <span className="flex items-center gap-2">
-            <span className="bg-purple-200 dark:bg-purple-800/50 p-1.5 rounded-lg"><MessageCircle size={16}/></span> 
-            Global AI Assistant Settings
+      {/* Minimal AI Generator Toggle */}
+      <div className="bg-purple-50/50 dark:bg-purple-900/10 rounded-xl border border-purple-100 dark:border-purple-800/30 overflow-hidden">
+        <button type="button" onClick={() => setShowAi(!showAi)} className="w-full px-4 py-3 flex items-center justify-between font-bold text-sm text-purple-700 dark:text-purple-300 hover:bg-purple-100/50 dark:hover:bg-purple-900/20 transition-colors">
+          <span className="flex items-center gap-2 text-xs">
+            ✨ Global AI Customization Settings
           </span>
           <span className="flex items-center gap-2">
-            <span className="text-xs font-medium bg-white/50 dark:bg-black/20 px-2 py-1 rounded-md text-purple-600 dark:text-purple-400">Generations: {localStorage.getItem('ai_gen_count') || 0}/15</span>
+            <span className="text-[10px] font-bold bg-white/50 dark:bg-black/20 px-2 py-1 rounded text-purple-600 dark:text-purple-400">Uses: {localStorage.getItem('ai_gen_count') || 0}/15</span>
             {showAi ? '▼' : '▶'}
           </span>
         </button>
         
         {showAi && (
-          <div className="p-5 pt-0 space-y-4 border-t border-purple-100/50 dark:border-purple-800/30 mt-2">
-            <p className="text-xs text-purple-600/80 dark:text-purple-400/80 font-medium">Configure tone and content. Then click "✨ AI Customize" on any customer card, or use the generator inside the Template editor.</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 pt-0 space-y-3 border-t border-purple-100/50 dark:border-purple-800/30 mt-1">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Tone</label>
-                <select className="input w-full py-2 text-sm" value={aiTone} onChange={e => setAiTone(e.target.value)}>
+                <select className="input w-full py-1.5 text-xs bg-white dark:bg-ink-900" value={aiTone} onChange={e => setAiTone(e.target.value)}>
                   <option>Sweet & Friendly</option>
                   <option>Playful</option>
-                  <option>Requestful / Polite</option>
-                  <option>Urgent / Angry</option>
                   <option>Professional</option>
                   <option>Marketing Gimmick</option>
                 </select>
               </div>
               <div>
-                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Language</label>
-                <select className="input w-full py-2 text-sm" value={aiLanguage} onChange={e => setAiLanguage(e.target.value)}>
+                <select className="input w-full py-1.5 text-xs bg-white dark:bg-ink-900" value={aiLanguage} onChange={e => setAiLanguage(e.target.value)}>
                   <option>English</option>
                   <option>Gujarati</option>
                   <option>Hindi</option>
                   <option>Hinglish</option>
-                  <option>Gujarati + English Mix</option>
                 </select>
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Content Type</label>
-                <select className="input w-full py-2 text-sm" value={aiContentType} onChange={e => setAiContentType(e.target.value)}>
+              <div className="col-span-2 md:col-span-1">
+                <select className="input w-full py-1.5 text-xs bg-white dark:bg-ink-900" value={aiContentType} onChange={e => setAiContentType(e.target.value)}>
                   <option>Marketing / General</option>
                   <option>Promotional Offer</option>
                   <option>Khata Reminder</option>
-                  <option>Festival Greeting</option>
                 </select>
               </div>
             </div>
-
             {aiContentType === 'Promotional Offer' && (
-              <div className="animate-fade-in w-full md:w-1/3">
-                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Select Active Offer</label>
-                <select className="input w-full py-2 text-sm" value={aiOfferId} onChange={e => setAiOfferId(e.target.value)}>
-                  <option value="">-- Select an Offer --</option>
-                  {activeOffers.map(o => (
-                    <option key={o.id} value={o.id}>{o.name} - ₹{o.price}</option>
-                  ))}
-                </select>
-              </div>
+              <select className="input w-full py-1.5 text-xs bg-white dark:bg-ink-900 animate-fade-in" value={aiOfferId} onChange={e => setAiOfferId(e.target.value)}>
+                <option value="">-- Select an Offer --</option>
+                {activeOffers.map(o => <option key={o.id} value={o.id}>{o.name} - ₹{o.price}</option>)}
+              </select>
             )}
           </div>
         )}
       </div>
 
-      {/* Customer List & Preview */}
-      <div className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-2xl flex-1 flex flex-col overflow-hidden">
-        <div className="px-5 py-4 border-b border-ink-200 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
-          <h2 className="font-bold text-sm text-ink-900 dark:text-white flex items-center gap-2">
-            <Filter size={16} /> Customers ({filteredCustomers.length})
-          </h2>
-          <span className="text-xs font-medium text-ink-500 bg-white dark:bg-ink-800 px-2 py-1 rounded-md border border-ink-200 dark:border-ink-700 truncate max-w-xs">
-            Template: <span className="font-bold">{activeTemplate?.name}</span>
-          </span>
-        </div>
+      {/* Minimal Customer List */}
+      <div className="flex justify-between items-center px-1">
+        <h2 className="font-bold text-xs text-ink-500 uppercase tracking-widest">
+          Results ({filteredCustomers.length})
+        </h2>
+      </div>
         
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 relative">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="animate-spin w-8 h-8 border-4 border-ember border-t-transparent rounded-full" />
-            </div>
-          ) : filteredCustomers.length === 0 ? (
-            <div className="text-center text-ink-400 py-10 font-medium">No customers found matching filters.</div>
-          ) : (
-            filteredCustomers.map(c => (
-              <div key={c.id} className="flex flex-col md:flex-row gap-4 p-4 rounded-xl border border-ink-200 dark:border-ink-800 hover:border-green-500/30 hover:bg-green-50/50 dark:hover:bg-green-900/10 transition-colors group">
-                <div className="md:w-1/4 flex-shrink-0">
-                  <h3 className="font-bold text-ink-900 dark:text-white">{c.name}</h3>
-                  <p className="text-xs text-ink-500">{c.mobile_number || 'No Mobile'}</p>
-                  
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-ink-400">{c.branchName}</span>
-                    {c.displayKhata > 0 && <span className="text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-0.5 rounded">Owes: ₹{c.displayKhata}</span>}
-                    {c.displayAdv > 0 && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded">Jama: ₹{c.displayAdv}</span>}
+      <div className="space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <div className="animate-spin w-6 h-6 border-2 border-ember border-t-transparent rounded-full" />
+          </div>
+        ) : filteredCustomers.length === 0 ? (
+          <div className="text-center text-ink-400 py-10 font-medium bg-white dark:bg-ink-900 rounded-xl border border-ink-200 dark:border-ink-800">No customers found.</div>
+        ) : (
+          filteredCustomers.map(c => {
+            const hasCustomMsg = !!customMessages[c.id];
+            return (
+              <div key={c.id} className="bg-white dark:bg-ink-900 rounded-xl border border-ink-200 dark:border-ink-800 overflow-hidden shadow-sm hover:border-ink-300 dark:hover:border-ink-700 transition-colors">
+                
+                {/* Header Info */}
+                <div className="p-3 flex items-center justify-between gap-2 border-b border-ink-100 dark:border-ink-800/50 bg-ink-50/50 dark:bg-ink-950/30">
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-ink-900 dark:text-white text-sm truncate">{c.name}</h3>
+                    <p className="text-[10px] font-bold text-ink-400 mt-0.5">{c.mobile_number || 'No Mobile'} · {c.branchName}</p>
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0 text-right">
+                    {c.displayKhata > 0 && <span className="text-[10px] font-black bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-1 rounded">₹{c.displayKhata} KHATA</span>}
+                    {c.displayAdv > 0 && <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-1 rounded">₹{c.displayAdv} JAMA</span>}
                   </div>
                 </div>
                 
-                <div className="flex-1 bg-ink-50 dark:bg-ink-950 p-3 rounded-lg border border-ink-100 dark:border-ink-800/50 relative min-h-[80px]">
-                  <div className="absolute top-2 right-2 text-[10px] font-bold text-ink-400 uppercase">Preview</div>
-                  <p className="text-sm text-ink-700 dark:text-ink-300 whitespace-pre-wrap pt-3 pr-14 leading-relaxed">
+                {/* Message Preview (Expandable styling removed to keep it simple, just scrolling text) */}
+                <div className="p-3 bg-white dark:bg-ink-900">
+                  <div className={`text-xs text-ink-600 dark:text-ink-400 leading-relaxed font-medium ${hasCustomMsg ? 'text-purple-700 dark:text-purple-400' : ''} max-h-24 overflow-y-auto whitespace-pre-wrap`}>
                     {customMessages[c.id] || getPopulatedMessage(c, activeTemplate?.text)}
-                  </p>
+                  </div>
                 </div>
                 
-                <div className="md:w-36 flex-shrink-0 flex flex-col justify-center gap-2">
+                {/* Action Footer */}
+                <div className="p-2 bg-ink-50 dark:bg-ink-950/50 border-t border-ink-100 dark:border-ink-800 flex gap-2">
+                  <button
+                    onClick={() => generateForCustomer(c)}
+                    disabled={isGeneratingFor === c.id || (aiContentType === 'Promotional Offer' && !aiOfferId)}
+                    className="flex-1 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-800/50 font-bold rounded-lg text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  >
+                    {isGeneratingFor === c.id ? <div className="animate-spin w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full" /> : (hasCustomMsg ? '✨ Regen' : '✨ AI Customize')}
+                  </button>
                   <button 
                     onClick={() => handleSend(c)}
                     disabled={!c.mobile_number}
                     style={{ backgroundColor: '#25D366' }}
-                    className="w-full py-2 hover:brightness-95 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed text-sm"
+                    className="flex-[2] py-2 hover:brightness-95 text-white font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-transform active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed text-xs"
                   >
-                    <Share2 size={14} /> Send
+                    <Share2 size={14} /> Send WhatsApp
                   </button>
-                  <button
-                    onClick={() => generateForCustomer(c)}
-                    disabled={isGeneratingFor === c.id || (aiContentType === 'Promotional Offer' && !aiOfferId)}
-                    className="w-full py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-800/50 font-bold rounded-lg text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
-                  >
-                    {isGeneratingFor === c.id ? <div className="animate-spin w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full" /> : '✨ AI Customize'}
-                  </button>
-                  {customMessages[c.id] && (
-                     <button onClick={() => setCustomMessages(p => { const newP = {...p}; delete newP[c.id]; return newP; })} className="text-[10px] font-bold text-ink-400 hover:text-red-500 text-center w-full mt-1">Reset to Template</button>
-                  )}
                 </div>
+                {hasCustomMsg && (
+                  <button onClick={() => setCustomMessages(p => { const newP = {...p}; delete newP[c.id]; return newP; })} className="block w-full py-1.5 bg-red-50 dark:bg-red-900/20 text-[10px] font-bold text-red-500 hover:text-red-600 text-center uppercase tracking-widest border-t border-red-100 dark:border-red-900/30">
+                    Reset to Standard Template
+                  </button>
+                )}
               </div>
-            ))
-          )}
-        </div>
+            );
+          })
+        )}
       </div>
 
       {/* Template Modal */}

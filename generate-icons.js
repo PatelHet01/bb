@@ -4,15 +4,15 @@ import sharp from 'sharp';
 const customerSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="black" rx="100"/>
-  <text x="256" y="375" font-family="Montserrat, sans-serif" font-weight="900" font-size="380" fill="white" text-anchor="middle">B</text>
+  <text x="256" y="415" font-family="Montserrat, sans-serif" font-weight="900" font-size="460" fill="white" text-anchor="middle">B</text>
 </svg>
 `;
 
 const adminSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="#fcd34d" rx="100"/>
-  <text x="256" y="375" font-family="Montserrat, sans-serif" font-weight="900" font-size="380" fill="black" text-anchor="middle">B</text>
-  <text x="256" y="460" font-family="Montserrat, sans-serif" font-weight="bold" font-size="60" fill="black" text-anchor="middle">ADMIN</text>
+  <text x="256" y="360" font-family="Montserrat, sans-serif" font-weight="900" font-size="400" fill="black" text-anchor="middle">B</text>
+  <text x="256" y="460" font-family="Montserrat, sans-serif" font-weight="bold" font-size="70" fill="black" text-anchor="middle">ADMIN</text>
 </svg>
 `;
 

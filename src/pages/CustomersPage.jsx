@@ -46,10 +46,15 @@ export default function CustomersPage() {
   
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showKhataModal, setShowKhataModal] = useState(false)
-  const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '' })
+  const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '', autoClearOtherBranches: true })
   const [editingLedgerEntry, setEditingLedgerEntry] = useState(null)
   const [showTempPasswordModal, setShowTempPasswordModal] = useState(false)
   const [tempPassword, setTempPassword] = useState('')
+
+  const [branchFilter, setBranchFilter] = useState('all')
+  const [balanceFilter, setBalanceFilter] = useState('all')
+  const [lockFilter, setLockFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('name')
 
   const isAdmin = role === 'admin' || role === 'super_admin'
 
@@ -272,7 +277,7 @@ export default function CustomersPage() {
       })
       toast.success('Khata credit added')
       setShowKhataModal(false)
-      setTxForm({ amount: '', mode: 'CASH', reason: '' })
+      setTxForm({ amount: '', mode: 'CASH', reason: '', autoClearOtherBranches: true })
       viewCustomer(selected)
       fetchCustomers()
     } catch (e) { toast.error(e.message) }
@@ -284,42 +289,58 @@ export default function CustomersPage() {
     const X = parseFloat(txForm.amount)
     if (!X || X <= 0) { toast.error('Enter valid amount'); return }
 
-    if (displayKhata === 0 && displayAdv === 0) {
-      toast.error('No outstanding balance. Customer has no debt.')
-      return
-    }
-
     setSaving(true)
     try {
       const branch = branchId || selected.branch_id || 'gurukul'
       const note   = txForm.reason || `Payment via ${txForm.mode}`
+      let remaining = X
 
-      if (X <= displayKhata) {
-        // Partial or exact payment
-        await supabase.from('khata_ledger').insert({
+      // 1. Get branch balances for the customer
+      const allBalances = computeBranchBalances(khataLedger, advanceLedger, branches)
+      const currentBranchDebt = allBalances.find(b => b.id === branch)
+      
+      const insertPromises = []
+
+      // 2. Clear current branch first
+      if (currentBranchDebt && currentBranchDebt.khata > 0) {
+        const deduct = Math.min(remaining, currentBranchDebt.khata)
+        insertPromises.push(supabase.from('khata_ledger').insert({
           customer_id: selected.id, branch_id: branch,
-          type: 'PAYMENT', amount: X, reason: note, recorded_by: user.username
-        })
-      } else {
-        // Overpayment: clear outstanding first, surplus → advance_ledger TOPUP
-        if (displayKhata > 0) {
-          await supabase.from('khata_ledger').insert({
-            customer_id: selected.id, branch_id: branch,
-            type: 'PAYMENT', amount: displayKhata,
-            reason: `${note} (Khata Cleared)`, recorded_by: user.username
-          })
-        }
-        const surplus = X - displayKhata
-        await supabase.from('advance_ledger').insert({
-          customer_id: selected.id, branch_id: branch,
-          type: 'TOPUP', amount: surplus,
-          reason: `${note} (Jama/Advance)`, recorded_by: user.username
-        })
+          type: 'PAYMENT', amount: deduct, reason: note + (deduct >= currentBranchDebt.khata ? ' (Khata Cleared)' : ''), recorded_by: user.username
+        }))
+        remaining -= deduct
       }
+
+      // 3. If surplus and auto-clear is enabled, clear other branches (lowest first)
+      if (remaining > 0 && txForm.autoClearOtherBranches) {
+        const otherBranchesDebt = allBalances
+          .filter(b => b.id !== branch && b.khata > 0)
+          .sort((a, b) => a.khata - b.khata) // Ascending order (lowest amount first)
+          
+        for (const b of otherBranchesDebt) {
+          if (remaining <= 0) break
+          const deduct = Math.min(remaining, b.khata)
+          insertPromises.push(supabase.from('khata_ledger').insert({
+            customer_id: selected.id, branch_id: b.id,
+            type: 'PAYMENT', amount: deduct, reason: note + ` (Cleared by payment at ${branch})`, recorded_by: user.username
+          }))
+          remaining -= deduct
+        }
+      }
+
+      // 4. Any final remainder goes to advance (Jama) in the recording branch
+      if (remaining > 0) {
+        insertPromises.push(supabase.from('advance_ledger').insert({
+          customer_id: selected.id, branch_id: branch,
+          type: 'TOPUP', amount: remaining, reason: note + ' (Jama/Advance)', recorded_by: user.username
+        }))
+      }
+
+      await Promise.all(insertPromises)
 
       toast.success('Payment recorded')
       setShowPaymentModal(false)
-      setTxForm({ amount: '', mode: 'CASH', reason: '' })
+      setTxForm({ amount: '', mode: 'CASH', reason: '', autoClearOtherBranches: true })
       viewCustomer(selected)
       fetchCustomers()
     } catch (e) { toast.error(e.message) }
@@ -345,7 +366,7 @@ export default function CustomersPage() {
 
       toast.success('Advance added')
       setShowAdvanceModal(false)
-      setTxForm({ amount: '', mode: 'CASH', reason: '' })
+      setTxForm({ amount: '', mode: 'CASH', reason: '', autoClearOtherBranches: true })
       viewCustomer(selected)
       fetchCustomers()
     } catch (e) { toast.error(e.message) }
@@ -421,11 +442,62 @@ export default function CustomersPage() {
     }
   }
 
-  const filtered = customers.filter(c =>
-    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.username || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.mobile_number || '').includes(search)
-  )
+  const filtered = useMemo(() => {
+    let result = customers.filter(c => {
+      const matchesSearch = !search ||
+        (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
+        (c.username || '').toLowerCase().includes(search.toLowerCase()) ||
+        (c.mobile_number || '').includes(search)
+
+      const matchesBranch = branchFilter === 'all' || 
+        (branchFilter === 'global' ? c.branch_id === null : c.branch_id === branchFilter)
+
+      let matchesBalance = true
+      if (balanceFilter === 'owes') {
+        matchesBalance = c.khataBalance > 0
+      } else if (balanceFilter === 'jama') {
+        matchesBalance = c.advanceBalance > 0
+      } else if (balanceFilter === 'clear') {
+        matchesBalance = c.khataBalance === 0 && c.advanceBalance === 0
+      }
+
+      let matchesLock = true
+      if (lockFilter === 'locked') {
+        matchesLock = c.is_khata_locked === true
+      } else if (lockFilter === 'unlocked') {
+        matchesLock = !c.is_khata_locked
+      }
+
+      return matchesSearch && matchesBranch && matchesBalance && matchesLock
+    })
+
+    result.sort((a, b) => {
+      if (sortBy === 'name') {
+        return (a.name || '').localeCompare(b.name || '')
+      }
+      if (sortBy === 'balance_desc') {
+        const netA = a.khataBalance - a.advanceBalance
+        const netB = b.khataBalance - b.advanceBalance
+        return netB - netA
+      }
+      if (sortBy === 'balance_asc') {
+        const netA = a.khataBalance - a.advanceBalance
+        const netB = b.khataBalance - b.advanceBalance
+        return netA - netB
+      }
+      if (sortBy === 'purchases_desc') {
+        return (b.totalPurchases || 0) - (a.totalPurchases || 0)
+      }
+      if (sortBy === 'last_visit_desc') {
+        if (!a.lastVisit) return 1
+        if (!b.lastVisit) return -1
+        return new Date(b.lastVisit) - new Date(a.lastVisit)
+      }
+      return 0
+    })
+
+    return result
+  }, [customers, search, branchFilter, balanceFilter, lockFilter, sortBy])
 
   const branchBalances = computeBranchBalances(khataLedger, advanceLedger, branches)
 
@@ -469,6 +541,65 @@ export default function CustomersPage() {
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
             <input className="input pl-9 w-full bg-white dark:bg-ink-900" placeholder="Search by name, username, mobile..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-ink-400 uppercase">Branch</label>
+              <select 
+                className="input py-1 px-2 text-xs bg-white dark:bg-ink-900" 
+                value={branchFilter} 
+                onChange={e => setBranchFilter(e.target.value)}
+              >
+                <option value="all">All Branches</option>
+                <option value="global">Global (No Branch)</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-ink-400 uppercase">Balance</label>
+              <select 
+                className="input py-1 px-2 text-xs bg-white dark:bg-ink-900" 
+                value={balanceFilter} 
+                onChange={e => setBalanceFilter(e.target.value)}
+              >
+                <option value="all">All Balances</option>
+                <option value="owes">Owes (Khata &gt; 0)</option>
+                <option value="jama">Jama (Adv &gt; 0)</option>
+                <option value="clear">Clear (Zero)</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-ink-400 uppercase">Khata Lock</label>
+              <select 
+                className="input py-1 px-2 text-xs bg-white dark:bg-ink-900" 
+                value={lockFilter} 
+                onChange={e => setLockFilter(e.target.value)}
+              >
+                <option value="all">All Status</option>
+                <option value="locked">Locked 🔒</option>
+                <option value="unlocked">Unlocked 🔓</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-ink-400 uppercase">Sort By</label>
+              <select 
+                className="input py-1 px-2 text-xs bg-white dark:bg-ink-900" 
+                value={sortBy} 
+                onChange={e => setSortBy(e.target.value)}
+              >
+                <option value="name">Name (A-Z)</option>
+                <option value="balance_desc">Balance (Owes First)</option>
+                <option value="balance_asc">Balance (Jama First)</option>
+                <option value="purchases_desc">Purchases (High to Low)</option>
+                <option value="last_visit_desc">Last Visit (Recent First)</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -567,8 +698,8 @@ export default function CustomersPage() {
 
                 <div className="flex flex-col items-end gap-1">
                   <div className="flex gap-2 text-xs font-bold">
-                    {c.khataBalance > 0 && <span className="text-red-500 bg-red-50 dark:bg-red-900/20 px-1.5 rounded">Khata: ₹{c.khataBalance}</span>}
-                    {c.advanceBalance > 0 && <span className="text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 rounded">Adv: ₹{c.advanceBalance}</span>}
+                    {c.khataBalance > 0 && <span className="text-red-500 bg-red-50 dark:bg-red-900/20 px-1.5 rounded">- ₹{c.khataBalance}</span>}
+                    {c.advanceBalance > 0 && <span className="text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 rounded">+ ₹{c.advanceBalance}</span>}
                   </div>
                   <div className="flex gap-2 text-[10px] text-ink-500">
                     <span>🪙 {c.ghoda_coins || 0}</span>
@@ -633,11 +764,8 @@ export default function CustomersPage() {
                     </p>
                     <div className="flex gap-2 mt-3">
                       <button
-                        className={`flex-1 py-2 text-xs font-bold text-white rounded-lg shadow-sm transition-colors ${
-                          displayKhata > 0 ? 'bg-red-500 hover:bg-red-600' : 'bg-ink-300 dark:bg-ink-700 cursor-not-allowed'
-                        }`}
+                        className="flex-1 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors"
                         onClick={() => setShowPaymentModal(true)}
-                        disabled={liveNet <= 0 && displayAdv === 0}
                       >
                         Record Payment
                       </button>
@@ -868,9 +996,15 @@ export default function CustomersPage() {
           <label className="label">Note / Reference ID</label>
           <input className="input w-full" value={txForm.reason} onChange={e => setTxForm({...txForm, reason: e.target.value})} placeholder="Optional" />
         </div>
+        <div className="flex items-center gap-2 pt-2">
+          <input type="checkbox" id="autoClearOtherBranches" className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer" checked={txForm.autoClearOtherBranches} onChange={e => setTxForm({...txForm, autoClearOtherBranches: e.target.checked})} />
+          <label htmlFor="autoClearOtherBranches" className="text-xs font-semibold text-ink-700 dark:text-ink-300 cursor-pointer">
+            Auto-deduct surplus from other branches
+          </label>
+        </div>
       </Modal>
 
-      <Modal title="Add Khata Credit (Goods on Credit)" show={showKhataModal} onClose={() => { setShowKhataModal(false); setTxForm({ amount: '', mode: 'CASH', reason: '' }) }} onSubmit={handleAddKhataCredit} saving={saving}>
+      <Modal title="Add Khata Credit (Goods on Credit)" show={showKhataModal} onClose={() => { setShowKhataModal(false); setTxForm({ amount: '', mode: 'CASH', reason: '', autoClearOtherBranches: true }) }} onSubmit={handleAddKhataCredit} saving={saving}>
         <div>
           <label className="label">Amount (₹) *</label>
           <input className="input w-full font-black text-lg" type="number" min="1" required value={txForm.amount} onChange={e => setTxForm({...txForm, amount: e.target.value})} autoFocus />

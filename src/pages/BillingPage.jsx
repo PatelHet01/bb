@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { logAudit, AUDIT_ACTIONS } from '../lib/auditLogger'
 
 import { playBell } from '../utils/bell'
+import { computeBranchBalances } from '../utils/khata'
 import { processVoiceCommand } from '../utils/voiceAI'
 import * as IndianDict from '../utils/indianVoiceDictionary'
 import Fuse from 'fuse.js'
@@ -79,6 +80,7 @@ export default function BillingPage() {
 
   // Payments & Checkout
   const [payments, setPayments] = useState([{ mode: 'CASH', subtype: '', amount: 0 }])
+  const [autoClearOtherBranches, setAutoClearOtherBranches] = useState(true)
   const [loading, setLoading] = useState(true)
 
   // Voice AI
@@ -1316,15 +1318,50 @@ export default function BillingPage() {
     const finalTotalPaid = finalPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
     
     if (cart.length === 0) { toast.error('Cart is empty'); return }
-    if (Math.abs(total - finalTotalPaid) > 0.01) { toast.error(`Total paid (₹${finalTotalPaid}) must equal Bill total (₹${total})`); return }
+    if (finalTotalPaid < total - 0.01) {
+      toast.error(`Total paid (₹${finalTotalPaid}) is less than Bill total (₹${total})`)
+      return
+    }
+
+    let surplus = finalTotalPaid - total
+    let adjustedPaymentsForOrder = []
     
-    const totalAdvanceAttempt = finalPayments.filter(p => p.mode === 'ADVANCE').reduce((s, p) => s + parseFloat(p.amount), 0)
+    if (surplus > 0.01) {
+      if (!customer) {
+        toast.error('Overpayment is only allowed when a customer is selected.')
+        return
+      }
+      
+      const sortedPayments = [...finalPayments].sort((a, b) => {
+        const isAOrderSpecific = (a.mode === 'KHATA' || a.mode === 'ADVANCE') ? -1 : 1;
+        const isBOrderSpecific = (b.mode === 'KHATA' || b.mode === 'ADVANCE') ? -1 : 1;
+        return isAOrderSpecific - isBOrderSpecific;
+      });
+
+      let remainingToAssignToOrder = total
+      for (const p of sortedPayments) {
+        const amt = parseFloat(p.amount)
+        if (remainingToAssignToOrder <= 0) {
+          // This payment is entirely surplus, do not add to adjustedPaymentsForOrder
+        } else if (amt <= remainingToAssignToOrder) {
+          adjustedPaymentsForOrder.push(p)
+          remainingToAssignToOrder -= amt
+        } else {
+          adjustedPaymentsForOrder.push({ ...p, amount: remainingToAssignToOrder })
+          remainingToAssignToOrder = 0
+        }
+      }
+    } else {
+      adjustedPaymentsForOrder = finalPayments
+    }
+    
+    const totalAdvanceAttempt = adjustedPaymentsForOrder.filter(p => p.mode === 'ADVANCE').reduce((s, p) => s + parseFloat(p.amount), 0)
     if (totalAdvanceAttempt > custBalances.advance) {
       toast.error(`Advance exceeds balance (₹${custBalances.advance})`); return
     }
 
     // Khata credit limit guard — block if locked and any payment is KHATA
-    const hasKhataPayment = finalPayments.some(p => p.mode === 'KHATA')
+    const hasKhataPayment = adjustedPaymentsForOrder.some(p => p.mode === 'KHATA')
     if (hasKhataPayment && customer?.is_khata_locked) {
       toast.error(`🔒 ${customer.name}'s khata limit is reached. They must repay to unlock before adding more on credit.`)
       return
@@ -1498,7 +1535,7 @@ export default function BillingPage() {
         }
       }
 
-      const { error: paymentError } = await supabase.from('order_payments').insert(finalPayments.map(p => ({
+      const { error: paymentError } = await supabase.from('order_payments').insert(adjustedPaymentsForOrder.map(p => ({
           order_id: order.id, 
           mode: p.mode === 'ONLINE' ? (p.subtype || 'UPI') : p.mode, 
           amount: parseFloat(p.amount)
@@ -1508,7 +1545,7 @@ export default function BillingPage() {
          throw paymentError
       }
 
-      for (const p of finalPayments) {
+      for (const p of adjustedPaymentsForOrder) {
         if (p.mode === 'KHATA') {
           await supabase.from('khata_ledger').insert({
             customer_id: customer.id, branch_id: target_branch, type: 'CREDIT', amount: parseFloat(p.amount),
@@ -1523,6 +1560,56 @@ export default function BillingPage() {
             created_at: order.created_at
           })
         }
+      }
+
+      // ── SURPLUS PAYMENT LOGIC (Waterfall) ──
+      if (surplus > 0.01 && customer) {
+        const note = `Overpayment from Order #${order.order_number || order.id.slice(0, 8)}`
+        let remainingSurplus = surplus
+        
+        const { data: allKhata } = await supabase.from('khata_ledger').select('branch_id, type, amount').eq('customer_id', customer.id)
+        const { data: allAdv } = await supabase.from('advance_ledger').select('branch_id, type, amount').eq('customer_id', customer.id)
+        const { data: allBranches } = await supabase.from('branches').select('id')
+        const allBalances = computeBranchBalances(allKhata || [], allAdv || [], allBranches || [])
+        
+        const currentBranchDebt = allBalances.find(b => b.id === target_branch)
+        const insertPromises = []
+
+        // 1. Clear current branch first
+        if (currentBranchDebt && currentBranchDebt.khata > 0) {
+          const deduct = Math.min(remainingSurplus, currentBranchDebt.khata)
+          insertPromises.push(supabase.from('khata_ledger').insert({
+            customer_id: customer.id, branch_id: target_branch,
+            type: 'PAYMENT', amount: deduct, reason: note + (deduct >= currentBranchDebt.khata ? ' (Khata Cleared)' : ''), recorded_by: user.username
+          }))
+          remainingSurplus -= deduct
+        }
+
+        // 2. Clear other branches if autoClearOtherBranches is true
+        if (remainingSurplus > 0 && autoClearOtherBranches) {
+          const otherBranchesDebt = allBalances
+            .filter(b => b.id !== target_branch && b.khata > 0)
+            .sort((a, b) => a.khata - b.khata)
+            
+          for (const b of otherBranchesDebt) {
+            if (remainingSurplus <= 0) break
+            const deduct = Math.min(remainingSurplus, b.khata)
+            insertPromises.push(supabase.from('khata_ledger').insert({
+              customer_id: customer.id, branch_id: b.id,
+              type: 'PAYMENT', amount: deduct, reason: note + ` (Cleared by payment at ${target_branch})`, recorded_by: user.username
+            }))
+            remainingSurplus -= deduct
+          }
+        }
+
+        // 3. Final remainder to advance (Jama)
+        if (remainingSurplus > 0) {
+          insertPromises.push(supabase.from('advance_ledger').insert({
+            customer_id: customer.id, branch_id: target_branch,
+            type: 'TOPUP', amount: remainingSurplus, reason: note + ' (Jama/Advance)', recorded_by: user.username
+          }))
+        }
+        await Promise.all(insertPromises)
       }
 
       if (customer) {
@@ -2683,6 +2770,15 @@ export default function BillingPage() {
                   {payments.length > 1 && <button onClick={() => removePayment(i)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><X size={16}/></button>}
                 </div>
               ))}
+              {/* Overpayment auto-clear checkbox */}
+              {customer && payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) - total > 0.01 && (
+                <div className="flex items-center gap-2 mt-2 px-2 pb-2">
+                  <input type="checkbox" id="autoClearOtherBranches" className="w-4 h-4 text-ember rounded focus:ring-ember cursor-pointer" checked={autoClearOtherBranches} onChange={e => setAutoClearOtherBranches(e.target.checked)} />
+                  <label htmlFor="autoClearOtherBranches" className="text-[10px] font-bold text-ink-600 dark:text-ink-400 cursor-pointer uppercase tracking-widest">
+                    Auto-clear Khata in other branches with surplus (₹{(payments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) - total).toFixed(0)})
+                  </label>
+                </div>
+              )}
               {/* Cash Denomination Helper - UI only */}
               {isSingleCash && total > 0 && (
                 <div className="bg-emerald-50 dark:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 space-y-2">

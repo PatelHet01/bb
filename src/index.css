@@ -10,6 +10,12 @@
     @apply bg-zinc-100 text-zinc-900;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: env(safe-area-inset-top);
   }
   .dark body, body.dark {
     @apply bg-zinc-950 text-zinc-100;

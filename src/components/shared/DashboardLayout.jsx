@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
   BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee, Shield,
-  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock, ShieldCheck, MessageCircle
+  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock, ShieldCheck, MessageCircle, Download
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
@@ -83,9 +83,34 @@ export default function DashboardLayout() {
   const [profileFullName, setProfileFullName] = useState('')
   const [profilePassword, setProfilePassword] = useState('')
   const [profileLoading, setProfileLoading] = useState(false)
-
+  const [deferredPrompt, setDeferredPrompt] = useState(null)
+  const [isInstallable, setIsInstallable] = useState(false)
 
   useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+      setIsInstallable(true)
+    }
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    
+    // Check if already installed
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstallable(false)
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  }, [])
+
+  async function handleInstallClick() {
+    if (!deferredPrompt) return
+    deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+    if (outcome === 'accepted') {
+      setIsInstallable(false)
+    }
+    setDeferredPrompt(null)
+  }  useEffect(() => {
     // Check if the logged in user actually exists in DB
     async function verifyUser() {
       if (!user?.id) return
@@ -328,6 +353,27 @@ export default function DashboardLayout() {
           </div>
 
           <div className="flex items-center gap-1">
+            {isInstallable && (
+              <button
+                onClick={handleInstallClick}
+                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-500/30 transition-colors mr-2"
+                title="Install BB Admin App"
+              >
+                <Download size={14} />
+                Install App
+              </button>
+            )}
+            {/* Mobile install icon */}
+            {isInstallable && (
+              <button
+                onClick={handleInstallClick}
+                className="md:hidden p-2 text-amber-600 dark:text-amber-400 btn-ghost rounded-lg mr-1"
+                title="Install App"
+              >
+                <Download size={16} />
+              </button>
+            )}
+            
             {['super_admin','admin','manager'].includes(role) && <NotificationBell />}
             <button
               onClick={toggleDark}

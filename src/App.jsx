@@ -2,12 +2,21 @@ import AppRoutes from './routes/AppRoutes'
 import { useAutoLogout } from './hooks/useAutoLogout'
 import { useAuthStore } from './store/authStore'
 import { useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { supabase } from './lib/supabase'
 
 export default function App() {
   const { showWarning, extendSession } = useAutoLogout()
   const { user, role, branchId, logout } = useAuthStore()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/admin')) {
+      document.getElementById('manifest-link')?.setAttribute('href', '/admin-manifest.json')
+      document.getElementById('apple-touch-icon')?.setAttribute('href', '/admin-pwa-192x192.png')
+      document.getElementById('theme-color-meta')?.setAttribute('content', '#fcd34d')
+    }
+  }, [window.location.pathname])
 
   function handleLogout() {
     if (user) {

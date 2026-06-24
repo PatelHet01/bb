@@ -7,6 +7,7 @@ import DashboardHome from '../pages/DashboardHome'
 import BillingPage from '../pages/BillingPage'
 import InventoryPage from '../pages/InventoryPage'
 import CustomersPage from '../pages/CustomersPage'
+import WhatsAppCRMPage from '../pages/WhatsAppCRMPage'
 import StaffSalaryPage from '../pages/StaffSalaryPage'
 import RewardsPage from '../pages/RewardsPage'
 import AnalyticsPage from '../pages/AnalyticsPage'
@@ -65,6 +66,11 @@ export default function AppRoutes() {
         <Route path="customers" element={
           <AdminRoute allowedRoles={['super_admin', 'admin']}>
             <CustomersPage />
+          </AdminRoute>
+        } />
+        <Route path="whatsapp" element={
+          <AdminRoute allowedRoles={['super_admin', 'admin']}>
+            <WhatsAppCRMPage />
           </AdminRoute>
         } />
         <Route path="offers" element={<OffersPage />} />

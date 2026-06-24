@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users,
   LogOut, Sun, Moon, Menu, X, ChevronRight,
   BarChart2, Settings, Gift, Megaphone, Receipt, GitBranch, Utensils, QrCode, Coffee, Shield,
-  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock, ShieldCheck
+  ClipboardList, Truck, ArrowLeftRight, Banknote, Clock, ShieldCheck, MessageCircle
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
@@ -37,6 +37,7 @@ const NAV_GROUPS = [
     title: 'PEOPLE',
     items: [
       { to: '/admin/customers', label: 'Customers',    icon: Users,           roles: ['super_admin','admin'], feature: 'customers' },
+      { to: '/admin/whatsapp',  label: 'WhatsApp',     icon: MessageCircle,   roles: ['super_admin','admin'], feature: 'customers' },
       { to: '/admin/hr',        label: 'HR & Operations', icon: Users,        roles: ['super_admin','admin'], feature: 'salary' },
       { to: '/admin/vendors',   label: 'Vendors',      icon: Truck,           roles: ['super_admin','admin'], feature: 'vendors' }
     ]

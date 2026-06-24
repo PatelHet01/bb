@@ -20,6 +20,9 @@ export default function WhatsAppCRMPage() {
   const [statementFilter, setStatementFilter] = useState('all') // all, today, date
   const [statementDate, setStatementDate] = useState('')
   
+  // Orders for today
+  const [todaysOrders, setTodaysOrders] = useState([])
+
   // Templates
   const [templates, setTemplates] = useState([
     { id: 't1', name: 'Daily Summary', text: 'Hi {name},\n\nHere is your transaction summary for today at {branch}:\n\n{statement}\n\nTotal Outstanding Khata: ₹{khata_amount}\n\nThank you for visiting!' },
@@ -33,6 +36,19 @@ export default function WhatsAppCRMPage() {
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState({ id: '', name: '', text: '' })
   const [savingSettings, setSavingSettings] = useState(false)
+
+  // AI Generator States
+  const [activeOffers, setActiveOffers] = useState([])
+  const [showAi, setShowAi] = useState(false)
+  const [aiTone, setAiTone] = useState('Sweet')
+  const [aiLanguage, setAiLanguage] = useState('English')
+  const [aiContentType, setAiContentType] = useState('Marketing / General')
+  const [aiOfferId, setAiOfferId] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
+  
+  // Custom Customer Messaging
+  const [customMessages, setCustomMessages] = useState({})
+  const [isGeneratingFor, setIsGeneratingFor] = useState(null)
 
   useEffect(() => {
     fetchData()
@@ -68,16 +84,23 @@ export default function WhatsAppCRMPage() {
   async function fetchData() {
     setLoading(true)
     try {
-      const [cRes, kRes, aRes, bRes] = await Promise.all([
+      const startOfDay = new Date()
+      startOfDay.setHours(0,0,0,0)
+
+      const [cRes, kRes, aRes, bRes, oRes, offersRes] = await Promise.all([
         supabase.from('customers').select('*').order('name'),
         supabase.from('khata_ledger').select('*'),
         supabase.from('advance_ledger').select('*'),
-        supabase.from('branches').select('*')
+        supabase.from('branches').select('*'),
+        supabase.from('orders').select('customer_id, final_total, created_at, order_number').gte('created_at', startOfDay.toISOString()),
+        supabase.from('offers').select('id, name, description, price').eq('is_active', true)
       ])
       
       setCustomers(cRes.data || [])
       setLedgers({ khata: kRes.data || [], advance: aRes.data || [] })
       setBranches(bRes.data || [])
+      setTodaysOrders(oRes.data || [])
+      setActiveOffers(offersRes.data || [])
     } catch (e) {
       toast.error('Failed to load data')
     } finally {
@@ -127,19 +150,32 @@ export default function WhatsAppCRMPage() {
   function generateStatement(customer) {
     let k = ledgers.khata.filter(l => l.customer_id === customer.id)
     let a = ledgers.advance.filter(l => l.customer_id === customer.id)
+    let o = todaysOrders.filter(l => l.customer_id === customer.id)
 
-    if (statementFilter === 'today') {
-      const today = new Date().toISOString().split('T')[0]
-      k = k.filter(l => l.created_at.startsWith(today))
-      a = a.filter(l => l.created_at.startsWith(today))
+    const isDailySummary = activeTemplate?.id === 't1'
+
+    if (statementFilter === 'today' || isDailySummary) {
+      const startOfDay = new Date()
+      startOfDay.setHours(0,0,0,0)
+      const iso = startOfDay.toISOString()
+      k = k.filter(l => l.created_at >= iso)
+      a = a.filter(l => l.created_at >= iso)
+      // o is already only today's orders
     } else if (statementFilter === 'date' && statementDate) {
-      k = k.filter(l => l.created_at.startsWith(statementDate))
-      a = a.filter(l => l.created_at.startsWith(statementDate))
+      const d1 = new Date(statementDate)
+      d1.setHours(0,0,0,0)
+      const d2 = new Date(statementDate)
+      d2.setHours(23,59,59,999)
+      k = k.filter(l => l.created_at >= d1.toISOString() && l.created_at <= d2.toISOString())
+      a = a.filter(l => l.created_at >= d1.toISOString() && l.created_at <= d2.toISOString())
+      o = [] // ignore non-today orders for custom date for now
     }
 
     const combined = [
       ...k.map(x => ({ ...x, _type: x.type === 'PAYMENT' ? 'khata_pay' : 'khata_debt' })),
-      ...a.map(x => ({ ...x, _type: x.type === 'TOPUP' ? 'adv_topup' : 'adv_deduct' }))
+      ...a.map(x => ({ ...x, _type: x.type === 'TOPUP' ? 'adv_topup' : 'adv_deduct' })),
+      ...o.filter(x => !k.some(kl => kl.reason?.includes(x.order_number)) && !a.some(al => al.reason?.includes(x.order_number)))
+          .map(x => ({ created_at: x.created_at, amount: x.final_total, reason: `Order #${x.order_number} (Cash/UPI)`, _type: 'order_cash' }))
     ].sort((x, y) => new Date(x.created_at) - new Date(y.created_at))
 
     if (combined.length === 0) return 'No entries found.'
@@ -149,10 +185,11 @@ export default function WhatsAppCRMPage() {
       const d = new Date(row.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
       let amt = parseFloat(row.amount)
       let note = row.reason || ''
-      if (row._type === 'khata_debt') str += `${d}: -₹${amt} (${note})\n`
-      if (row._type === 'khata_pay') str += `${d}: +₹${amt} (Khata Payment)\n`
-      if (row._type === 'adv_topup') str += `${d}: +₹${amt} (Jama)\n`
-      if (row._type === 'adv_deduct') str += `${d}: -₹${amt} (Jama Deduct)\n`
+      if (row._type === 'khata_debt') str += `${d}: -₹${amt} (${note} - Khata)\n`
+      if (row._type === 'khata_pay') str += `${d}: +₹${amt} (Khata Payment Received)\n`
+      if (row._type === 'adv_topup') str += `${d}: +₹${amt} (Jama Added)\n`
+      if (row._type === 'adv_deduct') str += `${d}: -₹${amt} (${note} - Jama)\n`
+      if (row._type === 'order_cash') str += `${d}: ₹${amt} (${note})\n`
     })
 
     return str.trim()
@@ -174,7 +211,7 @@ export default function WhatsAppCRMPage() {
       toast.error('Customer has no mobile number')
       return
     }
-    const msg = getPopulatedMessage(customer, activeTemplate?.text)
+    const msg = customMessages[customer.id] || getPopulatedMessage(customer, activeTemplate?.text)
     let num = customer.mobile_number.replace(/\D/g, '')
     if (num.length === 10) num = '91' + num
     
@@ -199,6 +236,120 @@ export default function WhatsAppCRMPage() {
       if (selectedTemplateId === id) setSelectedTemplateId(newT[0].id)
       saveTemplates(newT)
       setShowTemplateModal(false)
+    }
+  }
+
+  async function generateTemplateWithAI() {
+    const key = import.meta.env.VITE_GEMINI_API_KEY
+    if (!key) return toast.error('Gemini API key is missing from environment variables (.env)')
+
+    let offerText = ''
+    if (aiContentType === 'Promotional Offer' && aiOfferId) {
+      const offer = activeOffers.find(o => o.id === aiOfferId)
+      if (offer) {
+        offerText = `We are promoting a combo/offer: "${offer.name}" for ₹${offer.price}. Description: ${offer.description || 'No description'}. Make sure to enthusiastically mention this offer in the message.`
+      }
+    }
+
+    const prompt = `You are a helpful assistant writing a WhatsApp template message for a cafe/paan shop named Bombay Bethak.
+Tone: ${aiTone}
+Language: ${aiLanguage}
+Content Type: ${aiContentType}
+${offerText}
+
+IMPORTANT: You can optionally use any of the following variables in the text exactly as shown:
+{name} - The Customer's name
+{branch} - The Branch name
+{khata_amount} - The amount they owe (outstanding khata)
+{jama_amount} - The advance amount they have
+{statement} - Their transaction history for today
+
+Only use the variables if it makes sense for the content type. For example, if it's a Khata Reminder, use {khata_amount}. If it's a promotional message, you don't need to use {khata_amount}.
+Keep it concise, formatted well for WhatsApp (use * for bolding, emojis are welcome). 
+Return ONLY the final message body text. Do not include quotes, markdown blocks, or intro text.`
+
+    setIsGenerating(true)
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      })
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`API Error: ${errText}`)
+      }
+      const data = await res.json()
+      const generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      if (generatedText) {
+        setEditingTemplate(prev => ({ ...prev, text: generatedText.trim() }))
+        toast.success('Generated successfully! ✨')
+      } else {
+        toast.error('AI returned empty text.')
+      }
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  async function generateForCustomer(c) {
+    const countStr = localStorage.getItem('ai_gen_count') || '0'
+    let count = parseInt(countStr)
+    if (count >= 15) return toast.error('You have reached the limit of 15 AI generations.')
+
+    const key = import.meta.env.VITE_GEMINI_API_KEY
+    if (!key) return toast.error('Gemini API key is missing')
+
+    let offerText = ''
+    if (aiContentType === 'Promotional Offer' && aiOfferId) {
+      const offer = activeOffers.find(o => o.id === aiOfferId)
+      if (offer) {
+        offerText = `Promoting Combo: "${offer.name}" for ₹${offer.price}. Description: ${offer.description || 'No description'}.`
+      }
+    }
+
+    const statement = generateStatement(c)
+
+    const prompt = `You are a helpful assistant writing a WhatsApp message for a cafe/paan shop named Bombay Bethak to send directly to a specific customer.
+Customer Name: ${c.name}
+Branch: ${c.branchName}
+Khata (Owes us): ₹${c.displayKhata}
+Jama (Advance): ₹${c.displayAdv}
+Today's Transaction Statement:
+${statement}
+
+Tone: ${aiTone}
+Language: ${aiLanguage}
+Content Type: ${aiContentType}
+${offerText}
+
+Write a deeply personalized, concise message to this specific customer based on the Content Type and their details. Use * for bolding. DO NOT use placeholder variables like {name}, insert their actual data into the text natively.
+Return ONLY the final message body text. No quotes.`
+
+    setIsGeneratingFor(c.id)
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      })
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(`API Error: ${errText}`)
+      }
+      const data = await res.json()
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      if (text) {
+        setCustomMessages(p => ({ ...p, [c.id]: text.trim() }))
+        localStorage.setItem('ai_gen_count', (count + 1).toString())
+        toast.success(`Generated personalized message for ${c.name}! (${count + 1}/15)`)
+      }
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setIsGeneratingFor(null)
     }
   }
 
@@ -283,6 +434,70 @@ export default function WhatsAppCRMPage() {
         </div>
       </div>
 
+      {/* Global AI Generator Toggle */}
+      <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/10 dark:to-indigo-900/10 rounded-2xl border border-purple-100 dark:border-purple-800/50 overflow-hidden shadow-sm">
+        <button type="button" onClick={() => setShowAi(!showAi)} className="w-full px-5 py-4 flex items-center justify-between font-bold text-sm text-purple-700 dark:text-purple-300 hover:bg-purple-100/50 dark:hover:bg-purple-900/20 transition-colors">
+          <span className="flex items-center gap-2">
+            <span className="bg-purple-200 dark:bg-purple-800/50 p-1.5 rounded-lg"><MessageCircle size={16}/></span> 
+            Global AI Assistant Settings
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-xs font-medium bg-white/50 dark:bg-black/20 px-2 py-1 rounded-md text-purple-600 dark:text-purple-400">Generations: {localStorage.getItem('ai_gen_count') || 0}/15</span>
+            {showAi ? '▼' : '▶'}
+          </span>
+        </button>
+        
+        {showAi && (
+          <div className="p-5 pt-0 space-y-4 border-t border-purple-100/50 dark:border-purple-800/30 mt-2">
+            <p className="text-xs text-purple-600/80 dark:text-purple-400/80 font-medium">Configure tone and content. Then click "✨ AI Customize" on any customer card, or use the generator inside the Template editor.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Tone</label>
+                <select className="input w-full py-2 text-sm" value={aiTone} onChange={e => setAiTone(e.target.value)}>
+                  <option>Sweet & Friendly</option>
+                  <option>Playful</option>
+                  <option>Requestful / Polite</option>
+                  <option>Urgent / Angry</option>
+                  <option>Professional</option>
+                  <option>Marketing Gimmick</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Language</label>
+                <select className="input w-full py-2 text-sm" value={aiLanguage} onChange={e => setAiLanguage(e.target.value)}>
+                  <option>English</option>
+                  <option>Gujarati</option>
+                  <option>Hindi</option>
+                  <option>Hinglish</option>
+                  <option>Gujarati + English Mix</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Content Type</label>
+                <select className="input w-full py-2 text-sm" value={aiContentType} onChange={e => setAiContentType(e.target.value)}>
+                  <option>Marketing / General</option>
+                  <option>Promotional Offer</option>
+                  <option>Khata Reminder</option>
+                  <option>Festival Greeting</option>
+                </select>
+              </div>
+            </div>
+
+            {aiContentType === 'Promotional Offer' && (
+              <div className="animate-fade-in w-full md:w-1/3">
+                <label className="text-[10px] font-bold text-purple-600/70 uppercase tracking-wider block mb-1">Select Active Offer</label>
+                <select className="input w-full py-2 text-sm" value={aiOfferId} onChange={e => setAiOfferId(e.target.value)}>
+                  <option value="">-- Select an Offer --</option>
+                  {activeOffers.map(o => (
+                    <option key={o.id} value={o.id}>{o.name} - ₹{o.price}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Customer List & Preview */}
       <div className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-800 rounded-2xl flex-1 flex flex-col overflow-hidden">
         <div className="px-5 py-4 border-b border-ink-200 dark:border-ink-800 flex justify-between items-center bg-ink-50 dark:bg-ink-950/50">
@@ -317,18 +532,30 @@ export default function WhatsAppCRMPage() {
                 
                 <div className="flex-1 bg-ink-50 dark:bg-ink-950 p-3 rounded-lg border border-ink-100 dark:border-ink-800/50 relative min-h-[80px]">
                   <div className="absolute top-2 right-2 text-[10px] font-bold text-ink-400 uppercase">Preview</div>
-                  <p className="text-sm text-ink-700 dark:text-ink-300 whitespace-pre-wrap pt-3 pr-14 leading-relaxed">{getPopulatedMessage(c, activeTemplate?.text)}</p>
+                  <p className="text-sm text-ink-700 dark:text-ink-300 whitespace-pre-wrap pt-3 pr-14 leading-relaxed">
+                    {customMessages[c.id] || getPopulatedMessage(c, activeTemplate?.text)}
+                  </p>
                 </div>
                 
-                <div className="md:w-32 flex-shrink-0 flex flex-col justify-center gap-2">
+                <div className="md:w-36 flex-shrink-0 flex flex-col justify-center gap-2">
                   <button 
                     onClick={() => handleSend(c)}
                     disabled={!c.mobile_number}
                     style={{ backgroundColor: '#25D366' }}
-                    className="w-full py-3 hover:brightness-95 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed"
+                    className="w-full py-2 hover:brightness-95 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 disabled:opacity-50 disabled:active:scale-100 disabled:cursor-not-allowed text-sm"
                   >
-                    <Share2 size={16} /> Send
+                    <Share2 size={14} /> Send
                   </button>
+                  <button
+                    onClick={() => generateForCustomer(c)}
+                    disabled={isGeneratingFor === c.id || (aiContentType === 'Promotional Offer' && !aiOfferId)}
+                    className="w-full py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-800/50 font-bold rounded-lg text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  >
+                    {isGeneratingFor === c.id ? <div className="animate-spin w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full" /> : '✨ AI Customize'}
+                  </button>
+                  {customMessages[c.id] && (
+                     <button onClick={() => setCustomMessages(p => { const newP = {...p}; delete newP[c.id]; return newP; })} className="text-[10px] font-bold text-ink-400 hover:text-red-500 text-center w-full mt-1">Reset to Template</button>
+                  )}
                 </div>
               </div>
             ))
@@ -362,6 +589,23 @@ export default function WhatsAppCRMPage() {
                 <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Template Name</label>
                 <input className="input w-full" value={editingTemplate.name} onChange={e => setEditingTemplate({...editingTemplate, name: e.target.value})} required placeholder="e.g. Festival Offer" />
               </div>
+
+              {/* AI Template Generation Button (Uses Global Settings) */}
+              <div className="bg-purple-50 dark:bg-purple-900/10 p-4 rounded-xl border border-purple-100 dark:border-purple-800/30 flex justify-between items-center">
+                <div className="text-xs text-purple-700 dark:text-purple-300">
+                  <p className="font-bold mb-0.5">✨ AI Template Generator</p>
+                  <p className="opacity-80">Uses Global Settings: {aiTone}, {aiLanguage}, {aiContentType}</p>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={generateTemplateWithAI}
+                  disabled={isGenerating || (aiContentType === 'Promotional Offer' && !aiOfferId)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1.5 px-4 rounded-lg text-xs transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isGenerating ? <div className="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full" /> : 'Generate'}
+                </button>
+              </div>
+
               <div>
                 <label className="text-xs font-bold text-ink-500 uppercase tracking-widest mb-1 block">Message Body</label>
                 <textarea className="input w-full h-32 py-3 resize-none font-medium" value={editingTemplate.text} onChange={e => setEditingTemplate({...editingTemplate, text: e.target.value})} required placeholder="Type your message here..." />

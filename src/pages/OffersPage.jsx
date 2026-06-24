@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
@@ -18,6 +18,63 @@ export default function OffersPage() {
   // Search state for adding items to combo
   const [itemSearch, setItemSearch] = useState('')
 
+  // Siren Audio Refs
+  const audioCtxRef = useRef(null)
+  const oscRef = useRef(null)
+  const intervalRef = useRef(null)
+
+  function startSiren() {
+    if (audioCtxRef.current) return // already playing
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    audioCtxRef.current = ctx
+    const osc = ctx.createOscillator()
+    const gainNode = ctx.createGain()
+    
+    osc.type = 'square'
+    osc.frequency.setValueAtTime(400, ctx.currentTime)
+    
+    // Siren modulation effect
+    let high = true
+    intervalRef.current = setInterval(() => {
+      if (oscRef.current) {
+        oscRef.current.frequency.setValueAtTime(high ? 800 : 400, ctx.currentTime)
+        high = !high
+      }
+    }, 400)
+
+    gainNode.gain.setValueAtTime(0.05, ctx.currentTime) // reasonable volume
+    osc.connect(gainNode)
+    gainNode.connect(ctx.destination)
+    osc.start()
+    oscRef.current = osc
+  }
+
+  function stopSiren() {
+    if (intervalRef.current) clearInterval(intervalRef.current)
+    if (oscRef.current) {
+      try { oscRef.current.stop() } catch (e) {}
+      oscRef.current.disconnect()
+    }
+    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+      audioCtxRef.current.close()
+    }
+    audioCtxRef.current = null
+    oscRef.current = null
+    intervalRef.current = null
+  }
+
+  // Cost Price Enforcement State
+  const [missingCpItem, setMissingCpItem] = useState(null)
+  const [newCpValue, setNewCpValue] = useState('')
+
+  // AI Combo State
+  const [showAiModal, setShowAiModal] = useState(false)
+  const [aiStrategy, setAiStrategy] = useState('Profit')
+  const [isAiGenerating, setIsAiGenerating] = useState(false)
+
+  const [isGeneratingImage, setIsGeneratingImage] = useState(null)
+  const [editCpItem, setEditCpItem] = useState(null)
+
   useEffect(() => {
     fetchData()
 
@@ -35,14 +92,14 @@ export default function OffersPage() {
     const targetBranch = branchId || 'gurukul'
     
     // Fetch Items for searching
-    const { data: dbItems } = await supabase.from('items').select('id, name, variant, price, stock_quantity')
+    const { data: dbItems } = await supabase.from('items').select('id, name, variant, price, cost_price, stock_quantity, category')
       .eq('branch_id', targetBranch)
       .eq('is_active', true)
       .eq('item_type', 'SELLABLE')
     setItems(dbItems || [])
 
     // Fetch Offers & Offer Items
-    let q = supabase.from('offers').select('*, offer_items(*, items(name, variant))')
+    let q = supabase.from('offers').select('*, offer_items(*, items(name, variant, cost_price))')
     if (branchId && branchId !== 'All Branches') {
       q = q.or(`branch_id.eq.${branchId},branch_id.is.null`)
     }
@@ -58,7 +115,8 @@ export default function OffersPage() {
       item_id: oi.item_id,
       quantity: oi.quantity,
       name: oi.items?.name,
-      variant: oi.items?.variant
+      variant: oi.items?.variant,
+      cost_price: oi.items?.cost_price || 0
     })))
     setShowForm(true)
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -72,14 +130,138 @@ export default function OffersPage() {
   }
 
   function addOfferItem(item) {
+    if (!item.cost_price || item.cost_price <= 0 || item.cost_price < (0.30 * item.price)) {
+      setMissingCpItem(item)
+      setNewCpValue('')
+      startSiren()
+      return
+    }
+
     setOfferItems(prev => {
       const exists = prev.find(p => p.item_id === item.id)
       if (exists) {
         return prev.map(p => p.item_id === item.id ? { ...p, quantity: p.quantity + 1 } : p)
       }
-      return [...prev, { item_id: item.id, quantity: 1, name: item.name, variant: item.variant }]
+      return [...prev, { item_id: item.id, quantity: 1, name: item.name, variant: item.variant, cost_price: item.cost_price || 0, price: item.price || 0 }]
     })
     setItemSearch('') // Clear search after picking
+  }
+
+  async function handleSaveCp() {
+    if (!newCpValue || parseFloat(newCpValue) <= 0) return toast.error('Enter a valid Cost Price')
+    const cp = parseFloat(newCpValue)
+    
+    setLoading(true)
+    const { error } = await supabase.from('items').update({ cost_price: cp }).eq('id', missingCpItem.id)
+    setLoading(false)
+    
+    if (error) return toast.error('Failed to update Cost Price')
+    
+    // Update local items array
+    setItems(prev => prev.map(i => i.id === missingCpItem.id ? { ...i, cost_price: cp } : i))
+    
+    // Add to offer
+    addOfferItem({ ...missingCpItem, cost_price: cp })
+    setMissingCpItem(null)
+    stopSiren()
+    toast.success('Cost price saved and item added')
+  }
+
+  async function saveInlineCp() {
+    if (!newCpValue || parseFloat(newCpValue) <= 0) return toast.error('Enter a valid Cost Price')
+    const cp = parseFloat(newCpValue)
+    
+    setLoading(true)
+    const { error } = await supabase.from('items').update({ cost_price: cp }).eq('id', editCpItem.id)
+    setLoading(false)
+    
+    if (error) return toast.error('Failed to update Cost Price')
+    
+    setItems(prev => prev.map(i => i.id === editCpItem.id ? { ...i, cost_price: cp } : i))
+    
+    toast.success('Cost price updated globally!')
+    setEditCpItem(null)
+    setNewCpValue('')
+    fetchData()
+  }
+
+  async function generateSocialPost(offer) {
+    const count = parseInt(localStorage.getItem('bb_image_gen_count') || '0')
+    if (count >= 5) {
+      return toast.error('You have reached the maximum limit of 5 image generations.')
+    }
+
+    setIsGeneratingImage(offer.id)
+    try {
+      if (!window.puter) throw new Error("AI is initializing. Please wait a moment.")
+      
+      toast.loading('Generating background image with AI...', { id: 'img-gen' })
+      
+      const prompt = `A highly realistic, cinematic, mouth-watering food photography shot of ${offer.name}. ${offer.description}. Dark, moody lighting, perfectly styled for instagram.`
+      
+      const imgElement = await window.puter.ai.txt2img(prompt, {
+        provider: 'openai-image-generation',
+        model: 'gpt-image-1',
+        ratio: { w: 1, h: 1 }
+      })
+      
+      toast.loading('Applying Bombay Bethak Logo and Text...', { id: 'img-gen' })
+
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const width = 1080
+      const height = 1080
+      canvas.width = width
+      canvas.height = height
+
+      ctx.drawImage(imgElement, 0, 0, width, height)
+
+      const gradient = ctx.createLinearGradient(0, height * 0.5, 0, height)
+      gradient.addColorStop(0, 'rgba(0,0,0,0)')
+      gradient.addColorStop(1, 'rgba(0,0,0,0.8)')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, width, height)
+
+      const logoImg = new Image()
+      logoImg.crossOrigin = "Anonymous"
+      logoImg.src = "/assets/logo.png"
+      
+      await new Promise((resolve) => {
+        logoImg.onload = () => {
+          const logoWidth = 200
+          const logoHeight = (logoImg.height / logoImg.width) * logoWidth
+          ctx.drawImage(logoImg, (width - logoWidth) / 2, 50, logoWidth, logoHeight)
+          resolve()
+        }
+        logoImg.onerror = resolve
+      })
+
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 80px "Playfair Display", serif'
+      ctx.textAlign = 'center'
+      ctx.shadowColor = 'rgba(0,0,0,0.5)'
+      ctx.shadowBlur = 10
+      ctx.fillText(offer.name.toUpperCase(), width / 2, height - 150)
+
+      ctx.font = 'bold 100px Montserrat, sans-serif'
+      ctx.fillStyle = '#10b981'
+      ctx.fillText(`₹${offer.price}`, width / 2, height - 40)
+
+      const dataUrl = canvas.toDataURL('image/png')
+      const link = document.createElement('a')
+      link.download = `BB_${offer.name.replace(/\s+/g, '_')}_Post.png`
+      link.href = dataUrl
+      link.click()
+
+      localStorage.setItem('bb_image_gen_count', (count + 1).toString())
+      toast.success('Social Media Post Generated & Downloaded!', { id: 'img-gen' })
+
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to generate image: ' + err.message, { id: 'img-gen' })
+    } finally {
+      setIsGeneratingImage(null)
+    }
   }
 
   function updateOfferItemQty(item_id, delta) {
@@ -95,6 +277,7 @@ export default function OffersPage() {
     const payload = {
       name: form.name,
       description: form.description,
+      offer_type: 'COMBO_BUNDLE',
       price: parseFloat(form.price),
       is_active: form.is_active,
       branch_id: branchId === 'All Branches' ? null : branchId
@@ -104,23 +287,27 @@ export default function OffersPage() {
       let offerId = form.id
       if (offerId) {
         // Update existing
-        await supabase.from('offers').update(payload).eq('id', offerId)
+        const { error: updateError } = await supabase.from('offers').update(payload).eq('id', offerId)
+        if (updateError) throw updateError
         // Clear old offer items
         await supabase.from('offer_items').delete().eq('offer_id', offerId)
       } else {
         // Create new
-        const { data } = await supabase.from('offers').insert(payload).select().single()
-        offerId = data.id
+        const { data, error: insertError } = await supabase.from('offers').insert(payload).select()
+        if (insertError) throw insertError
+        if (!data || data.length === 0) throw new Error('Offer created but database returned no ID. Please refresh the page.')
+        offerId = data[0].id
       }
 
       // Insert new offer items
-      await supabase.from('offer_items').insert(
+      const { error: itemsError } = await supabase.from('offer_items').insert(
         offerItems.map(oi => ({
           offer_id: offerId,
           item_id: oi.item_id,
           quantity: oi.quantity
         }))
       )
+      if (itemsError) throw itemsError
 
       toast.success(form.id ? 'Offer updated!' : 'Offer created!')
       resetForm()
@@ -149,6 +336,157 @@ export default function OffersPage() {
     (i.variant || '').toLowerCase().includes(itemSearch.toLowerCase())
   ).slice(0, 10) : []
 
+  async function generateAiCombo() {
+    const groqKey = import.meta.env.VITE_GROQ_API_KEY
+    const orKey = import.meta.env.VITE_OPENROUTER_API_KEY
+    
+    if (!groqKey && !orKey) return toast.error('No AI API keys configured')
+
+    if (items.length === 0) return toast.error('No items available for generation')
+
+    setIsAiGenerating(true)
+    
+    // STRICT INVENTORY FILTERING FOR AI:
+    // 1. Must have valid CP (>= 30% of SP)
+    // 2. Must be profitable (CP < SP)
+    // 3. Must ONLY be Cafe Menu or Beverages (no tobacco, cigarettes, paan, etc)
+    const validItems = items.filter(i => {
+      if (!i.cost_price || i.cost_price <= 0) return false
+      if (i.cost_price >= i.price) return false // Prevent selling at a loss
+      if (i.cost_price < (0.30 * i.price)) return false // Enforce 30% rule
+      
+      const cat = (i.category || '').toLowerCase()
+      // Only allow Cafe and Beverages
+      if (!cat.includes('cafe') && !cat.includes('beverage') && !cat.includes('drink') && !cat.includes('snack')) {
+        return false
+      }
+      return true
+    })
+    if (validItems.length < 2) {
+      setIsAiGenerating(false)
+      return toast.error('Need at least 2 items with Cost Prices filled in the inventory to generate combos.')
+    }
+
+    const itemsData = validItems.map(i => `ID: ${i.id} | Name: ${i.name} ${i.variant || ''} | Sell Price: ₹${i.price} | Cost Price: ₹${i.cost_price}`).join('\n')
+
+    let strategyText = ''
+    if (aiStrategy === 'Profit') strategyText = 'Focus STRICTLY on items with the absolute highest profit margins (Sell Price minus Cost Price). Your goal is to maximize the margin for the business. Ensure the combo price leaves a massive margin.'
+    else if (aiStrategy === 'Satisfaction') strategyText = 'Focus on classic, high-satisfaction pairings (e.g., Burger + Fries + Coke, or Chai + Samosa) that customers love.'
+    else strategyText = 'Create a clearance combo to move stock. Combine popular items with random add-ons.'
+
+    const prompt = `You are an AI assistant for a cafe/paan shop.
+Your task is to generate a single new Combo Offer based on the following available inventory:
+
+${itemsData}
+
+STRATEGY: ${strategyText}
+
+RULES:
+1. Select 2 to 4 items from the list above. DO NOT invent items or IDs.
+2. Determine an appropriate discounted combo price (lower than the sum of individual sell prices, but higher than the sum of cost prices to ensure some profit).
+3. Provide a catchy name and a short marketing description.
+4. Output EXACTLY valid JSON matching this structure:
+{
+  "name": "Combo Name",
+  "description": "Short description",
+  "price": 199,
+  "items": [
+    { "item_id": "...", "quantity": 1 }
+  ]
+}
+No markdown formatting or extra text. ONLY raw JSON.`
+
+    // Auto-switching Free Models List
+    const freeModels = [
+      { id: localStorage.getItem('lastWorkingAiModel'), provider: localStorage.getItem('lastWorkingAiProvider') }, // Memory from previous success
+      { id: 'meta-llama/llama-3.3-70b-instruct:free', provider: 'openrouter' },
+      { id: 'meta-llama/llama-3.2-3b-instruct:free', provider: 'openrouter' },
+      { id: 'nvidia/nemotron-3-nano-30b-a3b:free', provider: 'openrouter' },
+      { id: 'llama-3.3-70b-versatile', provider: 'groq' } // Final reliable fallback
+    ].filter(m => m.id && ((m.provider === 'groq' && groqKey) || (m.provider === 'openrouter' && orKey)))
+
+    let data = null
+    let usedModel = null
+
+    for (const modelDef of freeModels) {
+      try {
+        const url = modelDef.provider === 'groq' 
+          ? 'https://api.groq.com/openai/v1/chat/completions' 
+          : 'https://openrouter.ai/api/v1/chat/completions'
+          
+        const authKey = modelDef.provider === 'groq' ? groqKey : orKey
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authKey}`
+          },
+          body: JSON.stringify({ 
+            model: modelDef.id,
+            messages: [{ role: 'user', content: prompt }]
+          })
+        })
+        
+        if (!res.ok) continue // Move to next model if failed
+        
+        const resData = await res.json()
+        if (resData?.choices?.[0]?.message?.content) {
+           data = resData
+           usedModel = modelDef
+           break // Success! Stop looping.
+        }
+      } catch (e) {
+        continue // Network error, try next
+      }
+    }
+
+    try {
+      if (!data) throw new Error('All AI models failed or were rate-limited.')
+
+      // Save successful model to memory
+      localStorage.setItem('lastWorkingAiModel', usedModel.id)
+      localStorage.setItem('lastWorkingAiProvider', usedModel.provider)
+
+      let text = data?.choices?.[0]?.message?.content || ''
+      text = text.replace(/```json/g, '').replace(/```/g, '').trim()
+      
+      const parsed = JSON.parse(text)
+      
+      const newOfferItems = parsed.items.map(pi => {
+        const fullItem = items.find(i => i.id === pi.item_id)
+        if (!fullItem) return null
+        return {
+          item_id: fullItem.id,
+          quantity: pi.quantity,
+          name: fullItem.name,
+          variant: fullItem.variant,
+          cost_price: fullItem.cost_price || 0,
+          price: fullItem.price || 0
+        }
+      }).filter(Boolean)
+
+      let finalPrice = parsed.price
+      const totalGeneratedCP = newOfferItems.reduce((acc, oi) => acc + (oi.cost_price * oi.quantity), 0)
+      if (finalPrice <= totalGeneratedCP) {
+        // AI Hallucinated a loss-making price, auto-correct to 20% profit margin
+        finalPrice = Math.ceil(totalGeneratedCP * 1.2)
+      }
+
+      setForm({ id: null, name: parsed.name, description: parsed.description || '', price: finalPrice, is_active: true })
+      setOfferItems(newOfferItems)
+      setShowAiModal(false)
+      setShowForm(true)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      toast.success(`AI Combo Generated using ${usedModel.id.split('/')[1] || usedModel.id}!`)
+    } catch (e) {
+      console.error(e)
+      toast.error('Failed to generate AI combo: ' + e.message)
+    } finally {
+      setIsAiGenerating(false)
+    }
+  }
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
       <div className="flex justify-between items-center bg-white dark:bg-zinc-900 p-4 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800">
@@ -173,6 +511,27 @@ export default function OffersPage() {
             <button onClick={resetForm} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
           </div>
           
+          {!form.id && (
+            <div className="bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800/50 rounded-xl p-4 mb-6">
+              <h3 className="text-sm font-bold text-purple-700 dark:text-purple-400 mb-2 flex items-center gap-2">✨ AI Auto-Generate</h3>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <select className="input flex-1 py-2 text-sm" value={aiStrategy} onChange={e => setAiStrategy(e.target.value)}>
+                  <option value="Profit">Strategy: Maximize Profit</option>
+                  <option value="Satisfaction">Strategy: Maximize Satisfaction</option>
+                  <option value="Clearance">Strategy: Clear Old Stock</option>
+                </select>
+                <button 
+                  type="button"
+                  onClick={generateAiCombo} 
+                  disabled={isAiGenerating}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 flex justify-center items-center gap-2 whitespace-nowrap shadow-sm"
+                >
+                  {isAiGenerating ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : 'Generate Offer'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={saveOffer} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -183,9 +542,18 @@ export default function OffersPage() {
                 <label className="label">Combo Price (₹) *</label>
                 <input type="number" min="0" step="0.5" className="input w-full font-black text-indigo-600" value={form.price} onChange={e=>setForm(p=>({...p, price: e.target.value}))} placeholder="0" required/>
               </div>
-              <div className="md:col-span-2">
-                <label className="label">Description (Optional)</label>
-                <input className="input w-full" value={form.description} onChange={e=>setForm(p=>({...p, description: e.target.value}))} placeholder="e.g. Buy 1 Burger get 1 Coke Free"/>
+              <div className="md:col-span-2 flex justify-between items-end gap-4">
+                <div className="flex-1">
+                  <label className="label">Description (Optional)</label>
+                  <input className="input w-full" value={form.description} onChange={e=>setForm(p=>({...p, description: e.target.value}))} placeholder="e.g. Buy 1 Burger get 1 Coke Free"/>
+                </div>
+                {/* Profit Display for Reference */}
+                <div className="w-1/3 min-w-[120px] bg-emerald-50 dark:bg-emerald-900/20 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800 text-center">
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Combo Profit</p>
+                  <p className={`text-lg font-black ${parseFloat(form.price) - offerItems.reduce((s,i) => s + (i.cost_price * i.quantity), 0) >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-500'}`}>
+                    ₹{(parseFloat(form.price || 0) - offerItems.reduce((s,i) => s + ((i.cost_price || 0) * i.quantity), 0)).toFixed(2)}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -227,6 +595,7 @@ export default function OffersPage() {
                       <div className="flex-1">
                         <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{oi.name}</p>
                         {oi.variant && <p className="text-[10px] font-bold text-zinc-500">{oi.variant}</p>}
+                        <p className="text-[10px] font-semibold text-zinc-400 mt-0.5">SP: ₹{oi.price || 0} | CP: ₹{oi.cost_price || 0}</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 rounded-lg">
@@ -238,6 +607,10 @@ export default function OffersPage() {
                       </div>
                     </div>
                   ))}
+                  <div className="flex justify-end gap-4 p-2 mt-2 border-t border-zinc-200 dark:border-zinc-700">
+                    <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400">Total SP: <span className="text-zinc-900 dark:text-white">₹{offerItems.reduce((acc, oi) => acc + ((oi.price || 0) * oi.quantity), 0).toFixed(2)}</span></p>
+                    <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400">Total CP: <span className="text-zinc-900 dark:text-white">₹{offerItems.reduce((acc, oi) => acc + ((oi.cost_price || 0) * oi.quantity), 0).toFixed(2)}</span></p>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center py-4 border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl">
@@ -262,7 +635,10 @@ export default function OffersPage() {
 
       {/* Offers List */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {offers.map(o => (
+        {offers.map(o => {
+          const totalCost = o.offer_items?.reduce((sum, oi) => sum + ((oi.items?.cost_price || 0) * oi.quantity), 0) || 0
+          const profit = o.price - totalCost
+          return (
           <div key={o.id} className={`card p-4 transition-all ${!o.is_active ? 'opacity-60 grayscale' : 'border border-indigo-100 dark:border-indigo-900/30 shadow-md'}`}>
             <div className="flex justify-between items-start mb-2">
               <div>
@@ -270,15 +646,22 @@ export default function OffersPage() {
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{o.description}</p>
               </div>
               <div className="text-right">
-                <span className="font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1 rounded-lg text-sm">₹{o.price}</span>
+                <span className="font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1 rounded-lg text-sm block">₹{o.price}</span>
+                <span className={`text-[10px] font-bold ${profit >= 0 ? 'text-emerald-600' : 'text-red-500'} mt-1 block`}>Profit: ₹{profit.toFixed(2)}</span>
               </div>
             </div>
             
             <div className="mt-4 mb-4 space-y-1">
               {o.offer_items?.map(oi => (
-                <div key={oi.id} className="flex justify-between text-xs border-b border-zinc-100 dark:border-zinc-800/50 pb-1">
-                  <span className="font-bold text-zinc-600 dark:text-zinc-400">{oi.quantity}x {oi.items?.name}</span>
-                  <span className="text-[9px] text-zinc-400">{oi.items?.variant}</span>
+                <div key={oi.id} className="flex justify-between items-center text-xs border-b border-zinc-100 dark:border-zinc-800/50 pb-1">
+                  <div>
+                    <span className="font-bold text-zinc-600 dark:text-zinc-400">{oi.quantity}x {oi.items?.name}</span>
+                    <span className="text-[9px] text-zinc-400 ml-1">{oi.items?.variant}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500">CP: ₹{oi.items?.cost_price || 0}</span>
+                    <button onClick={() => { setEditCpItem({id: oi.item_id, name: oi.items?.name, variant: oi.items?.variant}); setNewCpValue(oi.items?.cost_price || ''); }} className="text-indigo-400 hover:text-indigo-600"><Edit2 size={12} /></button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -287,20 +670,90 @@ export default function OffersPage() {
               <button onClick={() => toggleActive(o)} className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded ${o.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-200 text-zinc-500'}`}>
                 {o.is_active ? 'Active' : 'Inactive'}
               </button>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                <button onClick={() => generateSocialPost(o)} disabled={isGeneratingImage === o.id} className="p-1.5 text-xs font-bold text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded flex items-center gap-1 disabled:opacity-50">
+                  {isGeneratingImage === o.id ? 'Generating...' : '✨ Insta Post'}
+                </button>
                 <button onClick={() => handleEdit(o)} className="p-1.5 text-zinc-400 hover:text-indigo-500 bg-zinc-50 dark:bg-zinc-800 rounded"><Edit2 size={14}/></button>
                 <button onClick={() => deleteOffer(o.id)} className="p-1.5 text-zinc-400 hover:text-red-500 bg-zinc-50 dark:bg-zinc-800 rounded"><Trash2 size={14}/></button>
               </div>
             </div>
           </div>
-        ))}
+          )
+        })}
         {offers.length === 0 && !loading && (
-          <div className="col-span-full py-12 text-center text-zinc-500">
-            <Tag size={32} className="mx-auto mb-2 opacity-20" />
-            <p className="font-bold">No offers created yet.</p>
+          <div className="text-center py-12 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl col-span-full">
+            <Tag className="mx-auto text-zinc-300 mb-4" size={48} />
+            <h3 className="text-lg font-black text-zinc-400 mb-2">No Combos Found</h3>
+            <p className="text-sm text-zinc-500">Create bundle offers to boost sales.</p>
           </div>
         )}
       </div>
+
+      {/* CP Enforcement Modal */}
+      {missingCpItem && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up border border-red-200 dark:border-red-900/50">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-black text-red-600 flex items-center gap-2">Missing Cost Price</h3>
+              <button onClick={() => { setMissingCpItem(null); stopSiren(); }} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
+            </div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
+              You must enter a Cost Price for <strong className="text-zinc-900 dark:text-white">{missingCpItem.name} {missingCpItem.variant || ''}</strong> before adding it to a combo. This ensures accurate profit calculations.
+            </p>
+            <label className="label mb-2 block">Cost Price (₹)</label>
+            <input 
+              type="number" 
+              className="input w-full mb-6" 
+              value={newCpValue} 
+              onChange={e => {
+                setNewCpValue(e.target.value);
+                stopSiren(); // Stop siren as soon as admin starts typing
+              }}
+              placeholder="e.g. 50"
+              autoFocus
+            />
+            <button 
+              onClick={handleSaveCp} 
+              disabled={loading}
+              className="w-full btn-primary py-3 flex justify-center items-center gap-2"
+            >
+              {loading ? 'Saving...' : 'Save & Add Item'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Inline CP Edit Modal */}
+      {editCpItem && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up border border-indigo-200 dark:border-indigo-900/50">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-black text-indigo-600 flex items-center gap-2">Edit Cost Price</h3>
+              <button onClick={() => setEditCpItem(null)} className="text-zinc-400 hover:text-red-500"><X size={20}/></button>
+            </div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
+              Update CP for <strong className="text-zinc-900 dark:text-white">{editCpItem.name} {editCpItem.variant || ''}</strong> globally.
+            </p>
+            <label className="label mb-2 block">Cost Price (₹)</label>
+            <input 
+              type="number" 
+              className="input w-full mb-6" 
+              value={newCpValue} 
+              onChange={e => setNewCpValue(e.target.value)}
+              placeholder="e.g. 50"
+              autoFocus
+            />
+            <button 
+              onClick={saveInlineCp} 
+              disabled={loading}
+              className="w-full btn-primary py-3 flex justify-center items-center gap-2"
+            >
+              {loading ? 'Saving...' : 'Update Cost Price'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

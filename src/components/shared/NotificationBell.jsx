@@ -127,6 +127,24 @@ export default function NotificationBell() {
               ))
             )}
           </div>
+          
+          {/* OS Notification Request */}
+          {('Notification' in window) && Notification.permission === 'default' && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/10 border-t border-amber-100 dark:border-amber-900/30">
+              <p className="text-[10px] text-amber-700 dark:text-amber-500 font-bold mb-2">Want live alerts even when minimized?</p>
+              <button 
+                onClick={() => {
+                  Notification.requestPermission().then(() => {
+                    setOpen(false)
+                  })
+                }}
+                className="w-full py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-colors"
+              >
+                Enable Desktop Alerts
+              </button>
+            </div>
+          )}
+
         </div>
       )}
     </div>

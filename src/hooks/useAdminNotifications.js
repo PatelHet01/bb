@@ -18,6 +18,13 @@ export function useAdminNotifications() {
       ? `branch_id=eq.${branchId}`
       : undefined
 
+    const fireOSNotif = (title, body, iconUrl = '/admin-pwa-192x192.png') => {
+      if (!('Notification' in window)) return
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, icon: iconUrl })
+      }
+    }
+
     const orderChannel = supabase
       .channel('admin-notif-orders')
       .on(
@@ -31,6 +38,7 @@ export function useAdminNotifications() {
           const msg   = `New Order ${num}${total}`
           addNotification({ type: 'order', title: 'New Order', body: msg })
           toast.success(msg, { icon: '🧾', duration: 4000, id: `order-${o.id}` })
+          fireOSNotif('🧾 New Order Received', msg)
         }
       )
       .subscribe()
@@ -48,6 +56,7 @@ export function useAdminNotifications() {
             if (!p) return
             const msg = `Payment ₹${Math.round(Number(p.amount))} via ${p.mode}`
             addNotification({ type: 'payment', title: 'Payment Received', body: msg })
+            fireOSNotif('💳 Payment Received', msg)
           }
         )
         .subscribe()

@@ -11,6 +11,13 @@ export default function OrderNotificationOverlay() {
   const [newOrderAlert, setNewOrderAlert] = useState(null)
 
   useEffect(() => {
+    const fireOSNotif = (title, body, iconUrl = '/admin-pwa-192x192.png') => {
+      if (!('Notification' in window)) return
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, icon: iconUrl })
+      }
+    }
+
     // Listen for new orders (TMS/QR)
     const channel = supabase.channel('global-notifications')
       .on('postgres_changes', { 
@@ -24,6 +31,10 @@ export default function OrderNotificationOverlay() {
         if (order.table_number || order.order_type?.includes('QR')) {
           setNewOrderAlert(order)
           playBell()
+          fireOSNotif(
+            'New QR Order! 🔔', 
+            `Action Required in Kitchen. Table ${order.table_number || '??'} - Order #${order.order_number || order.id.slice(0,6).toUpperCase()}`
+          )
         }
       })
       .subscribe()

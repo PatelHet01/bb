@@ -3,9 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useCustomerStore } from '../store/customerStore'
 import { motion } from 'framer-motion'
-import { LogOut, ArrowUpCircle, ArrowDownCircle, Gamepad2, Key } from 'lucide-react'
-import { getLedgerEntryStyle } from '../utils/ledger'
+import { LogOut, Gamepad2, Key } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { computeNetBalance, buildUnifiedLedger, computeRunningBalances } from '../utils/khata'
 
 const S = {
   page: { background: '#000', minHeight: '100vh', fontFamily: 'Inter, sans-serif', color: 'white' },
@@ -80,7 +80,7 @@ const S = {
 export default function MyBethakDashboard() {
   const { customer, logout } = useCustomerStore()
   const navigate = useNavigate()
-  const [tab, setTab] = useState('overview') // overview | khata | advance
+  const [tab, setTab] = useState('overview') // overview | khata
   const [khataLedger, setKhataLedger] = useState([])
   const [advLedger, setAdvLedger] = useState([])
   const [orders, setOrders] = useState([])
@@ -98,8 +98,9 @@ export default function MyBethakDashboard() {
     if (!customer) { navigate('/my-bethak'); return }
     async function fetch() {
       const [kRes, aRes, oRes] = await Promise.all([
-        supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(30),
-        supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(30),
+        // NO .limit() — must read ALL rows for correct balance
+        supabase.from('khata_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', customer.id).order('created_at', { ascending: false }),
+        supabase.from('advance_ledger').select('*, orders(order_number, order_items(quantity, price, items(name, variant)))').eq('customer_id', customer.id).order('created_at', { ascending: false }),
         supabase.from('orders').select('*, order_items(quantity, price, items(name, variant)), order_payments(mode, amount)').eq('customer_id', customer.id).order('created_at', { ascending: false }).limit(20),
       ])
       setKhataLedger(kRes.data || [])
@@ -191,14 +192,11 @@ export default function MyBethakDashboard() {
     }
   }
 
-  const rawKhata = khataLedger.reduce((s, l) => l.type === 'CREDIT' ? s + Number(l.amount) : s - Number(l.amount), 0)
-  const rawAdv = advLedger.reduce((s, l) => l.type === 'TOPUP' ? s + Number(l.amount) : s - Number(l.amount), 0)
-  
-  const net = rawKhata - rawAdv
-  let finalKhata = 0
-  let finalAdv = 0
-  if (net > 0) finalKhata = net
-  else if (net < 0) finalAdv = Math.abs(net)
+  // Unified net balance — single source of truth
+  const net = computeNetBalance(khataLedger, advLedger)
+  const owes = net > 0   // customer owes shop
+  const jama = net < 0   // shop owes customer (advance/jama)
+  const absNet = Math.abs(net)
 
   if (!customer) return null
 
@@ -247,20 +245,27 @@ export default function MyBethakDashboard() {
           </div>
         </motion.div>
 
-        {/* Balance Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
-          {[
-            { label: 'Your Devaa (you owe)', value: `₹${finalKhata.toLocaleString('en-IN')}`, color: finalKhata > 0 ? '#ef4444' : 'white', note: finalKhata > 0 ? 'Outstanding khata' : 'All clear' },
-            { label: 'Advance Balance', value: `₹${finalAdv.toLocaleString('en-IN')}`, color: '#22c55e', note: 'Pre-paid balance' },
-          ].map((b, i) => (
-            <motion.div key={i} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
-              style={{ ...S.card, marginBottom: 0 }}>
-              <p style={{ ...S.label, marginBottom: '0.5rem' }}>{b.label}</p>
-              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: b.color, lineHeight: 1 }}>{b.value}</p>
-              <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)', marginTop: '0.3rem' }}>{b.note}</p>
-            </motion.div>
-          ))}
-        </div>
+        {/* Unified Balance Card */}
+        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
+          style={{ ...S.card, marginBottom: '1.5rem', borderColor: owes ? 'rgba(239,68,68,0.4)' : jama ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.1)' }}>
+          <p style={{ ...S.label, marginBottom: '0.5rem' }}>Khata Balance</p>
+          {net === 0 ? (
+            <>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: 'white', lineHeight: 1 }}>✅ All Clear</p>
+              <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)', marginTop: '0.3rem' }}>No outstanding balance</p>
+            </>
+          ) : owes ? (
+            <>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: '#ef4444', lineHeight: 1 }}>- ₹{absNet.toLocaleString('en-IN')}</p>
+              <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)', marginTop: '0.3rem' }}>You owe this amount to the shop</p>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: '1.6rem', fontWeight: 900, color: '#22c55e', lineHeight: 1 }}>+ ₹{absNet.toLocaleString('en-IN')}</p>
+              <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)', marginTop: '0.3rem' }}>Jama — shop owes you this amount</p>
+            </>
+          )}
+        </motion.div>
 
         {/* Credit Limit Status */}
         {customer?.khata_limit != null && (() => {
@@ -268,7 +273,7 @@ export default function MyBethakDashboard() {
           const unlockPct = Number(customer.khata_unlock_percent || 30)
           const unlockThr = limit * (1 - unlockPct / 100)
           const locked = customer.is_khata_locked
-          const usedPct = limit > 0 ? Math.min(100, (finalKhata / limit) * 100) : 0
+          const usedPct = limit > 0 ? Math.min(100, (Math.max(0, net) / limit) * 100) : 0
           return (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               style={{
@@ -295,7 +300,7 @@ export default function MyBethakDashboard() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                 {[
                   { l: 'Limit', v: `₹${limit.toLocaleString('en-IN')}` },
-                  { l: 'Outstanding', v: `₹${finalKhata.toLocaleString('en-IN')}`, c: finalKhata > 0 ? '#ef4444' : '#22c55e' },
+                  { l: 'Outstanding', v: owes ? `₹${absNet.toLocaleString('en-IN')}` : '₹0', c: owes ? '#ef4444' : '#22c55e' },
                   { l: 'Unlock at ≤', v: `₹${unlockThr.toLocaleString('en-IN')}` }
                 ].map(({ l, v, c }) => (
                   <div key={l}>
@@ -315,7 +320,7 @@ export default function MyBethakDashboard() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.07)', marginBottom: '1.5rem' }}>
-          {[['overview', 'Orders'], ['khata', 'Khata Ledger'], ['advance', 'Advance']].map(([t, l]) => (
+          {[['overview', 'Orders'], ['khata', 'Khata']].map(([t, l]) => (
             <button key={t} style={S.tab(tab === t)} onClick={() => setTab(t)}>{l}</button>
           ))}
         </div>
@@ -359,11 +364,7 @@ export default function MyBethakDashboard() {
             )}
 
             {tab === 'khata' && (
-              <LedgerList entries={khataLedger} type="khata" />
-            )}
-
-            {tab === 'advance' && (
-              <LedgerList entries={advLedger} type="advance" />
+              <UnifiedLedgerList khataRows={khataLedger} advRows={advLedger} />
             )}
           </>
         )}
@@ -428,43 +429,38 @@ export default function MyBethakDashboard() {
   )
 }
 
-function LedgerList({ entries, type }) {
-  if (entries.length === 0) return <EmptyState text={`No ${type} history yet.`} />
+function UnifiedLedgerList({ khataRows, advRows }) {
+  if (khataRows.length === 0 && advRows.length === 0)
+    return <EmptyState text="No khata history yet." />
 
-  // Running balance
-  let bal = 0
-  const withBal = [...entries].reverse().map(l => {
-    if (type === 'khata') bal = l.type === 'CREDIT' ? bal + Number(l.amount) : bal - Number(l.amount)
-    else bal = l.type === 'TOPUP' ? bal + Number(l.amount) : bal - Number(l.amount)
-    return { ...l, runningBal: bal }
-  }).reverse()
+  const unified = computeRunningBalances(buildUnifiedLedger(khataRows, advRows))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      {withBal.map(l => {
-        const style = getLedgerEntryStyle(l.type, type === 'khata' ? 'customer_khata' : 'customer_advance')
-        const colorHex = style.isDebit ? '#22c55e' : '#ef4444'
-        const Icon = style.isDebit ? ArrowDownCircle : ArrowUpCircle
-        
-        // Customer friendly labels
-        let userLabel = style.label
-        if (type === 'khata') userLabel = l.type === 'CREDIT' ? 'You Used Credit' : 'You Paid'
-        else userLabel = l.type === 'TOPUP' ? 'You Added Balance' : 'Used For Bill'
+      {unified.map(l => {
+        const colorHex = l._color === 'green' ? '#22c55e' : '#ef4444'
+        // Customer-friendly labels
+        let userLabel = l._label
+        if (l._source === 'khata') {
+          userLabel = l.type === 'CREDIT' ? 'Khata Used (You Owe)' : 'You Paid'
+        } else {
+          userLabel = l.type === 'TOPUP' ? 'Jama / Advance (You Pre-Paid)' : 'Advance Used for Bill'
+        }
 
         return (
-          <div key={l.id} style={{ border: '1px solid rgba(255,255,255,0.07)', padding: '0.9rem 1rem', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-            <div style={{ color: colorHex, marginTop: '2px', flexShrink: 0 }}>
-              <Icon size={16} />
+          <div key={`${l._source}-${l.id}`} style={{ border: `1px solid ${l._color === 'green' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`, padding: '0.9rem 1rem', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <div style={{ color: colorHex, marginTop: '2px', flexShrink: 0, fontSize: '1.1rem', fontWeight: 900, minWidth: '1.5rem', textAlign: 'center' }}>
+              {l._prefix}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <p style={{ fontSize: '0.85rem', fontWeight: 700 }}>{userLabel}</p>
                 <p style={{ fontWeight: 900, fontSize: '0.95rem', color: colorHex }}>
-                  {style.prefix}₹{l.amount}
+                  {l._prefix}₹{Number(l.amount).toLocaleString('en-IN')}
                 </p>
               </div>
-              
-              {/* Order Items display for order transactions */}
+
+              {/* Order items */}
               {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem', marginBottom: '0.2rem' }}>
                   {l.orders.order_items.map((oi, i) => (
@@ -475,44 +471,20 @@ function LedgerList({ entries, type }) {
                 </div>
               )}
 
-              {/* Compulsory remark/reason display */}
-              {l.reason ? (
-                <p style={{ 
-                  fontSize: '0.72rem', 
-                  color: 'rgba(255,255,255,0.45)', 
-                  marginTop: '0.35rem', 
-                  whiteSpace: l.order_id ? 'nowrap' : 'normal', 
-                  overflow: l.order_id ? 'hidden' : 'visible', 
-                  textOverflow: l.order_id ? 'ellipsis' : 'clip',
-                  background: l.order_id ? 'none' : 'rgba(255,255,255,0.03)',
-                  padding: l.order_id ? '0' : '0.4rem 0.6rem',
-                  borderLeft: l.order_id ? 'none' : '2px solid rgba(255,255,255,0.15)',
-                  lineHeight: 1.3
-                }}>
-                  {!l.order_id && <strong style={{ color: 'rgba(255,255,255,0.65)' }}>Remark: </strong>}
+              {/* Reason */}
+              {l.reason && (
+                <p style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', marginTop: '0.3rem', lineHeight: 1.3 }}>
                   {l.reason}
                 </p>
-              ) : (
-                !l.order_id && (
-                  <p style={{ 
-                    fontSize: '0.72rem', 
-                    color: 'rgba(255,255,255,0.45)', 
-                    marginTop: '0.35rem', 
-                    whiteSpace: 'normal',
-                    background: 'rgba(255,255,255,0.03)',
-                    padding: '0.4rem 0.6rem',
-                    borderLeft: '2px solid rgba(255,255,255,0.15)',
-                    lineHeight: 1.3
-                  }}>
-                    <strong style={{ color: 'rgba(255,255,255,0.65)' }}>Remark: </strong>
-                    Manual transaction recorded by {l.recorded_by || 'staff'}
-                  </p>
-                )
               )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.4rem' }}>
-                <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)' }}>{new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
-                <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)' }}>Bal: ₹{l.runningBal.toFixed(0)}</p>
+                <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)' }}>
+                  {new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </p>
+                <p style={{ fontSize: '0.65rem', color: l._runningBal > 0 ? 'rgba(239,68,68,0.6)' : 'rgba(34,197,94,0.6)' }}>
+                  Bal: {l._runningBal > 0 ? `-₹${l._runningBal.toFixed(0)}` : l._runningBal < 0 ? `+₹${Math.abs(l._runningBal).toFixed(0)}` : '✅ Clear'}
+                </p>
               </div>
             </div>
           </div>

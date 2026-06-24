@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 import toast from 'react-hot-toast'
 import { Plus, Search, X, UserCircle, Edit2, Trash2, ShoppingBag, Download } from 'lucide-react'
 import { getLedgerEntryStyle } from '../utils/ledger'
+import { computeNetBalance, buildUnifiedLedger, computeRunningBalances, computeBranchBalances } from '../utils/khata'
 
 const Modal = ({ title, show, onClose, onSubmit, saving, children }) => {
   if (!show) return null
@@ -41,10 +42,9 @@ export default function CustomersPage() {
   const [advanceLedger, setAdvanceLedger] = useState([])
   const [ordersHistory, setOrdersHistory] = useState([])
   const [ghodaHistory, setGhodaHistory] = useState([])
-  const [activeTab, setActiveTab] = useState('profile') // profile, khata, advance, orders, ghoda
+  const [activeTab, setActiveTab] = useState('profile') // profile, khata, orders, ghoda
   
   const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [showAdvanceModal, setShowAdvanceModal] = useState(false)
   const [showKhataModal, setShowKhataModal] = useState(false)
   const [txForm, setTxForm] = useState({ amount: '', mode: 'CASH', reason: '' })
   const [editingLedgerEntry, setEditingLedgerEntry] = useState(null)
@@ -247,12 +247,10 @@ export default function CustomersPage() {
     setGhodaHistory(ghodaRes.data || [])
   }
 
-  // --- Live balance derived from already-loaded ledger state (never stale) ---
-  const liveKhataRaw = khataLedger.reduce((s, l) => s + (l.type === 'CREDIT' ? +l.amount : -l.amount), 0)
-  const liveAdvRaw   = advanceLedger.reduce((s, l) => s + (l.type === 'TOPUP' ? +l.amount : -l.amount), 0)
-  const liveNet      = liveKhataRaw - liveAdvRaw
-  const displayKhata = Math.max(0, liveNet)
-  const displayAdv   = Math.max(0, -liveNet)
+  // ── Unified net balance (single source of truth) ──────────────────────────
+  const liveNet     = computeNetBalance(khataLedger, advanceLedger)
+  const displayKhata = Math.max(0, liveNet)   // positive = owes
+  const displayAdv   = Math.max(0, -liveNet)  // negative = jama (kept for branch compat)
 
   async function handleAddKhataCredit(e) {
     e.preventDefault()
@@ -286,9 +284,8 @@ export default function CustomersPage() {
     const X = parseFloat(txForm.amount)
     if (!X || X <= 0) { toast.error('Enter valid amount'); return }
 
-    // Gate: nothing to clear
-    if (displayKhata === 0) {
-      toast.error('No outstanding Khata to clear. Use "Add Advance" to credit the customer.')
+    if (displayKhata === 0 && displayAdv === 0) {
+      toast.error('No outstanding balance. Customer has no debt.')
       return
     }
 
@@ -298,23 +295,25 @@ export default function CustomersPage() {
       const note   = txForm.reason || `Payment via ${txForm.mode}`
 
       if (X <= displayKhata) {
-        // Partial payment — only touches khata_ledger
+        // Partial or exact payment
         await supabase.from('khata_ledger').insert({
           customer_id: selected.id, branch_id: branch,
           type: 'PAYMENT', amount: X, reason: note, recorded_by: user.username
         })
       } else {
-        // Overpayment — clear khata, surplus becomes advance
-        await supabase.from('khata_ledger').insert({
-          customer_id: selected.id, branch_id: branch,
-          type: 'PAYMENT', amount: displayKhata,
-          reason: `${note} (Khata Cleared)`, recorded_by: user.username
-        })
+        // Overpayment: clear outstanding first, surplus → advance_ledger TOPUP
+        if (displayKhata > 0) {
+          await supabase.from('khata_ledger').insert({
+            customer_id: selected.id, branch_id: branch,
+            type: 'PAYMENT', amount: displayKhata,
+            reason: `${note} (Khata Cleared)`, recorded_by: user.username
+          })
+        }
         const surplus = X - displayKhata
         await supabase.from('advance_ledger').insert({
           customer_id: selected.id, branch_id: branch,
           type: 'TOPUP', amount: surplus,
-          reason: `${note} (Surplus Advance)`, recorded_by: user.username
+          reason: `${note} (Jama/Advance)`, recorded_by: user.username
         })
       }
 
@@ -428,36 +427,7 @@ export default function CustomersPage() {
     (c.mobile_number || '').includes(search)
   )
 
-  const branchBalances = useMemo(() => {
-    const allBranchIds = new Set([
-      ...khataLedger.map(l => l.branch_id),
-      ...advanceLedger.map(l => l.branch_id)
-    ])
-
-    const list = []
-    allBranchIds.forEach(bid => {
-      const branchObj = branches.find(b => b.id === bid)
-      const branchName = branchObj ? branchObj.name : (bid ? (bid.charAt(0).toUpperCase() + bid.slice(1)) : 'Global')
-      const kList = khataLedger.filter(l => l.branch_id === bid)
-      const aList = advanceLedger.filter(l => l.branch_id === bid)
-      const kRaw = kList.reduce((s, l) => s + (l.type === 'CREDIT' ? +l.amount : -l.amount), 0)
-      const aRaw = aList.reduce((s, l) => s + (l.type === 'TOPUP' ? +l.amount : -l.amount), 0)
-      const net = kRaw - aRaw
-      
-      const khataVal = Math.max(0, net)
-      const advVal = Math.max(0, -net)
-      
-      if (khataVal > 0 || advVal > 0 || kList.length > 0 || aList.length > 0) {
-        list.push({
-          id: bid || 'global',
-          name: branchName,
-          khata: khataVal,
-          advance: advVal
-        })
-      }
-    })
-    return list
-  }, [khataLedger, advanceLedger, branches])
+  const branchBalances = computeBranchBalances(khataLedger, advanceLedger, branches)
 
   const ordersByBranch = useMemo(() => {
     const groups = {}
@@ -636,7 +606,7 @@ export default function CustomersPage() {
           </div>
 
           <div className="px-2 pt-2 border-b border-ink-200 dark:border-ink-800 flex overflow-x-auto no-scrollbar">
-            {['profile', 'khata', 'advance', 'orders', 'ghoda'].map(tab => (
+            {['profile', 'khata', 'orders', 'ghoda'].map(tab => (
               <button key={tab} className={`px-4 py-3 text-xs font-black uppercase tracking-wider whitespace-nowrap border-b-2 transition-all ${activeTab === tab ? 'border-ember text-ember' : 'border-transparent text-ink-500 hover:text-ink-900 dark:hover:text-white'}`} onClick={() => setActiveTab(tab)}>
                 {tab}
               </button>
@@ -648,29 +618,36 @@ export default function CustomersPage() {
             {activeTab === 'profile' && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
-                    <p className="text-[10px] uppercase font-bold text-ink-400 mb-1">Total Khata (Levana)</p>
-                    <p className="text-2xl font-black text-red-500">₹{displayKhata}</p>
-                    <button
-                      className={`w-full mt-3 py-2 text-xs font-bold text-white rounded-lg shadow-sm transition-colors ${
-                        displayKhata > 0 ? 'bg-red-500 hover:bg-red-600' : 'bg-ink-300 dark:bg-ink-700 cursor-not-allowed'
-                      }`}
-                      onClick={() => setShowPaymentModal(true)}
-                      disabled={displayKhata === 0}
-                    >
-                      {displayKhata > 0 ? 'Record Payment' : 'No Khata Pending'}
-                    </button>
-                    <button
-                      className="w-full mt-2 py-2 text-xs font-bold text-red-600 border border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                      onClick={() => setShowKhataModal(true)}
-                    >
-                      + Add Khata Credit
-                    </button>
-                  </div>
-                  <div className="bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
-                    <p className="text-[10px] uppercase font-bold text-ink-400 mb-1">Advance Balance</p>
-                    <p className="text-2xl font-black text-emerald-500">₹{displayAdv}</p>
-                    <button className="w-full mt-3 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-lg shadow-sm" onClick={() => setShowAdvanceModal(true)}>Add Advance</button>
+                  {/* Unified Balance Card */}
+                  <div className="col-span-2 bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800">
+                    <p className="text-[10px] uppercase font-bold text-ink-400 mb-1">Khata Balance</p>
+                    {liveNet === 0 ? (
+                      <p className="text-2xl font-black text-emerald-500">✅ Clear</p>
+                    ) : liveNet > 0 ? (
+                      <p className="text-2xl font-black text-red-500">- ₹{displayKhata.toLocaleString('en-IN')}</p>
+                    ) : (
+                      <p className="text-2xl font-black text-emerald-500">+ ₹{displayAdv.toLocaleString('en-IN')}</p>
+                    )}
+                    <p className="text-[10px] text-ink-400 mt-1">
+                      {liveNet > 0 ? 'Customer owes shop' : liveNet < 0 ? 'Jama — shop owes customer' : 'No outstanding balance'}
+                    </p>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        className={`flex-1 py-2 text-xs font-bold text-white rounded-lg shadow-sm transition-colors ${
+                          displayKhata > 0 ? 'bg-red-500 hover:bg-red-600' : 'bg-ink-300 dark:bg-ink-700 cursor-not-allowed'
+                        }`}
+                        onClick={() => setShowPaymentModal(true)}
+                        disabled={liveNet <= 0 && displayAdv === 0}
+                      >
+                        Record Payment
+                      </button>
+                      <button
+                        className="flex-1 py-2 text-xs font-bold text-red-600 border border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        onClick={() => setShowKhataModal(true)}
+                      >
+                        + Add Khata Credit
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -710,7 +687,7 @@ export default function CustomersPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-y-2.5 text-sm">
                         <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Credit Limit</span><span className="font-black text-base">{limit != null ? `₹${limit.toLocaleString('en-IN')}` : 'Unlimited'}</span></div>
-                        <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Outstanding</span><span className={`font-black text-base ${displayKhata > 0 ? 'text-red-500' : 'text-emerald-500'}`}>₹{displayKhata.toLocaleString('en-IN')}</span></div>
+                        <div><p className="text-[10px] uppercase font-bold text-ink-400 uppercase">Outstanding</p><span className={`font-black text-base ${displayKhata > 0 ? 'text-red-500' : 'text-emerald-500'}`}>₹{displayKhata.toLocaleString('en-IN')}</span></div>
                         {limit != null && <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Unlock At (≤)</span><span className="font-semibold">₹{unlockThr.toLocaleString('en-IN')} ({unlockPct}% repaid)</span></div>}
                         {limit != null && displayKhata > 0 && <div><span className="block text-[10px] font-bold text-ink-400 uppercase">Remaining Room</span><span className={`font-semibold ${!locked && limit - displayKhata < limit * 0.1 ? 'text-amber-500' : ''}`}>{locked ? '—' : `₹${Math.max(0, limit - displayKhata).toLocaleString('en-IN')}`}</span></div>}
                       </div>
@@ -778,115 +755,7 @@ export default function CustomersPage() {
             )}
 
             {activeTab === 'khata' && (
-              khataLedger.length === 0 ? <p className="text-sm font-semibold text-ink-400 text-center py-10">No Khata History</p> :
-              <div className="space-y-2">
-                {khataLedger.map(l => {
-                  const style = getLedgerEntryStyle(l.type, 'customer_khata')
-                  return (
-                    <div key={l.id} className="group bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800 flex gap-4 transition-all hover:border-ink-300 dark:hover:border-ink-700">
-                      <div className="flex-1">
-                        <div className="flex justify-between items-start">
-                          <p className={`font-bold text-sm ${style.color}`}>{style.label}</p>
-                          <div className="flex items-center gap-3">
-                            <p className={`font-black text-base tabular-nums ${style.color}`}>{style.prefix}₹{l.amount}</p>
-                            {canModify(l.branch_id) && (
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => openEditLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
-                                <button onClick={() => handleDeleteLedger(l, 'khata_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Order Items display for order transactions */}
-                        {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
-                            {l.orders.order_items.map((oi, i) => (
-                              <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
-                                {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
-                                {oi.sell_mode === 'pack' && <span className="ml-1 text-[8px] bg-ember-100 text-ember-700 px-1 rounded font-bold uppercase">Pack</span>}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Compulsory remark/reason display */}
-                        {l.reason ? (
-                          <p className={`text-xs text-ink-500 mt-2 ${l.order_id ? 'truncate' : 'bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal'}`}>
-                            {!l.order_id && <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>}
-                            {l.reason}
-                          </p>
-                        ) : (
-                          !l.order_id && (
-                            <p className="text-xs text-ink-500 mt-2 bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal">
-                              <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>
-                              Manual transaction recorded by {l.recorded_by || 'staff'}
-                            </p>
-                          )
-                        )}
-
-                        <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()} {l.recorded_by && `· by ${l.recorded_by}`}</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {activeTab === 'advance' && (
-              advanceLedger.length === 0 ? <p className="text-sm font-semibold text-ink-400 text-center py-10">No Advance History</p> :
-              <div className="space-y-2">
-                {advanceLedger.map(l => {
-                  const style = getLedgerEntryStyle(l.type, 'customer_advance')
-                  return (
-                    <div key={l.id} className="group bg-white dark:bg-ink-900 p-4 rounded-xl border border-ink-200 dark:border-ink-800 flex gap-4 transition-all hover:border-ink-300 dark:hover:border-ink-700">
-                      <div className="flex-1">
-                        <div className="flex justify-between items-start">
-                          <p className={`font-bold text-sm ${style.color}`}>{style.label}</p>
-                          <div className="flex items-center gap-3">
-                            <p className={`font-black text-base tabular-nums ${style.color}`}>{style.prefix}₹{l.amount}</p>
-                            {canModify(l.branch_id) && (
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => openEditLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
-                                <button onClick={() => handleDeleteLedger(l, 'advance_ledger')} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Order Items display for order transactions */}
-                        {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
-                            {l.orders.order_items.map((oi, i) => (
-                              <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
-                                {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
-                                {oi.sell_mode === 'pack' && <span className="ml-1 text-[8px] bg-ember-100 text-ember-700 px-1 rounded font-bold uppercase">Pack</span>}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Compulsory remark/reason display */}
-                        {l.reason ? (
-                          <p className={`text-xs text-ink-500 mt-2 ${l.order_id ? 'truncate' : 'bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal'}`}>
-                            {!l.order_id && <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>}
-                            {l.reason}
-                          </p>
-                        ) : (
-                          !l.order_id && (
-                            <p className="text-xs text-ink-500 mt-2 bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal">
-                              <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>
-                              Manual transaction recorded by {l.recorded_by || 'staff'}
-                            </p>
-                          )
-                        )}
-
-                        <p className="text-[10px] font-bold text-ink-400 mt-2 uppercase">{new Date(l.created_at).toLocaleString()} {l.recorded_by && `· by ${l.recorded_by}`}</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              <UnifiedKhataTab khataLedger={khataLedger} advanceLedger={advanceLedger} canModify={canModify} openEditLedger={openEditLedger} handleDeleteLedger={handleDeleteLedger} />
             )}
 
             {activeTab === 'orders' && (
@@ -1013,24 +882,6 @@ export default function CustomersPage() {
         <p className="text-xs text-red-500 font-semibold">⚠ This adds to what the customer owes you (Khata/Levana).</p>
       </Modal>
 
-      <Modal title="Add Advance Balance" show={showAdvanceModal} onClose={() => setShowAdvanceModal(false)} onSubmit={handleAddAdvance} saving={saving}>
-        <div>
-          <label className="label">Advance Amount (₹) *</label>
-          <input className="input w-full font-black text-lg" type="number" min="1" required value={txForm.amount} onChange={e => setTxForm({...txForm, amount: e.target.value})} autoFocus />
-        </div>
-        <div>
-          <label className="label">Payment Mode</label>
-          <select className="input w-full" value={txForm.mode} onChange={e => setTxForm({...txForm, mode: e.target.value})}>
-            <option value="CASH">Cash</option>
-            <option value="ONLINE">Online (UPI / Card)</option>
-          </select>
-        </div>
-        <div>
-          <label className="label">Note / Reference ID</label>
-          <input className="input w-full" value={txForm.reason} onChange={e => setTxForm({...txForm, reason: e.target.value})} placeholder="Optional" />
-        </div>
-      </Modal>
-
       <Modal title="Edit Ledger Transaction" show={!!editingLedgerEntry} onClose={() => setEditingLedgerEntry(null)} onSubmit={handleUpdateLedger} saving={saving}>
         {editingLedgerEntry && (
           <>
@@ -1075,6 +926,91 @@ export default function CustomersPage() {
         </div>
       </Modal>
 
+    </div>
+  )
+}
+
+function UnifiedKhataTab({ khataLedger, advanceLedger, canModify, openEditLedger, handleDeleteLedger }) {
+  if (khataLedger.length === 0 && advanceLedger.length === 0)
+    return <p className="text-sm font-semibold text-ink-400 text-center py-10">No Khata History</p>
+
+  const kEntries = khataLedger.map(l => ({
+    ...l, _source: 'khata',
+    _color: l.type === 'CREDIT' ? 'red' : 'green',
+    _prefix: l.type === 'CREDIT' ? '-' : '+',
+    _label: l.type === 'CREDIT' ? 'Credit Given' : 'Payment Received',
+    _netEffect: l.type === 'CREDIT' ? +l.amount : -l.amount,
+  }))
+  const aEntries = advanceLedger.map(l => ({
+    ...l, _source: 'advance',
+    _color: l.type === 'TOPUP' ? 'green' : 'red',
+    _prefix: l.type === 'TOPUP' ? '+' : '-',
+    _label: l.type === 'TOPUP' ? 'Jama / Advance' : 'Advance Used',
+    _netEffect: l.type === 'TOPUP' ? -l.amount : +l.amount,
+  }))
+  const sorted = [...kEntries, ...aEntries].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+  let r = 0
+  const unified = sorted.map(e => { r += e._netEffect; return { ...e, _runningBal: r } }).reverse()
+
+  return (
+    <div className="space-y-2">
+      {unified.map(l => {
+        const isRed = l._color === 'red'
+        const colorClass = isRed ? 'text-red-500 dark:text-red-400' : 'text-emerald-500 dark:text-emerald-400'
+        const borderClass = isRed ? 'border-red-100 dark:border-red-900/30' : 'border-emerald-100 dark:border-emerald-900/30'
+        const bgClass = isRed ? 'bg-red-50/50 dark:bg-red-900/5' : 'bg-emerald-50/50 dark:bg-emerald-900/5'
+        const table = l._source === 'khata' ? 'khata_ledger' : 'advance_ledger'
+
+        return (
+          <div key={`${l._source}-${l.id}`} className={`group p-4 rounded-xl border ${borderClass} ${bgClass} flex gap-4 transition-all`}>
+            <div className={`font-black text-lg w-5 text-center flex-shrink-0 mt-0.5 ${colorClass}`}>{l._prefix}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between items-start">
+                <p className={`font-bold text-sm ${colorClass}`}>{l._label}</p>
+                <div className="flex items-center gap-3">
+                  <p className={`font-black text-base tabular-nums ${colorClass}`}>{l._prefix}₹{Number(l.amount).toLocaleString('en-IN')}</p>
+                  {canModify(l.branch_id) && (
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openEditLedger(l, table)} className="p-1.5 text-ink-400 hover:text-blue-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Edit2 size={14} /></button>
+                      <button onClick={() => handleDeleteLedger(l, table)} className="p-1.5 text-ink-400 hover:text-red-500 rounded-lg transition-colors bg-ink-50 dark:bg-ink-800"><Trash2 size={14} /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Order items */}
+              {l.order_id && l.orders?.order_items && l.orders.order_items.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+                  {l.orders.order_items.map((oi, i) => (
+                    <span key={i} className="text-[10px] text-ink-600 dark:text-ink-400 bg-ink-50 dark:bg-ink-800/60 px-2 py-0.5 rounded font-medium border border-ink-100 dark:border-ink-800/40">
+                      {oi.items?.name} {oi.items?.variant ? `(${oi.items.variant})` : ''} ×{oi.quantity}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Reason */}
+              {l.reason && (
+                <p className={`text-xs text-ink-500 mt-1.5 ${l.order_id ? 'truncate' : 'bg-ink-50 dark:bg-ink-950/40 p-2 border-l-2 border-ink-300 dark:border-ink-700 rounded-r-lg whitespace-normal'}`}>
+                  {!l.order_id && <strong className="text-ink-600 dark:text-ink-400">Remark: </strong>}
+                  {l.reason}
+                </p>
+              )}
+
+              <div className="flex justify-between mt-2">
+                <p className="text-[10px] font-bold text-ink-400 uppercase">
+                  {new Date(l.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  {l.recorded_by && ` · by ${l.recorded_by}`}
+                  {l._source === 'advance' && <span className="ml-1 text-[9px] bg-ink-100 dark:bg-ink-800 px-1 rounded">legacy adv</span>}
+                </p>
+                <p className={`text-[10px] font-bold ${l._runningBal > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  Bal: {l._runningBal > 0 ? `-₹${l._runningBal.toFixed(0)}` : l._runningBal < 0 ? `+₹${Math.abs(l._runningBal).toFixed(0)}` : '✅ Clear'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

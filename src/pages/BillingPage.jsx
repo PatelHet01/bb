@@ -1936,8 +1936,7 @@ export default function BillingPage() {
                     <div>
                       <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
                       <div className="flex gap-2 text-[9px] font-bold mt-1 flex-wrap">
-                        {custBalances.khata > 0 && <span className="text-red-500">Levana: ₹{custBalances.khata}</span>}
-                        {custBalances.advance > 0 && <span className="text-emerald-500">Adv: ₹{custBalances.advance}</span>}
+                        {(() => { const net = custBalances.khata - custBalances.advance; return net > 0 ? <span className="text-red-500">Owes: ₹{net.toFixed(0)}</span> : net < 0 ? <span className="text-emerald-500">Jama: ₹{Math.abs(net).toFixed(0)}</span> : null })()} 
                         {customer.is_khata_locked && (
                           <span className="text-white bg-red-500 px-1.5 py-0.5 rounded animate-pulse">🔒 KHATA LOCKED</span>
                         )}
@@ -2188,8 +2187,7 @@ export default function BillingPage() {
                     <div>
                       <p className="font-bold text-ink-900 dark:text-white text-sm leading-none">{customer.name}</p>
                       <div className="flex gap-2 text-[9px] font-bold mt-1 flex-wrap">
-                        {custBalances.khata > 0 && <span className="text-red-500">Levana: ₹{custBalances.khata}</span>}
-                        {custBalances.advance > 0 && <span className="text-emerald-500">Adv: ₹{custBalances.advance}</span>}
+                        {(() => { const net = custBalances.khata - custBalances.advance; return net > 0 ? <span className="text-red-500">Owes: ₹{net.toFixed(0)}</span> : net < 0 ? <span className="text-emerald-500">Jama: ₹{Math.abs(net).toFixed(0)}</span> : null })()} 
                         {customer.is_khata_locked && (
                           <span className="text-white bg-red-500 px-1.5 py-0.5 rounded animate-pulse">🔒 KHATA LOCKED</span>
                         )}
@@ -2674,7 +2672,7 @@ export default function BillingPage() {
                         {customer.is_khata_locked ? '🔒 Khata (Locked)' : 'Khata'}
                       </option>
                     )}
-                    {customer && custBalances.advance > 0 && <option value="ADVANCE">Advance</option>}
+                    {customer && custBalances.advance > 0 && <option value="ADVANCE" disabled title="Advance payment handled automatically">Advance (Legacy)</option>}
                   </select>
                   {p.mode === 'ONLINE' && (
                     <select className="bg-white dark:bg-ink-900 border border-ink-200 dark:border-ink-700 text-xs font-bold p-2.5 rounded-lg w-20 focus:ring-1 focus:ring-ember outline-none appearance-none" value={p.subtype} onChange={e => updatePayment(i, 'subtype', e.target.value)}>
